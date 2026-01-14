@@ -4,6 +4,7 @@ from raider import Raider
 
 
 class Schedule:
+    date: ClassVar[datetime]
     day: ClassVar[str]
     time: ClassVar[str]
     team: ClassVar[Dict] = {
@@ -13,6 +14,9 @@ class Schedule:
         'flex': [],
         'fill': []
     }
+    missing: ClassVar[List[str]] = [
+        'tank', 'healer', 'dps', 'dps', 'dps'
+    ]
     bloodlust: ClassVar[bool]
     full: ClassVar[bool]
     signup: ClassVar[int]
@@ -24,6 +28,7 @@ class Schedule:
     ]
     
     def __init__(self, date: datetime) -> Self:
+        self.date = date
         self.day = self.dates[date.weekday()]
         self.time = f"<t:{date.timestamp}:t>"
         self.full = False
@@ -32,12 +37,7 @@ class Schedule:
     def _check_flex(self) -> Self:
         flex = []
         for raider in self.team['flex']:
-            found = []
-            for role in raider.roles:
-                if role != 'dps':
-                    found.append(False if self.team[role] else True)
-                else:
-                    found.append(False if len(self.team[role]) > 2 else True)
+            found = [True if role in self.missing else False for role in raider.roles]
                     
             if sum(found) == 1:
                 role = raider.roles[found.index(True)]
@@ -47,64 +47,82 @@ class Schedule:
                 else:
                     self.team[role] = raider
                     self.signup += 1
+                
+                self.missing.remove(role)
             else:
                 flex.append(raider)
                 
         self.team['flex'] = flex
 
     def _check_fill(self) -> Self:
-        filled = False
+        filled = None
         for raider in self.team['fill']:
-            roles = raider.roles
-            for role in roles:
-                if role == 'dps':
-                    if len(self.team['dps']) < 3:
-                        self.team['dps'].append(raider)
-                        self.signup += 1
-                        self.filled = True
-                    else:
-                        if not self.team[role]:
-                            self.team[role] = raider
+            if not filled:
+                roles = raider.roles
+                for role in roles:
+                    if role == 'dps':
+                        if len(self.team['dps']) < 3:
+                            self.team['dps'].append(raider)
                             self.signup += 1
-                            self.filled = True
+                            filled = raider
+                        else:
+                            if not self.team[role]:
+                                self.team[role] = raider
+                                self.signup += 1
+                                filled = raider
+        
         if filled:
-            self.team['fill'].pop(0)
+            self.team['fill'].remove(raider)
+        
         
         
     def send_message(self) -> str:
         message = f"{self.day} at {self.time} "
         if self.team['tank']:
-            message += f"Tank: @{self.tank.name} "
+            message += f"Tank: @{self.tank.member.display_name} "
         if self.team['healer']:
-            message += f"Healer: @{self.healer.name} "
+            message += f"Healer: @{self.healer.member.display_name} "
         if self.team['dps']:
             for raider in self.team['dps']:
-                message += f"DPS: @{raider.name} "
+                message += f"DPS: @{raider.member.display_name} "
         if self.team['flex']:
             for raider in self.team['flex']:
-                message += f"Flex: @{raider.name} Roles: {str(raider.roles)}"
+                message += f"Flex: @{raider.member.display_name} Roles: {str(raider.roles)}"
         if self.team['fill']:
             for raider in self.team['fill']:
-                message += f"Fill: @{raider.name} "
+                message += f"Fill: @{raider.member.display_name} "
+                
+        if len(self.missing) > 0:
+            message += "Missing: "
+            for role in self.missing:
+                message += f"{role} "
 
         return message
     
+    def send_reminder(self) -> str:
+        return f"""
+            Reminder for @{self.team['tank'].member.display_name} @{self.team['healer'].member.display_name} @{self.team['dps'][0].member.display_name} @{self.team['dps'][1].member.display_name} @{self.team['dps'][2].member.display_name}
+        """
+    
     def raider_signup(self, raider: Raider) -> Self:
-        # Only play one role easy to assign    
+        # Only play one role easy to assign
         if len(raider.roles) == 1:
             role = raider.roles[0]
             
             if role == 'tank' and not self.team['tank']:
                 self.team['tank'] = raider
                 self.signup += 1
+                self.missing.remove('tank')
 
             elif role == 'healer' and not self.team['healer']:
                 self.team['healer'] = raider
                 self.signup += 1
+                self.missing.remove('healer')
                 
             elif role == 'dps' and len(self.team['dps']) < 3:
                 self.dps.append(raider)
                 self.signup += 1
+                self.missing.remove('dps')
                 
             else:
                 self.team['fill'].append(raider)
@@ -131,11 +149,13 @@ class Schedule:
                 if role == 'dps':
                     self.team['dps'].remove(raider)
                     self.signup -= 1
+                    self.missing.append('dps')
                     self._check_fill()
                 elif self.team[role] == raider:
                     self.team[role] = None
                     self.signup -= 1
-                    self.check_fill()
+                    self.missing.append(role)
+                    self._check_fill()
                 else:
                     pass
                 
