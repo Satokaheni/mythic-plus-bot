@@ -21,7 +21,7 @@ These are for your raid toons so please do not fill out a role you cannot play.
 Reminders will be sent out 1 and 2 hours before start. 
 """
 
-def create_schedules() -> List[Schedule]:FD
+def create_schedules() -> List[Schedule]:
     def raid_day():
         return [time(17, 0), time(18, 0), time(23, 0)]
     
