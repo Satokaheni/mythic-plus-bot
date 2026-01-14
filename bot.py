@@ -1,5 +1,7 @@
 import discord
 import pickle
+from pathlib import Path
+from discord import Member
 from typing import Dict, List
 from datetime import datetime
 from discord.ext import tasks
@@ -7,13 +9,18 @@ from dotenv import load_dotenv
 from logging import getLogger
 from raider import Raider
 from schedule import Schedule
-from utils import message, create_schedules
+from utils import message, create_schedules, validate_role_message
 
 logging = getLogger(__name__)
 ak = load_dotenv('.env')
 
-raiders = {}
+raiders: Dict[Member, Raider] = {}
 schedules: Dict[int, Schedule] = {}
+
+raider_store = Path('raiders.pkl')
+if raider_store.is_file():
+    with open('raiders.pkl', 'rb') as f:
+        raiders = pickle.load(f)
 
 class MyClient(discord.Client):
     async def setup_hook(self):
@@ -28,12 +35,13 @@ class MyClient(discord.Client):
         if message.channel.id == ak['CHANNEL_ID']:
             if message.content[:5] == '!role':
                 if not message.author in raiders:
-                    m = message.content.split(' ')
-                    raider = Raider(message.author, message[1], message[2:])
-                    
-                    raiders[message.author] = raider
-                    with open('raiders.pkl', 'wb') as f:
-                        pickle.dump(raiders, f)
+                    raider = validate_role_message(message)
+                    if raider:
+                        raiders[message.author] = raider
+                        with open('raiders.pkl', 'wb') as f:
+                            pickle.dump(raiders, f)
+                    else:
+                        await message.reply('Improper !role command', mention_author=True)
                         
             if message.content[:6] == '!sched':
                 channel = self.get_channel(ak['CHANNEL_ID'])
@@ -45,7 +53,7 @@ class MyClient(discord.Client):
                     mid = await channel.send(s.send_message())
                     schedules[mid] = s
                 # else:
-                #     await channel.send('Cannot use that command unless it is reset day (Tuesday)')
+                #     await message.reply('Cannot use that command unless it is reset day (Tuesday)', mention_author=True)
                 
 
     async def on_reaction_add(self, reaction, user):

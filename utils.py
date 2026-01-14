@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, time
 from schedule import Schedule
+from raider import Raider
 from typing import List
+from discord import Message
 
 message: str = """
 Please sign up for the following slots by reacting to the time slot you want to be in.
@@ -47,3 +49,22 @@ def create_schedules() -> List[Schedule]:
         current = current + timedelta(days=1)
         
     return schedules
+
+def validate_role_message(message: Message) -> Raider:
+    wow_classes = [
+        'mage', 'hunter', 'evoker', 'paladin', 'shaman', 'dk', 'rogue', 'priest',
+        'warrior', 'warlock', 'druid', 'dh', 'monk'
+    ]
+    
+    roles = [
+        'tank', 'dps', 'healer'
+    ]
+    
+    content = message.content.lower().split(' ')
+    if not content[1] in wow_classes:
+        return None
+    
+    if not set(content[2:]).issubset(roles):
+        return None
+    
+    return Raider(message.author, content[1], content[2:])
