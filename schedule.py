@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import ClassVar, List, Self, Dict
+from typing import ClassVar, List, Dict
 from raider import Raider
 
 
@@ -27,14 +27,14 @@ class Schedule:
         'evoker', 'shaman', 'mage', 'hunter'
     ]
     
-    def __init__(self, date: datetime) -> Self:
+    def __init__(self, date: datetime):
         self.date = date
         self.day = self.dates[date.weekday()]
-        self.time = f"<t:{date.timestamp}:t>"
+        self.time = f"<t:{int(date.timestamp())}:t>"
         self.full = False
         self.signup = 0
         
-    def _check_flex(self) -> Self:
+    def _check_flex(self):
         flex = []
         for raider in self.team['flex']:
             found = [True if role in self.missing else False for role in raider.roles]
@@ -54,7 +54,7 @@ class Schedule:
                 
         self.team['flex'] = flex
 
-    def _check_fill(self) -> Self:
+    def _check_fill(self):
         filled = None
         for raider in self.team['fill']:
             if not filled:
@@ -79,32 +79,34 @@ class Schedule:
     def send_message(self) -> str:
         message = f"{self.day} at {self.time} "
         if self.team['tank']:
-            message += f"Tank: @{self.tank.member.display_name} "
+            message += f"Tank: {self.team['tank'].mention} "
         if self.team['healer']:
-            message += f"Healer: @{self.healer.member.display_name} "
+            message += f"Healer: {self.team['healer'].mention} "
         if self.team['dps']:
             for raider in self.team['dps']:
-                message += f"DPS: @{raider.member.display_name} "
+                message += f"DPS: {raider.mention} "
         if self.team['flex']:
             for raider in self.team['flex']:
-                message += f"Flex: @{raider.member.display_name} Roles: {str(raider.roles)}"
+                message += f"Flex: {raider.mention} Roles: {str(raider.roles)} "
         if self.team['fill']:
             for raider in self.team['fill']:
-                message += f"Fill: @{raider.member.display_name} "
+                message += f"Fill: {raider.mention} "
                 
         if len(self.missing) > 0:
             message += "Missing: "
             for role in self.missing:
                 message += f"{role} "
+                
+        message += "\n----------------------------------------------------------------"
 
         return message
     
     def send_reminder(self) -> str:
         return f"""
-            Reminder for @{self.team['tank'].member.display_name} @{self.team['healer'].member.display_name} @{self.team['dps'][0].member.display_name} @{self.team['dps'][1].member.display_name} @{self.team['dps'][2].member.display_name}
+            Reminder for {self.team['tank'].mention} {self.team['healer'].mention} {self.team['dps'][0].mention} {self.team['dps'][1].mention} {self.team['dps'][2].mention}
         """
     
-    def raider_signup(self, raider: Raider) -> Self:
+    def raider_signup(self, raider: Raider):
         # Only play one role easy to assign
         if len(raider.roles) == 1:
             role = raider.roles[0]
@@ -135,7 +137,7 @@ class Schedule:
         if self.signup == 5:
             self.full = True
             
-    def raider_remove(self, raider: Raider) -> Self:
+    def raider_remove(self, raider: Raider):
         roles = raider.roles
 
         if raider in self.team['fill']:
