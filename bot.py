@@ -1,6 +1,7 @@
 import os
 import discord
 import pickle
+from discord.ext import commands
 from pathlib import Path
 from discord import Member, Message
 from typing import Dict, List
@@ -25,79 +26,123 @@ load_dotenv('.env')
 CLIENT_ID = os.getenv('CLIENT_KEY')
 CHANNEL_ID = int(os.getenv('CHANNEL_ID'))
 
-class MyClient(discord.Client):
-    raiders: Dict[Member, Raider] = {}
-    schedules: Dict[int, Schedule] = {}
-
-    async def setup_hook(self):
-        self.check_schedule.start()
-    
-    async def on_ready(self):
-        raider_store = Path('raiders.pkl')
-        if raider_store.is_file():
-            with open('raiders.pkl', 'rb') as f:
-                self.raiders = pickle.load(f)
-        
-        logger.info(f'Logged on as {self.user}!')
-
-    async def on_message(self, message):
-        if message.channel.id == CHANNEL_ID:
-            if message.content[:5] == '!role':
-                if not message.author.id in self.raiders:
-                    raider = validate_role_message(message)
-                    if raider:
-                        self.raiders[message.author.id] = raider
-                        with open('raiders.pkl', 'wb') as f:
-                            pickle.dump(self.raiders, f)
-                    else:
-                        logger.warning(f'Incorrect usage of !role command by {message.author}. Content: {message.content}')
-                        await message.reply('Improper !role command', mention_author=True)
-                        
-            if message.content.lower() == '!sched':
-                channel = self.get_channel(CHANNEL_ID)
-                # if datetime.now().weekday() == 1:
-                await channel.send(schedule_boiler)
-                self.schedules = {}
-                sched: List[Schedule] = create_schedules()
-                for s in sched:
-                    mid = await channel.send(s.send_message())
-                    self.schedules[mid.id] = s
-                # else:
-                #     await message.reply('Cannot use that command unless it is reset day (Tuesday)', mention_author=True)
-
-    async def on_reaction_add(self, reaction, user):
-        message: Message = reaction.message
-        if message.channel.id == CHANNEL_ID and message.id in self.schedules:
-            if reaction.emoji == '✅':
-                if not user.id in self.raiders:
-                    logger.warning(f'User: {user.display_name} did not use the !role command first')
-                    await self.get_channel(CHANNEL_ID).send(f'{user.mention} you did not use the !role command first please remove your reaction and run the !role command before reacting to a schedule')
-                else:
-                    self.schedules[message.id].raider_signup(self.raiders[user.id])
-                    await message.edit(content=self.schedules[message.id].send_message())
-            elif reaction.emoji == '❌':
-                if not user.id in self.raiders:
-                    logger.warning(f'User: {user.display_name} did not use the !role command first and removed their reaction')
-                else:
-                    self.schedules[message.id].raider_remove(self.raiders[user.id])
-                    await message.edit(content=self.schedules[message.id].send_message())
-                
-            
-
-    @tasks.loop(minutes=60.0)
-    async def check_schedule(self):
-        logger.info('Check Schedule Loop Executed')
-        current = datetime.now()
-        for _, sched in self.schedules.items():
-            time_until = (sched.date - current).total_seconds()
-            if time_until < (120*60) and sched.full:
-                channel = self.get_channel(CHANNEL_ID)
-                await channel.send(f"{sched.send_reminder()} in {time_until//60} minutes")
-        pass
-    
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.reactions = True
+intents.members = True
+intents.dm_messages = True
 
-client = MyClient(intents=intents)
-client.run(CLIENT_ID)
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+
+# ---------------------------
+# Dropdown Menus
+# ---------------------------
+
+class WoWClassSelect(discord.ui.Select):
+    def __init__(self):
+        classes = [
+            "Warrior", "Paladin", "Hunter", "Rogue", "Priest",
+            "Death Knight", "Shaman", "Mage", "Warlock",
+            "Monk", "Druid", "Demon Hunter", "Evoker"
+        ]
+
+        options = [discord.SelectOption(label=c, value=c.lower()) for c in classes]
+
+        super().__init__(
+            placeholder="Choose your World of Warcraft class",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="wow_class"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_message(
+            f"You selected **{self.values[0].title()}** as your class.",
+            ephemeral=True
+        )
+
+
+class PrimaryRoleSelect(discord.ui.Select):
+    def __init__(self):
+        roles = ["Tank", "Healer", "DPS"]
+        options = [discord.SelectOption(label=r, value=r.lower()) for r in roles]
+
+        super().__init__(
+            placeholder="Choose your primary role",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="primary_role"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_message(
+            f"Primary role set to **{self.values[0].upper()}**.",
+            ephemeral=True
+        )
+
+
+class SecondaryRoleSelect(discord.ui.Select):
+    def __init__(self):
+        roles = ["Tank", "Healer", "DPS"]
+        options = [discord.SelectOption(label=r, value=r.lower()) for r in roles]
+
+        super().__init__(
+            placeholder="Choose your secondary role (optional)",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="secondary_role"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_message(
+            f"Secondary role set to **{self.values[0].upper()}**.",
+            ephemeral=True
+        )
+
+
+class WoWSelectionView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(WoWClassSelect())
+        self.add_item(PrimaryRoleSelect())
+        self.add_item(SecondaryRoleSelect())
+
+
+# ---------------------------
+# Reaction Listener
+# ---------------------------
+
+@bot.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    if payload.user_id == bot.user.id:
+        return
+
+    if payload.channel_id == TARGET_CHANNEL_ID and payload.message_id == TARGET_MESSAGE_ID:
+        user = bot.get_user(payload.user_id)
+        if user is None:
+            return
+
+        try:
+            await user.send(
+                "Choose your **World of Warcraft class** and **roles**:",
+                view=WoWSelectionView()
+            )
+        except discord.Forbidden:
+            print(f"Could not DM {user}")
+
+
+# ---------------------------
+# Startup
+# ---------------------------
+
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user}")
+
+
+bot.run(TOKEN)
