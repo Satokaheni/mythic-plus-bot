@@ -1,79 +1,71 @@
-from datetime import datetime, timedelta, time
-from schedule import Schedule
-from raider import Raider
-from typing import List
-from discord import Message
+"""Utility functions and constants for the WoW Mythic+ bot."""
 
-schedule_boiler: str = """
-Please sign up for the following slots by reacting to the time slot you want to be in.
-REACT WITH :white_check_mark: to sign up and also remove your :x: if you previously dropped
-REACT WITH :x: to remove yourself and also remove you :white_check_mark:
-PLEASE FOLLOW THE REACT RULES OR ELSE THE BOT DOES NOT WORK
+import pickle
+from typing import Dict, Any
+import logging
 
-If you have not declared a role with your class and roles you can play (in order of prevelance using the !role command) you will not be considered for a spot
-FOR DEATH KNIGHTS AND DEMON HUNTERS please use dk and dh respectively. 
-Example for the !role command
-!role paladin healer tank
+logger = logging.getLogger('discord')
 
-All runs will be based on completion for vault. The goal is not to push especially early in the tier. 
-If you react to line up that is already full you will be added as an extra if one of them cannot make it. 
-If you cannot make it to the run please remove your reaction from the schedule and react :x:
-If you are a flex you will be priority for your role you ranked the highest in the !role command but will be moved to make sure the group forms if needed
-These are for your raid toons so please do not fill out a role you cannot play.
+GREEN = '🟢'
+YELLOW = '🟡'
+RED = '🔴'
 
+AVAILABILITY_MESSAGE: str = """
+React to this message to set your availability for this week's myhic plus runs
 
-Reminders will be sent out 1 and 2 hours before start. 
------------------------------------------------------------------------------
+:green_circle: - Available
+:yellow_circle: - Maybe Available
+:red_circle: - Not Available
 """
 
-def create_schedules() -> List[Schedule]:
-    def raid_day():
-        return [time(17, 0), time(18, 0), time(23, 0)]
-    
-    def weekday():
-        return [time(x, 0) for x in range(17, 24)]
+ARMOR_DICT: Dict[str, str] = {
+    'Warrior': 'Plate',
+    'Paladin': 'Plate',
+    'Death Knight': 'Plate',
+    'Hunter': 'Mail',
+    'Evoker': 'Mail',
+    'Shaman': 'Mail',
+    'Rogue': 'Leather',
+    'Druid': 'Leather',
+    'Monk': 'Leather',
+    'Demon Hunter': 'Leather',
+    'Priest': 'Cloth',
+    'Mage': 'Cloth',
+    'Warlock': 'Cloth'
+}
 
-    def weekend():
-        return [time(x, 0) for x in range(9, 24)]
-    
-    schedules: List[Schedule] = []
-    
-    # Assume the day is Tuesday
-    current = datetime.now().date()
-    mythic_times = {
-        0: raid_day(),
-        1: raid_day(),
-        2: weekday(),
-        3: raid_day(),
-        4: weekday(),
-        5: weekend(),
-        6: weekend()
-    }
-    
-    for _ in range(7):
-        day = current.weekday()
-        schedules.extend(
-            [Schedule(date=datetime.combine(current, t)) for t in mythic_times[day]]
-        )
-        current = current + timedelta(days=1)
-        
-    return schedules
+ROLES_DICT: Dict[str, list[str]] = {
+    'Warrior': ['tank', 'dps'],
+    'Paladin': ['tank', 'healer', 'dps'],
+    'Death Knight': ['tank', 'dps'],
+    'Hunter': ['dps'],
+    'Evoker': ['healer', 'dps'],
+    'Shaman': ['healer', 'dps'],
+    'Rogue': ['dps'],
+    'Druid': ['tank', 'healer', 'dps'],
+    'Monk': ['tank', 'healer', 'dps'],
+    'Warlock': ['dps'],
+    'Mage': ['dps'],
+    'Demon Hunter': ['tank', 'dps'],
+    'Priest': ['healer', 'dps'],
+}
 
-def validate_role_message(message: Message) -> Raider:
-    wow_classes = [
-        'mage', 'hunter', 'evoker', 'paladin', 'shaman', 'dk', 'rogue', 'priest',
-        'warrior', 'warlock', 'druid', 'dh', 'monk'
-    ]
-    
-    roles = [
-        'tank', 'dps', 'healer'
-    ]
-    
-    content = message.content.lower().split(' ')
-    if not content[1] in wow_classes:
-        return None
-    
-    if not set(content[2:]).issubset(roles):
-        return None
-    
-    return Raider(message.author, content[1], content[2:])
+def save_state(raiders: Dict[Any, Any], schedules: Dict[Any, Any], availability: Dict[str, Any], availability_message_id: int) -> None:
+    """Save the bot's state to a pickle file."""
+    with open('state.pkl', 'wb') as state_file:
+        pickle.dump({
+            'raiders': raiders,
+            'schedules': schedules,
+            'availability': availability,
+            'availability_message_id': availability_message_id
+        }, state_file)
+
+def load_state() -> tuple[Dict[Any, Any], Dict[Any, Any], Dict[str, Any], int]:
+    """Load the bot's state from a pickle file, with error handling."""
+    try:
+        with open('state.pkl', 'rb') as state_file:
+            data = pickle.load(state_file)
+        return data['raiders'], data['schedules'], data['availability'], data['availability_message_id']
+    except (FileNotFoundError, pickle.UnpicklingError, EOFError, KeyError) as exc:
+        logger.warning("Error loading state.pkl: %s. Using default state.", exc)
+        return {}, {}, {}, 0
