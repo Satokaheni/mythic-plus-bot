@@ -20,6 +20,7 @@ class Schedule:
     signup: ClassVar[int] = 0
     tier_reached: ClassVar[str] = GREEN
     primary: ClassVar[bool] = True
+    asks: ClassVar[int] = 0
 
     def __init__(self, raider_scheduled: Raider, dungeon: str, level: str,
                  date_scheduled: str, start_time: datetime, end_time: datetime):

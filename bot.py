@@ -261,6 +261,7 @@ class MyClient(discord.Client):
                         logger.warning(f"Could not DM {raider.member} for schedule {schedule_id}")
 
         # Update schedule parameters
+        schedule.asks += 1
         if tier == GREEN and primary:
             schedule.primary = False
         elif tier == GREEN and not primary:
