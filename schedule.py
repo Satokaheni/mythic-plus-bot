@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import List, Dict, Union, ClassVar
-
+from utils import GREEN
 from raider import Raider
 
 
@@ -13,11 +13,13 @@ class Schedule:
         'tank': None,
         'healer': None,
         'dps': [],
-        'flex': [],
         'fill': []
     }
+    members: ClassVar[List[Raider]] = []
     missing: ClassVar[List[str]] = ['tank', 'healer', 'dps']
     signup: ClassVar[int] = 0
+    tier_reached: ClassVar[str] = GREEN
+    primary: ClassVar[bool] = True
 
     def __init__(self, raider_scheduled: Raider, dungeon: str, level: str,
                  date_scheduled: str, start_time: datetime, end_time: datetime):
@@ -28,27 +30,6 @@ class Schedule:
         self.start_time = start_time
         self.end_time = end_time
         self.raider_signup(raider_scheduled)
-
-    def _check_flex(self):
-        """Check flex raiders and assign them to missing roles if possible."""
-        flex = []
-        for raider in self.team['flex']:
-            found = [True if role in self.missing else False for role in raider.roles]
-
-            if sum(found) == 1:
-                role = raider.roles[found.index(True)]
-                if role == 'dps':
-                    self.team['dps'].append(raider)
-                    self.signup += 1
-                else:
-                    self.team[role] = raider
-                    self.signup += 1
-
-                self.missing.remove(role)
-            else:
-                flex.append(raider)
-
-        self.team['flex'] = flex
 
     def _check_fill(self):
         """Check fill raiders and assign them to available slots."""
@@ -88,8 +69,9 @@ class Schedule:
         Team:
         Tank: {self.team['tank'].mention if self.team['tank'] else 'TBD'}
         Healer: {self.team['healer'].mention if self.team['healer'] else 'TBD'}
-        DPS: {', '.join([raider.mention for raider in self.team['dps']]) if self.team['dps'] else 'TBD'}
-        Flex: {', '.join([f'{raider.mention} {raider.roles}' for raider in self.team['flex']]) if self.team['flex'] else 'None'}
+        DPS: {'TBD' if len(self.team['dps']) < 1 else self.team['dps'][0].mention}
+        DPS: {'TBD' if len(self.team['dps']) < 2 else self.team['dps'][1].mention}
+        DPS: {'TBD' if len(self.team['dps']) < 3 else self.team['dps'][2].mention}
         Fill: {', '.join([f'{raider.mention} {raider.roles}' for raider in self.team['fill']]) if self.team['fill'] else 'None'}
         """
 
@@ -104,31 +86,27 @@ class Schedule:
     def raider_signup(self, raider: Raider):
         """Add a raider to the schedule, assigning them to appropriate roles."""
         # Only play one role easy to assign
-        if len(raider.roles) == 1:
-            role = raider.roles[0]
+        role = raider.roles[0]
 
-            if role == 'tank' and not self.team['tank']:
-                self.team['tank'] = raider
-                self.signup += 1
-                self.missing.remove('tank')
+        if role == 'tank' and not self.team['tank']:
+            self.team['tank'] = raider
+            self.signup += 1
+            self.missing.remove('tank')
 
-            elif role == 'healer' and not self.team['healer']:
-                self.team['healer'] = raider
-                self.signup += 1
-                self.missing.remove('healer')
+        elif role == 'healer' and not self.team['healer']:
+            self.team['healer'] = raider
+            self.signup += 1
+            self.missing.remove('healer')
 
-            elif role == 'dps' and len(self.team['dps']) < 3:
-                self.team['dps'].append(raider)
-                self.signup += 1
-                self.missing.remove('dps')
-
-            else:
-                self.team['fill'].append(raider)
+        elif role == 'dps' and len(self.team['dps']) < 3:
+            self.team['dps'].append(raider)
+            self.signup += 1
+            self.missing.remove('dps')
 
         else:
-            self.team['flex'].append(raider)
+            self.team['fill'].append(raider)
 
-        self._check_flex()
+        self.members.append(raider)
 
         if self.signup == 5:
             self.full = True
@@ -139,9 +117,6 @@ class Schedule:
 
         if raider in self.team['fill']:
             self.team['fill'].remove(raider)
-
-        elif raider in self.team['flex']:
-            self.team['flex'].remove(raider)
 
         else:
             for role in roles:
@@ -158,5 +133,24 @@ class Schedule:
                 else:
                     pass
 
+        self.members.remove(raider)
+
         if self.signup < 5:
             self.full = False
+
+    def is_filled(self) -> bool:
+        """Return True if the schedule is full (5 signups)."""
+        return self.full
+
+    def try_signup(self, raider: Raider) -> bool:
+        """Attempt to sign up a raider. Returns True if they were added.
+
+        Prevents duplicate signups.
+        """
+        # Prevent duplicate signup
+        if raider in self.members:
+            return False
+
+        before = self.signup
+        self.raider_signup(raider)
+        return self.signup > before

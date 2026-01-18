@@ -1,7 +1,8 @@
 """Utility functions and constants for the WoW Mythic+ bot."""
 
 import pickle
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
+from schedule import Schedule
 import logging
 
 logger = logging.getLogger('discord')
@@ -50,14 +51,15 @@ ROLES_DICT: Dict[str, list[str]] = {
     'Priest': ['healer', 'dps'],
 }
 
-def save_state(raiders: Dict[Any, Any], schedules: Dict[Any, Any], availability: Dict[str, Any], availability_message_id: int) -> None:
+def save_state(raiders: Dict[Any, Any], schedules: Dict[Any, Any], availability: Dict[str, Any], availability_message_id: int, dm_map: Dict[int, Tuple[Schedule, int]]) -> None:
     """Save the bot's state to a pickle file."""
     with open('state.pkl', 'wb') as state_file:
         pickle.dump({
             'raiders': raiders,
             'schedules': schedules,
             'availability': availability,
-            'availability_message_id': availability_message_id
+            'availability_message_id': availability_message_id,
+            'dm_map': dm_map
         }, state_file)
 
 def load_state() -> tuple[Dict[Any, Any], Dict[Any, Any], Dict[str, Any], int]:
@@ -65,7 +67,7 @@ def load_state() -> tuple[Dict[Any, Any], Dict[Any, Any], Dict[str, Any], int]:
     try:
         with open('state.pkl', 'rb') as state_file:
             data = pickle.load(state_file)
-        return data['raiders'], data['schedules'], data['availability'], data['availability_message_id']
+        return data['raiders'], data['schedules'], data['availability'], data['availability_message_id'], data['dm_map']
     except (FileNotFoundError, pickle.UnpicklingError, EOFError, KeyError) as exc:
         logger.warning("Error loading state.pkl: %s. Using default state.", exc)
-        return {}, {}, {}, 0
+        return {}, {}, {}, 0, {}
