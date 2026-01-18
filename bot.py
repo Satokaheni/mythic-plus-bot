@@ -40,7 +40,7 @@ class MyClient(discord.Client):
     """Discord bot client for managing WoW Mythic+ raid scheduling and availability."""
     raiders: Dict[Member, Raider] = {}
     schedules: Dict[int, Schedule] = {}
-    availability: Dict[str, Raider] = {
+    availability: Dict[str, list] = {
         GREEN: [],
         YELLOW: [],
         RED: []
@@ -72,7 +72,12 @@ class MyClient(discord.Client):
         """Called when the bot is ready. Loads state from file."""
         logger.info("Logged in as %s", self.user)
 
-        self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map = load_state()
+        state = load_state()
+        if len(state) == 5:
+            self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map = state
+        else:
+            self.raiders, self.schedules, self.availability, self.availability_message_id = state
+            self.dm_map = {}
         logger.info("Loaded state from file.")
 
     # ---------------------------
@@ -137,9 +142,9 @@ class MyClient(discord.Client):
                 return
 
             if user.id in self.raiders:
-                self.availability[reaction.emoji].append(self.raiders[user.id])
-
-            if not user.id in self.raiders:
+                if self.raiders[user.id] not in self.availability[reaction.emoji]:
+                    self.availability[reaction.emoji].append(self.raiders[user.id])
+            else:
                 try:
                     view = WoWSelectionView(timeout=180)  # 3 minutes timeout
                     await user.send(
@@ -198,7 +203,7 @@ class MyClient(discord.Client):
             else:
                 logger.warning(f"Tried to remove {user} from availability list but they were not found meaning they removed someone else's reaction adding it back")
                 await reaction.message.add_reaction(reaction.emoji)
-            save_state(self.raiders, self.schedules, self.availability, self.availability_message_id)
+            save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map)
             logger.info("Reaction removed by %s for emoji %s", user, reaction.emoji)
 
         elif channel.id == CHANNEL_ID and reaction.message.id in self.schedules and user.id in self.raiders:

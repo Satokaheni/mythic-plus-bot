@@ -1,27 +1,13 @@
 """Schedule class for managing WoW Mythic+ raid team composition."""
 
 from datetime import datetime
-from typing import List, Dict, Union, ClassVar
+from typing import List, Dict, Union
 from utils import GREEN
 from raider import Raider
 
 
 class Schedule:
     """Represents a WoW Mythic+ raid schedule with team composition and signup management."""
-    full: ClassVar[bool] = False
-    team: ClassVar[Dict[str, Union[Raider, List[Raider], None]]] = {
-        'tank': None,
-        'healer': None,
-        'dps': [],
-        'fill': []
-    }
-    members: ClassVar[List[Raider]] = []
-    missing: ClassVar[List[str]] = ['tank', 'healer', 'dps']
-    signup: ClassVar[int] = 0
-    tier_reached: ClassVar[str] = GREEN
-    primary: ClassVar[bool] = True
-    asks: ClassVar[int] = 0
-
     def __init__(self, raider_scheduled: Raider, dungeon: str, level: str,
                  date_scheduled: str, start_time: datetime, end_time: datetime):
         """Initialize a new schedule with the scheduling raider and details."""
@@ -30,12 +16,25 @@ class Schedule:
         self.date_scheduled = datetime.strptime(date_scheduled, "%Y-%m-%d")
         self.start_time = start_time
         self.end_time = end_time
+        self.full = False
+        self.team = {
+            'tank': None,
+            'healer': None,
+            'dps': [],
+            'fill': []
+        }
+        self.members = []
+        self.missing = ['tank', 'healer', 'dps']
+        self.signup = 0
+        self.tier_reached = GREEN
+        self.primary = True
+        self.asks = 0
         self.raider_signup(raider_scheduled)
 
     def _check_fill(self):
         """Check fill raiders and assign them to available slots."""
         filled = None
-        for raider in self.team['fill']:
+        for raider in list(self.team['fill']):
             if not filled:
                 roles = raider.roles
                 for role in roles:
@@ -49,11 +48,8 @@ class Schedule:
                                 self.team[role] = raider
                                 self.signup += 1
                                 filled = raider
-
         if filled:
-            self.team['fill'].remove(raider)
-
-
+            self.team['fill'].remove(filled)
 
     def send_message(self) -> str:
         """Generate the formatted message for the schedule post."""
@@ -75,7 +71,6 @@ class Schedule:
         DPS: {'TBD' if len(self.team['dps']) < 3 else self.team['dps'][2].mention}
         Fill: {', '.join([f'{raider.mention} {raider.roles}' for raider in self.team['fill']]) if self.team['fill'] else 'None'}
         """
-
         return message
 
     def send_reminder(self) -> str:
@@ -86,9 +81,7 @@ class Schedule:
 
     def raider_signup(self, raider: Raider):
         """Add a raider to the schedule, assigning them to appropriate roles."""
-        # Only play one role easy to assign
         role = raider.roles[0]
-
         if role == 'tank' and not self.team['tank']:
             self.team['tank'] = raider
             self.signup += 1
@@ -106,36 +99,29 @@ class Schedule:
 
         else:
             self.team['fill'].append(raider)
-
         self.members.append(raider)
-
         if self.signup == 5:
             self.full = True
 
     def raider_remove(self, raider: Raider):
         """Remove a raider from the schedule and update team composition."""
         roles = raider.roles
-
         if raider in self.team['fill']:
             self.team['fill'].remove(raider)
-
         else:
             for role in roles:
-                if role == 'dps':
+                if role == 'dps' and raider in self.team['dps']:
                     self.team['dps'].remove(raider)
                     self.signup -= 1
                     self.missing.append('dps')
                     self._check_fill()
-                elif self.team[role] == raider:
+                elif role in self.team and self.team[role] == raider:
                     self.team[role] = None
                     self.signup -= 1
                     self.missing.append(role)
                     self._check_fill()
-                else:
-                    pass
-
-        self.members.remove(raider)
-
+        if raider in self.members:
+            self.members.remove(raider)
         if self.signup < 5:
             self.full = False
 
@@ -145,13 +131,10 @@ class Schedule:
 
     def try_signup(self, raider: Raider) -> bool:
         """Attempt to sign up a raider. Returns True if they were added.
-
         Prevents duplicate signups.
         """
-        # Prevent duplicate signup
         if raider in self.members:
             return False
-
         before = self.signup
         self.raider_signup(raider)
         return self.signup > before
