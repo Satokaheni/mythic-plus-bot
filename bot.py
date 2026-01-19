@@ -72,7 +72,7 @@ class MyClient(discord.Client):
 
         for schedule_id, schedule in self.schedules.items():
             # Check if schedule needs to be filled
-            if not schedule.is_filled() and schedule.asks >= 5:
+            if not schedule.is_filled() and schedule.asks >= 5 and schedule.tier_reached != RED:
                 await self.fill_remaining_spots(schedule_id)
             elif not schedule.is_filled() and schedule.asks < 5:
                 self.schedules[schedule_id].asks += 1
@@ -297,6 +297,8 @@ class MyClient(discord.Client):
             schedule.tier_reached = YELLOW
         elif tier == YELLOW and primary:
             schedule.primary = False
+        else:
+            schedule.tier_reached = RED
 
         self.schedules[schedule_id] = schedule
         save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map)
