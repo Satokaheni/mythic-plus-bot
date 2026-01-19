@@ -1,6 +1,6 @@
 """Schedule class for managing WoW Mythic+ raid team composition."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Union
 from utils import GREEN
 from raider import Raider
@@ -13,9 +13,11 @@ class Schedule:
         """Initialize a new schedule with the scheduling raider and details."""
         self.dungeon = dungeon
         self.level = level
-        self.date_scheduled = datetime.strptime(date_scheduled, "%Y-%m-%d")
-        self.start_time = start_time
-        self.end_time = end_time
+        # Parse date_scheduled as UTC
+        self.date_scheduled = datetime.strptime(date_scheduled, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        # Ensure start_time and end_time are UTC
+        self.start_time = start_time.astimezone(timezone.utc) if start_time.tzinfo else start_time.replace(tzinfo=timezone.utc)
+        self.end_time = end_time.astimezone(timezone.utc) if end_time.tzinfo else end_time.replace(tzinfo=timezone.utc)
         self.full = False
         self.team = {
             'tank': None,
@@ -55,8 +57,8 @@ class Schedule:
         """Generate the formatted message for the schedule post."""
         message = f"""
         Scheduled Mythic+ Run:
-        Date: {self.date_scheduled.strftime('%Y-%m-%d')}
-        Time: {self.start_time.strftime('%H:%M')} to {self.end_time.strftime('%H:%M')}
+        Date: <t:{int(self.date_scheduled.astimezone(timezone.utc).timestamp())}:D>
+        Time: <t:{int(self.start_time.astimezone(timezone.utc).timestamp())}:t> to <t:{int(self.end_time.astimezone(timezone.utc).timestamp())}:t>
 
         Dungeon: {self.dungeon} (Level {self.level})
 

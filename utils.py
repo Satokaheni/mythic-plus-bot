@@ -62,7 +62,7 @@ def save_state(raiders: Dict[Any, Any], schedules: Dict[Any, Any], availability:
             'dm_map': dm_map
         }, state_file)
 
-def load_state() -> tuple[Dict[Any, Any], Dict[Any, Any], Dict[str, Any], int]:
+def load_state() -> tuple[Dict[Any, Any], Dict[Any, Any], Dict[str, Any], int, Dict[int, Tuple[Schedule, int]]]:
     """Load the bot's state from a pickle file, with error handling."""
     try:
         with open('state.pkl', 'rb') as state_file:

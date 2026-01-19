@@ -4,8 +4,9 @@ import logging
 import os
 
 import discord
-from discord import Member
 import asyncio
+from discord.ext import tasks
+from datetime import datetime
 from dotenv import load_dotenv
 from typing import Dict, Tuple
 
@@ -38,9 +39,9 @@ CHANNEL_ID = int(os.getenv('CHANNEL_ID'))
 # ---------------------------
 class MyClient(discord.Client):
     """Discord bot client for managing WoW Mythic+ raid scheduling and availability."""
-    raiders: Dict[Member, Raider] = {}
+    raiders: Dict[discord.Member, Raider] = {}
     schedules: Dict[int, Schedule] = {}
-    availability: Dict[str, list] = {
+    availability: Dict[str, Raider] = {
         GREEN: [],
         YELLOW: [],
         RED: []
@@ -65,6 +66,28 @@ class MyClient(discord.Client):
         await self.get_channel(CHANNEL_ID).fetch_message(self.availability_message_id)
         [await self.get_channel(cid).fetch_message(mid[1]) for cid, mid in self.dm_map.items()]
 
+    @tasks.loop(hours=1)
+    async def hourly_check(self):
+        """Background task that runs every hour. Makes sure to fill schedules and perform reminders"""
+
+        for schedule_id, schedule in self.schedules.items():
+            # Check if schedule needs to be filled
+            if not schedule.is_filled() and schedule.asks >= 5:
+                await self.fill_remaining_spots(schedule_id)
+            elif not schedule.is_filled() and schedule.asks < 5:
+                self.schedules[schedule_id].asks += 1
+
+            # Check for reminders
+            if schedule.is_filled():
+                now = datetime.now(datetime.timezone.utc)
+                difference = (schedule.start_time - now).total_seconds()
+                if difference <= 3600 * 2:
+                    channel = self.get_channel(CHANNEL_ID)
+                    await channel.send(f"{schedule.send_reminder()} in {difference // 3600} hours and {(difference % 3600) // 60} minutes.")
+
+        save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map)
+
+
     # ---------------------------
     # Startup
     # ---------------------------
@@ -72,13 +95,13 @@ class MyClient(discord.Client):
         """Called when the bot is ready. Loads state from file."""
         logger.info("Logged in as %s", self.user)
 
-        state = load_state()
-        if len(state) == 5:
-            self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map = state
-        else:
-            self.raiders, self.schedules, self.availability, self.availability_message_id = state
-            self.dm_map = {}
+        self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map = load_state()
         logger.info("Loaded state from file.")
+
+        # Start hourly background task
+        self.hourly_check.start()
+        self.get_message_history()
+        
 
     # ---------------------------
     # Message Listener
