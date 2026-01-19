@@ -81,7 +81,8 @@ class Schedule:
 
     def raider_signup(self, raider: Raider):
         """Add a raider to the schedule, assigning them to appropriate roles."""
-        role = raider.roles[0]
+        role = raider.roles[0] if raider.roles[0] in self.missing else (raider.roles[1] if len(raider.roles) > 1 and raider.roles[1] in self.missing else raider.roles[0])
+        
         if role == 'tank' and not self.team['tank']:
             self.team['tank'] = raider
             self.signup += 1

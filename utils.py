@@ -51,7 +51,7 @@ ROLES_DICT: Dict[str, list[str]] = {
     'Priest': ['healer', 'dps'],
 }
 
-def save_state(raiders: Dict[Any, Any], schedules: Dict[Any, Any], availability: Dict[str, Any], availability_message_id: int, dm_map: Dict[int, Tuple[Schedule, int]]) -> None:
+def save_state(raiders: Dict[Any, Any], schedules: Dict[Any, Any], availability: Dict[str, Any], availability_message_id: int, dm_map: Dict[int, Dict[int, int]]) -> None:
     """Save the bot's state to a pickle file."""
     with open('state.pkl', 'wb') as state_file:
         pickle.dump({
@@ -62,7 +62,7 @@ def save_state(raiders: Dict[Any, Any], schedules: Dict[Any, Any], availability:
             'dm_map': dm_map
         }, state_file)
 
-def load_state() -> tuple[Dict[Any, Any], Dict[Any, Any], Dict[str, Any], int, Dict[int, Tuple[Schedule, int]]]:
+def load_state() -> tuple[Dict[Any, Any], Dict[Any, Any], Dict[str, Any], int, Dict[int, Dict[int, int]]]:
     """Load the bot's state from a pickle file, with error handling."""
     try:
         with open('state.pkl', 'rb') as state_file:
