@@ -1,8 +1,6 @@
 """Schedule class for managing WoW Mythic+ raid team composition."""
 
 from datetime import datetime, timezone
-from typing import List, Dict, Union
-from utils import GREEN
 from raider import Raider
 
 
@@ -14,10 +12,10 @@ class Schedule:
         self.dungeon = dungeon
         self.level = level
         # Parse date_scheduled as UTC
-        self.date_scheduled = datetime.strptime(date_scheduled, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        self.date_scheduled = datetime.strptime(date_scheduled, "%Y-%m-%d").replace(tzinfo=raider_scheduled.timezone)
         # Ensure start_time and end_time are UTC
-        self.start_time = start_time.astimezone(timezone.utc) if start_time.tzinfo else start_time.replace(tzinfo=timezone.utc)
-        self.end_time = end_time.astimezone(timezone.utc) if end_time.tzinfo else end_time.replace(tzinfo=timezone.utc)
+        self.start_time = start_time.astimezone(raider_scheduled.timezone) if start_time.tzinfo else start_time.replace(tzinfo=raider_scheduled.timezone)
+        self.end_time = end_time.astimezone(raider_scheduled.timezone) if end_time.tzinfo else end_time.replace(tzinfo=raider_scheduled.timezone)
         self.full = False
         self.team = {
             'tank': None,
@@ -28,7 +26,7 @@ class Schedule:
         self.members = []
         self.missing = ['tank', 'healer', 'dps']
         self.signup = 0
-        self.tier_reached = GREEN
+        self.tier_reached = '🟢'
         self.primary = True
         self.asks = 0
         self.raider_signup(raider_scheduled)

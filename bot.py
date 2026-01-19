@@ -100,7 +100,8 @@ class MyClient(discord.Client):
 
         # Start hourly background task
         self.hourly_check.start()
-        self.get_message_history()
+        if self.availability_message_id:
+            await self.get_message_history()
         
 
     # ---------------------------
@@ -142,7 +143,7 @@ class MyClient(discord.Client):
                             )
                             message = await self.get_channel(CHANNEL_ID).send(schedule.send_message())
                             self.schedules[message.id] = schedule
-                            save_state(self.raiders, self.schedules, self.availability, self.availability_message_id)
+                            save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map)
                             # Start background task to fill remaining spots from availability
                             self.loop.create_task(self.fill_remaining_spots(message.id))
                         else:
@@ -187,11 +188,12 @@ class MyClient(discord.Client):
 
                     # If user selected a class and at least one role, create a Raider and handle signup
                     if view.selected_class and roles:
-                        self.raiders[user.id] = Raider(user, view.selected_class, roles)
+                        self.raiders[user.id] = Raider(user, view.selected_class, roles, view.selected_timezone)
+                        print(view.selected_timezone)
                         self.availability[reaction.emoji].append(self.raiders[user.id])
-                        logger.info(f"Signup from {user}: class={view.selected_class} roles={roles}")
+                        logger.info(f"Signup from {user}: class={view.selected_class} roles={roles} timezone={view.selected_timezone}")
 
-                        save_state(self.raiders, self.schedules, self.availability, self.availability_message_id)
+                        save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map)
                     else:
                         logger.info(f"No valid selection from {user} (timed out or incomplete)")
                 except discord.Forbidden:
@@ -202,7 +204,7 @@ class MyClient(discord.Client):
             raider = self.raiders[user.id]
             schedule.raider_signup(raider)
             await reaction.message.edit(content=schedule.send_message())
-            save_state(self.raiders, self.schedules, self.availability, self.availability_message_id)
+            save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map)
             logger.info("%s signed up for schedule %s", user, reaction.message.id)
 
         elif reaction.message.channel.id in self.dm_map and user.id in self.raiders:
@@ -234,7 +236,7 @@ class MyClient(discord.Client):
             raider = self.raiders[user.id]
             schedule.raider_remove(raider)
             await reaction.message.edit(content=schedule.send_message())
-            save_state(self.raiders, self.schedules, self.availability, self.availability_message_id)
+            save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map)
             logger.info("%s removed signup for schedule %s", user, reaction.message.id)
 
     async def fill_remaining_spots(self, schedule_id: int):

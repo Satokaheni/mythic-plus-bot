@@ -119,18 +119,47 @@ class SubmitButton(discord.ui.Button):
             self.view.stop()
 
 
+class USTimezoneSelect(discord.ui.Select):
+    """Dropdown select for choosing US timezone."""
+    def __init__(self):
+        timezones = [
+            ("Eastern (EST/EDT)", "US/Eastern"),
+            ("Central (CST/CDT)", "US/Central"),
+            ("Mountain (MST/MDT)", "US/Mountain"),
+            ("Pacific (PST/PDT)", "US/Pacific"),
+            ("Alaska (AKST/AKDT)", "US/Alaska"),
+            ("Hawaii (HST/HDT)", "US/Hawaii")
+        ]
+        options = [discord.SelectOption(label=label, value=val) for label, val in timezones]
+        super().__init__(
+            placeholder="Choose your US timezone",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="us_timezone"
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.view:
+            self.view.selected_timezone = self.values[0]
+        await interaction.response.send_message(
+            f"Timezone set to **{self.values[0]}**.", ephemeral=True
+        )
+
 class WoWSelectionView(discord.ui.View):
-    """View containing dropdowns for WoW class and role selection."""
+    """View containing dropdowns for WoW class, role, and timezone selection."""
     def __init__(self, timeout: int = 60) -> None:
         super().__init__(timeout=timeout)
         # attributes to hold the user's choices
         self.selected_class: Optional[str] = None
         self.selected_primary: Optional[str] = None
         self.selected_secondary: Optional[str] = None
+        self.selected_timezone: Optional[str] = None
 
         self.add_item(WoWClassSelect())
         self.add_item(PrimaryRoleSelect())
         self.add_item(SecondaryRoleSelect())
+        self.add_item(USTimezoneSelect())
         self.add_item(SubmitButton())
 
 
