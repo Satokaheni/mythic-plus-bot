@@ -6,16 +6,14 @@ from raider import Raider
 
 class Schedule:
     """Represents a WoW Mythic+ raid schedule with team composition and signup management."""
-    def __init__(self, raider_scheduled: Raider, dungeon: str, level: str,
-                 date_scheduled: str, start_time: datetime, end_time: datetime):
+    def __init__(self, raider_scheduled: Raider, level: str,
+                 date_scheduled: str, start_time: datetime):
         """Initialize a new schedule with the scheduling raider and details."""
-        self.dungeon = dungeon
         self.level = level
         # Parse date_scheduled as UTC
         self.date_scheduled = datetime.strptime(date_scheduled, "%Y-%m-%d").replace(tzinfo=raider_scheduled.timezone)
-        # Ensure start_time and end_time are UTC
+        # Ensure start_time is in correct timezone
         self.start_time = start_time.astimezone(raider_scheduled.timezone) if start_time.tzinfo else start_time.replace(tzinfo=raider_scheduled.timezone)
-        self.end_time = end_time.astimezone(raider_scheduled.timezone) if end_time.tzinfo else end_time.replace(tzinfo=raider_scheduled.timezone)
         self.full = False
         self.team = {
             'tank': None,
@@ -55,10 +53,9 @@ class Schedule:
         """Generate the formatted message for the schedule post."""
         message = f"""
         Scheduled Mythic+ Run:
-        Date: <t:{int(self.date_scheduled.astimezone(timezone.utc).timestamp())}:D>
-        Time: <t:{int(self.start_time.astimezone(timezone.utc).timestamp())}:t> to <t:{int(self.end_time.astimezone(timezone.utc).timestamp())}:t>
+        Time: <t:{int(self.date_scheduled.astimezone(timezone.utc).timestamp())}:F>
 
-        Dungeon: {self.dungeon} (Level {self.level})
+        Level: {self.level}
 
         Please React to this message to confirm your attendance.
         Please Remove your reaction if you can no longer attend.
@@ -70,6 +67,8 @@ class Schedule:
         DPS: {'TBD' if len(self.team['dps']) < 2 else self.team['dps'][1].mention}
         DPS: {'TBD' if len(self.team['dps']) < 3 else self.team['dps'][2].mention}
         Fill: {', '.join([f'{raider.mention} {raider.roles}' for raider in self.team['fill']]) if self.team['fill'] else 'None'}
+        React :green_check_mark: to confirm your attendance.
+        React :x: to remove yourself from the run.
         """
         return message
 
@@ -139,3 +138,13 @@ class Schedule:
         before = self.signup
         self.raider_signup(raider)
         return self.signup > before
+    
+    def __eq__(self, other) -> bool:
+        """Check equality based on level, date, and start time."""
+        if isinstance(other, Schedule):
+            return (
+                self.level == other.level and
+                self.date_scheduled == other.date_scheduled and
+                self.start_time == other.start_time
+            )
+        return NotImplemented
