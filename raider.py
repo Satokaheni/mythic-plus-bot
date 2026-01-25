@@ -19,6 +19,7 @@ class Raider:
         """Initialize a Raider from a Discord member."""
         self.user_id = member.id
         self.mention = member.mention
+        self.name = member.display_name
         self.class_play = class_play
         self.roles = roles
         self.timezone = ZoneInfo(timezone)

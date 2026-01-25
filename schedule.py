@@ -114,7 +114,8 @@ class Schedule:
                 if role == 'dps' and raider in self.team['dps']:
                     self.team['dps'].remove(raider)
                     self.signup -= 1
-                    self.missing.append('dps')
+                    if 'dps' not in self.missing:
+                        self.missing.append('dps')
                     self._check_fill()
                 elif role in self.team and self.team[role] == raider:
                     self.team[role] = None
