@@ -1,9 +1,11 @@
 """Raider class representing a World of Warcraft player."""
 
-from typing import List
+from typing import List, TYPE_CHECKING
 from zoneinfo import ZoneInfo
 from discord import Member
-from schedule import Schedule
+
+if TYPE_CHECKING:
+    from schedule import Schedule
 
 class Raider:
     """Represents a World of Warcraft raider with class and roles."""
@@ -12,8 +14,8 @@ class Raider:
     class_play: str
     timezone: ZoneInfo
     roles: List[str]
-    current_runs: List[Schedule] = []
-    denied_runs: List[Schedule] = []
+    current_runs: List['Schedule'] = []
+    denied_runs: List['Schedule'] = []
 
     def __init__(self, member: Member, class_play: str, roles: List[str], timezone: str) -> None:
         """Initialize a Raider from a Discord member."""
@@ -24,21 +26,21 @@ class Raider:
         self.roles = roles
         self.timezone = ZoneInfo(timezone)
 
-    def add_run(self, schedule: Schedule) -> None:
+    def add_run(self, schedule: 'Schedule') -> None:
         """Add a scheduled run time to the raider's current runs."""
         if schedule not in self.current_runs:
             self.current_runs.append(schedule)
         if schedule in self.denied_runs:
             self.denied_runs.remove(schedule)
 
-    def remove_run(self, schedule: Schedule) -> None:
+    def remove_run(self, schedule: 'Schedule') -> None:
         """Remove a scheduled run time from the raider's current runs."""
         if schedule in self.current_runs:
             self.current_runs.remove(schedule)
         if not schedule in self.denied_runs:
             self.denied_runs.append(schedule)
 
-    def check_availability(self, schedule: Schedule) -> bool:
+    def check_availability(self, schedule: 'Schedule') -> bool:
         """Check if the raider is available for a given scheduled time."""
         return schedule not in self.current_runs
     
