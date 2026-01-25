@@ -33,6 +33,9 @@ logger = logging.getLogger('discord')
 load_dotenv('.env')
 CLIENT_ID = os.getenv('CLIENT_KEY')
 CHANNEL_ID = int(os.getenv('CHANNEL_ID'))
+TANK_ID = int(os.getenv('TANK_ROLE_ID'))
+HEALER_ID = int(os.getenv('HEALER_ROLE_ID'))
+DPS_ID = int(os.getenv('DPS_ROLE_ID'))
 
 # ---------------------------
 # Bot Class
@@ -48,18 +51,27 @@ class MyClient(discord.Client):
     }
     dm_map: Dict[int, Dict[int, int]] = {}
     availability_message_id: int = None
+    role_mentions = {}
 
     # ---------------------------
     # User Defined Functions
     # ---------------------------
 
-    def reset_availability(self):
-        """Reset the availability lists for all colors."""
+    def reset_week(self):
+        """
+            Reset the availability lists for all colors.
+            Resets each raider's current and denied runs for the new week.
+        """
+        
         self.availability = {
             GREEN: [],
             YELLOW: [],
             RED: []
         }
+
+        for raider in self.raiders.values():
+            raider.current_runs = []
+            raider.denied_runs = []
 
     async def message_user(self, raider: Raider, emoji: str, schedule: Schedule):
         """Send a direct message to a raider based on their availability reaction."""
@@ -85,6 +97,21 @@ class MyClient(discord.Client):
         except discord.Forbidden:
             logger.warning(f"Could not DM {raider.member} for schedule {schedule}")
 
+    async def repost_schedule(self, schedule: Schedule, schedule_post: int) -> Tuple[int, Schedule]:
+        """
+        Delete and repost message if it's been up for over 24 hours.
+        """
+        message = await self.get_channel(CHANNEL_ID).fetch_message(schedule_post)
+        await message.delete()
+
+        new_message = schedule.send_message()
+        for role in schedule.missing:
+            new_message += f"\n{self.role_mentions[role].mention} needed!"
+
+        new_message = await self.get_channel(CHANNEL_ID).send(new_message)
+
+        return new_message.id, schedule
+
     async def get_message_history(self):
         """Retrieve message history from the designated channel."""
         await self.get_channel(CHANNEL_ID).fetch_message(self.availability_message_id)
@@ -94,13 +121,23 @@ class MyClient(discord.Client):
     async def hourly_check(self):
         """Background task that runs every hour. Makes sure to fill schedules and perform reminders"""
 
-        for schedule_id, schedule in self.schedules.items():
-            # Check if schedule needs to be filled
-            if not schedule.is_filled() and schedule.asks >= 5 and schedule.tier_reached != RED:
-                schedule.asks = 0
-                await self.fill_remaining_spots(schedule_id)
-            elif not schedule.is_filled() and schedule.asks < 5:
-                self.schedules[schedule_id].asks += 1
+        for schedule_id, schedule in list(self.schedules.items()):
+            # Check if schedule is filled
+            if not schedule.is_filled():
+                # Check if schedule needs to be reposted after 24 hours of not being filled
+                time_passed = (datetime.now(timezone.utc) - schedule.posted).total_seconds()
+                if time_passed >= 86400:  # 24 hours
+                    new_schedule_id, new_schedule = await self.repost_schedule(schedule, schedule_id)
+                    del self.schedules[schedule_id]
+                    self.schedules[new_schedule_id] = new_schedule
+                    schedule_id = new_schedule_id
+                    schedule = new_schedule
+                # Check if schedule needs to be filled
+                if schedule.asks >= 5 and schedule.tier_reached != RED:
+                    schedule.asks = 0
+                    await self.fill_remaining_spots(schedule_id)
+                elif schedule.asks < 5:
+                    self.schedules[schedule_id].asks += 1
 
             # Check for reminders
             if schedule.is_filled():
@@ -145,17 +182,21 @@ class MyClient(discord.Client):
             if schedule.is_filled():
                 continue
             
+            # If hasn't been listed for an hour yet don't ask
+            if (datetime.now(timezone.utc) - schedule.posted).total_seconds() < 3600:
+                break
+
             # Check if we should ask this raider based on schedule's tier_reached
             schedule_tier_priority = tier_priority[schedule.tier_reached]
             raider_tier_priority = tier_priority[raider_tier]
             
             # Ask if raider is at least as available as the schedule's current tier
-            if raider_tier_priority <= schedule_tier_priority:
+            if raider_tier_priority <= schedule_tier_priority and raider.check_availability(schedule) and schedule not in raider.denied_runs:
                 
                 # Check if raider's primary role can fill a missing spot
                 primary_role = raider.roles[0]
             
-                if primary_role and primary_role in schedule.missing and raider.check_availability(schedule):
+                if primary_role and primary_role in schedule.missing:
                     # DM the raider
                     try:
                         dm_channel = await raider.member.create_dm()
@@ -220,14 +261,21 @@ class MyClient(discord.Client):
             if schedule.is_filled():
                 break  # Schedule is full
 
+            if not raider.check_availability(schedule):
+                break # Raider not available for this schedule
+        
+            if schedule in raider.denied_runs:
+                break # Raider has previously denied this schedule
+
             if primary:
                 if raider.roles[0] in schedule.missing and raider.check_availability(schedule):
                     try:
                         dm_channel = await raider.member.create_dm()
                         dm = await dm_channel.send(
                             f"""
-                                Hello {raider.member.display_name}, a spot has opened up for (Level {schedule.level})
-                                Run on <t:{int(schedule.date_scheduled.astimezone(timezone.utc).timestamp())}:F>.
+                            Hello {raider.member.display_name}, a spot has opened up for (Level {schedule.level})
+                            Run on <t:{int(schedule.date_scheduled.astimezone(timezone.utc).timestamp())}:F>.
+                            Your primary role ({raider.roles[0]}) is needed.
                                 React with :green_check_mark: if you would like to go, or :x: to decline.
                             """
                         )
@@ -245,8 +293,9 @@ class MyClient(discord.Client):
                         dm_channel = await raider.member.create_dm()
                         dm = await dm_channel.send(
                             f"""
-                                Hello {raider.member.display_name}, a spot has opened up for (Level {schedule.level})
-                                Run on <t:{int(schedule.date_scheduled.astimezone(timezone.utc).timestamp())}:F>.
+                            Hello {raider.member.display_name}, a spot has opened up for (Level {schedule.level})
+                            Run on <t:{int(schedule.date_scheduled.astimezone(timezone.utc).timestamp())}:F>.
+                            Your primary role ({raider.roles[1]}) is needed.
                                 React with :green_check_mark: if you would like to go, or :x: to decline.
                             """
                         )
@@ -319,6 +368,11 @@ class MyClient(discord.Client):
         self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map = load_state()
         logger.info("Loaded state from file.")
 
+        # Get roles for later use
+        self.role_mentions['healer'] = self.get_guild(CHANNEL_ID).get_role(HEALER_ID)
+        self.role_mentions['tank'] = self.get_guild(CHANNEL_ID).get_role(TANK_ID)
+        self.role_mentions['dps'] = self.get_guild(CHANNEL_ID).get_role(DPS_ID)
+
         # Start hourly background task
         self.hourly_check.start()
         if self.availability_message_id:
@@ -332,10 +386,19 @@ class MyClient(discord.Client):
         """Handle incoming messages, responding to commands like !avail and !key."""
         if message.author.id == self.user.id:
             return
+        
+        if message == '!keys':
+            if message.author.id in self.raiders and message.channel.id == message.author.dm_channel.id:
+                try:
+                    await message.author.send(
+                        self.raiders[message.author.id].current_runs()
+                    )
+                except discord.Forbidden:
+                    logger.warning(f"Could not DM {message.author} for current runs")
 
         if message.channel.id == CHANNEL_ID:
             if message.content == '!avail':
-                self.reset_availability()
+                self.reset_week()
                 channel = self.get_channel(CHANNEL_ID)
                 message = await channel.send(AVAILABILITY_MESSAGE)
                 self.availability_message_id = message.id

@@ -13,6 +13,7 @@ class Raider:
     timezone: ZoneInfo
     roles: List[str]
     current_runs: List[Schedule] = []
+    denied_runs: List[Schedule] = []
 
     def __init__(self, member: Member, class_play: str, roles: List[str], timezone: str) -> None:
         """Initialize a Raider from a Discord member."""
@@ -26,11 +27,15 @@ class Raider:
         """Add a scheduled run time to the raider's current runs."""
         if schedule not in self.current_runs:
             self.current_runs.append(schedule)
+        if schedule in self.denied_runs:
+            self.denied_runs.remove(schedule)
 
     def remove_run(self, schedule: Schedule) -> None:
         """Remove a scheduled run time from the raider's current runs."""
         if schedule in self.current_runs:
             self.current_runs.remove(schedule)
+        if not schedule in self.denied_runs:
+            self.denied_runs.append(schedule)
 
     def check_availability(self, schedule: Schedule) -> bool:
         """Check if the raider is available for a given scheduled time."""

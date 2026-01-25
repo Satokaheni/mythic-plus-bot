@@ -27,6 +27,7 @@ class Schedule:
         self.tier_reached = '🟢'
         self.primary = True
         self.asks = 0
+        self.posted = datetime.now(timezone.utc)
         self.raider_signup(raider_scheduled)
 
     def _check_fill(self):
