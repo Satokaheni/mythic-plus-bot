@@ -11,13 +11,7 @@ GREEN = '🟢'
 YELLOW = '🟡'
 RED = '🔴'
 
-AVAILABILITY_MESSAGE: str = """
-React to this message to set your availability for this week's myhic plus runs
 
-:green_circle: - Available
-:yellow_circle: - Maybe Available
-:red_circle: - Not Available
-"""
 
 ARMOR_DICT: Dict[str, str] = {
     'Warrior': 'Plate',

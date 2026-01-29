@@ -6,15 +6,15 @@ import os
 import discord
 import asyncio
 from discord.ext import tasks
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from typing import Dict, Tuple
+from textwrap import dedent
 
 from dropdown import WoWSelectionView, KeyRequestView
 from raider import Raider
 from schedule import Schedule
 from utils import (
-    AVAILABILITY_MESSAGE,
     GREEN,
     YELLOW,
     RED,
@@ -32,11 +32,25 @@ logger = logging.getLogger('discord')
 # ---------------------------
 load_dotenv('.env')
 CLIENT_ID = os.getenv('CLIENT_KEY')
-CHANNEL_ID = int(os.getenv('CHANNEL_ID'))
+AVAIL_CHANNEL_ID = int(os.getenv('AVAIL_CHANNEL_ID'))
+KEY_CHANNEL_ID = int(os.getenv('KEY_CHANNEL_ID'))
+GUILD_ID = int(os.getenv('GUILD_ID'))
 TANK_ID = int(os.getenv('TANK_ROLE_ID'))
 HEALER_ID = int(os.getenv('HEALER_ROLE_ID'))
 DPS_ID = int(os.getenv('DPS_ROLE_ID'))
 COORDINATOR_ID = int(os.getenv('COORDINATOR_ID'))
+MYTHIC_PLUS_ID = int(os.getenv('MYTHIC_PLUS_ID'))
+AVAILABILITY_MESSAGE: str = lambda x, y, z: f"""
+React to this message to set your availability for this week's mythic plus runs
+<t:{int(x)}:F> to <t:{int(y)}:F>
+
+
+:green_circle: - Available
+:yellow_circle: - Maybe Available
+:red_circle: - Not Available
+
+{z}
+"""
 
 # ---------------------------
 # Bot Class
@@ -81,42 +95,42 @@ class MyClient(discord.Client):
             if emoji in ['✅', '❌']:
                 dm_channel = await self.get_user(raider.user_id).create_dm()
                 if emoji == '✅':
-                    await dm_channel.send(
+                    await dm_channel.send(dedent(
                         f"""
                         Hello {raider.name}, you have successfully signed up for (Level {schedule.level})
                         Run on <t:{int(schedule.date_scheduled.astimezone(timezone.utc).timestamp())}:F>.
                         See you there!
                         """
-                    )
+                    ))
                 elif emoji == '❌':
-                    await dm_channel.send(
+                    await dm_channel.send(dedent(
                         f"""
                         Hello {raider.name}, you have successfully declined the spot for (Level {schedule.level})
                         Run on <t:{int(schedule.date_scheduled.astimezone(timezone.utc).timestamp())}:F>.
                         """
-                    )
+                    ))
             
         except discord.Forbidden:
-            logger.warning(f"Could not DM {raider.member} for schedule {schedule}")
+            logger.warning(f"Could not DM {raider.name} for schedule {schedule}")
 
     async def repost_schedule(self, schedule: Schedule, schedule_post: int) -> Tuple[int, Schedule]:
         """
         Delete and repost message if it's been up for over 24 hours.
         """
-        message = await self.get_channel(CHANNEL_ID).fetch_message(schedule_post)
+        message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_post)
         await message.delete()
 
         new_message = schedule.send_message()
         for role in schedule.missing:
             new_message += f"\n{self.role_mentions[role].mention} needed!"
 
-        new_message = await self.get_channel(CHANNEL_ID).send(new_message)
+        new_message = await self.get_channel(KEY_CHANNEL_ID).send(dedent(new_message))
 
         return new_message.id, schedule
 
     async def get_message_history(self):
         """Retrieve message history from the designated channel."""
-        await self.get_channel(CHANNEL_ID).fetch_message(self.availability_message_id)
+        await self.get_channel(AVAIL_CHANNEL_ID).fetch_message(self.availability_message_id)
         [await self.get_channel(cid).fetch_message(mid[1]) for cid, mid in self.dm_map.items()]
 
     # Add new method to handle DM retries
@@ -175,16 +189,16 @@ class MyClient(discord.Client):
                     if role_needed:
                         # Send new DM
                         dm_channel = await raider.member.create_dm()
-                        new_dm = await dm_channel.send(
+                        new_dm = await dm_channel.send(dedent(
                             f"""
                             🔔 **Reminder** 🔔
                             Hello {raider.name}, a spot is still available for (Level {schedule.level})
                             Run on <t:{int(schedule.date_scheduled.astimezone(timezone.utc).timestamp())}:F>.
                             Your role ({role_needed}) is needed.
                             
-                            React with :green_check_mark: if you would like to go, or :x: to decline.
+                            React with :white_check_mark: if you would like to go, or :x: to decline.
                             """
-                        )
+                        ))
                         await new_dm.add_reaction('✅')
                         await new_dm.add_reaction('❌')
                         
@@ -248,13 +262,13 @@ class MyClient(discord.Client):
                         missing_roles = ', '.join(schedule.missing)
                         filled = f"{schedule.signup}/5"
                         conflict_message += f"  • Level {schedule.level} - {filled} filled - Missing: {missing_roles}\n"
-                        conflict_message += f"    [Jump to message](https://discord.com/channels/{self.get_channel(CHANNEL_ID).guild.id}/{CHANNEL_ID}/{schedule_id})\n"
+                        conflict_message += f"    [Jump to message](https://discord.com/channels/{self.get_channel(KEY_CHANNEL_ID).guild.id}/{KEY_CHANNEL_ID}/{schedule_id})\n"
                     
                     conflict_message += "\n"
                 
                 conflict_message += "Please manually resolve these conflicts by consolidating or rescheduling runs."
                 
-                await dm_channel.send(conflict_message)
+                await dm_channel.send(dedent(conflict_message))
                 logger.info(f"Notified coordinator about {len(conflicts)} scheduling conflict(s)")
                 
             except discord.Forbidden:
@@ -293,15 +307,15 @@ class MyClient(discord.Client):
                 if primary_role and primary_role in schedule.missing:
                     # DM the raider
                     try:
-                        dm_channel = await raider.member.create_dm()
-                        dm = await dm_channel.send(
+                        dm_channel = await self.get_user(raider.user_id).create_dm()
+                        dm = await dm_channel.send(dedent(
                             f"""
                             Hello {raider.name}, a spot has opened up for (Level {schedule.level})
                             Run on <t:{int(schedule.date_scheduled.astimezone(timezone.utc).timestamp())}:F>.
                             Your primary role ({primary_role}) is needed.
-                                React with :green_check_mark: if you would like to go, or :x: to decline.
+                                React with :white_check_mark: if you would like to go, or :x: to decline.
                             """
-                        )
+                        ))
                         await dm.add_reaction('✅')
                         await dm.add_reaction('❌')
                         
@@ -314,7 +328,7 @@ class MyClient(discord.Client):
                             self.dm_map[dm_channel.id] = {}
                         self.dm_map[dm_channel.id][dm.id] = schedule_id
                     except discord.Forbidden:
-                        logger.warning(f"Could not DM {raider.member} for schedule {schedule_id}")
+                        logger.warning(f"Could not DM {raider.name} for schedule {schedule_id}")
             elif not schedule.primary and len(raider.roles) > 1:
                 # Check if raider's secondary role can fill a missing spot
                 secondary_role = raider.roles[1]
@@ -322,15 +336,15 @@ class MyClient(discord.Client):
                 if secondary_role and secondary_role in schedule.missing and raider.check_availability(schedule):
                     # DM the raider
                     try:
-                        dm_channel = await raider.member.create_dm()
-                        dm = await dm_channel.send(
+                        dm_channel = await self.get_user(raider.user_id).create_dm()
+                        dm = await dm_channel.send(dedent(
                             f"""
                             Hello {raider.name}, a spot has opened up for (Level {schedule.level})
                             Run on <t:{int(schedule.date_scheduled.astimezone(timezone.utc).timestamp())}:F>.
                             Your secondary role ({secondary_role}) is needed.
-                                React with :green_check_mark: if you would like to go, or :x: to decline.
+                                React with :white_check_mark: if you would like to go, or :x: to decline.
                             """
-                        )
+                        ))
                         await dm.add_reaction('✅')
                         await dm.add_reaction('❌')
 
@@ -343,7 +357,7 @@ class MyClient(discord.Client):
                             self.dm_map[dm_channel.id] = {}
                         self.dm_map[dm_channel.id][dm.id] = schedule_id
                     except discord.Forbidden:
-                        logger.warning(f"Could not DM {raider.member} for schedule {schedule_id}")
+                        logger.warning(f"Could not DM {raider.name} for schedule {schedule_id}")
 
     async def fill_remaining_spots(self, schedule_id: int):
         """Background task to fill remaining schedule spots from available raiders, asking all eligible in a tier in parallel."""
@@ -359,7 +373,7 @@ class MyClient(discord.Client):
         if schedule.is_filled():
             return  # Schedule already filled
 
-        channel = self.get_channel(CHANNEL_ID)
+        channel = self.get_channel(KEY_CHANNEL_ID)
         if not channel:
             return  # Channel no longer accessible
 
@@ -375,15 +389,15 @@ class MyClient(discord.Client):
             if primary:
                 if raider.roles[0] in schedule.missing and raider.check_availability(schedule):
                     try:
-                        dm_channel = await raider.member.create_dm()
-                        dm = await dm_channel.send(
+                        dm_channel = await self.get_user(raider.user_id).create_dm()
+                        dm = await dm_channel.send(dedent(
                             f"""
                             Hello {raider.name}, a spot has opened up for (Level {schedule.level})
                             Run on <t:{int(schedule.date_scheduled.astimezone(timezone.utc).timestamp())}:F>.
                             Your primary role ({raider.roles[0]}) is needed.
-                                React with :green_check_mark: if you would like to go, or :x: to decline.
+                                React with :white_check_mark: if you would like to go, or :x: to decline.
                             """
-                        )
+                        ))
                         await dm.add_reaction('✅')
                         await dm.add_reaction('❌')
 
@@ -396,19 +410,19 @@ class MyClient(discord.Client):
                             self.dm_map[dm_channel.id] = {}
                         self.dm_map[dm_channel.id][dm.id] = schedule_id
                     except discord.Forbidden:
-                        logger.warning(f"Could not DM {raider.member} for schedule {schedule_id}")
+                        logger.warning(f"Could not DM {raider.name} for schedule {schedule_id}")
             else:
                 if len(raider.roles) > 1 and raider.roles[1] in schedule.missing and raider.check_availability(schedule):
                     try:
-                        dm_channel = await raider.member.create_dm()
-                        dm = await dm_channel.send(
+                        dm_channel = await self.get_user(raider.user_id).create_dm()
+                        dm = await dm_channel.send(dedent(
                             f"""
                             Hello {raider.name}, a spot has opened up for (Level {schedule.level})
                             Run on <t:{int(schedule.date_scheduled.astimezone(timezone.utc).timestamp())}:F>.
                             Your primary role ({raider.roles[1]}) is needed.
-                                React with :green_check_mark: if you would like to go, or :x: to decline.
+                                React with :white_check_mark: if you would like to go, or :x: to decline.
                             """
-                        )
+                        ))
                         await dm.add_reaction('✅')
                         await dm.add_reaction('❌')
 
@@ -416,7 +430,7 @@ class MyClient(discord.Client):
                             self.dm_map[dm_channel.id] = {}
                         self.dm_map[dm_channel.id][dm.id] = schedule_id
                     except discord.Forbidden:
-                        logger.warning(f"Could not DM {raider.member} for schedule {schedule_id}")
+                        logger.warning(f"Could not DM {raider.name} for schedule {schedule_id}")
 
         # Update schedule parameters
         if tier == GREEN and primary:
@@ -451,20 +465,20 @@ class MyClient(discord.Client):
                 time_str = dt.strftime('%I:%M %p %Z')
                 dm_channel = await raider.member.create_dm()
                 if schedule.is_filled():
-                    await dm_channel.send(
+                    await dm_channel.send(dedent(
                         f"""
                         Your Mythic+ run (Level {schedule.level}) is now **filled**!
                         Date: {day_of_week}, {dt.date()} at {time_str}
                         See you there!
                         """
-                    )
+                    ))
                 else:
-                    await dm_channel.send(
+                    await dm_channel.send(dedent(
                         f"""
                         Your Mythic+ run (Level {schedule.level}) is no longer **filled**!
                         Date: {day_of_week}, {dt.date()} at {time_str}
                         """
-                    )
+                    ))
             except discord.Forbidden as e:
                 logger.warning(f"Could not DM {raider.member} for filled schedule: {e}")
 
@@ -499,7 +513,7 @@ class MyClient(discord.Client):
                 now = datetime.now(timezone.utc)
                 difference = (schedule.start_time.astimezone(timezone.utc) - now).total_seconds()
                 if difference <= 3600 * 2:
-                    channel = self.get_channel(CHANNEL_ID)
+                    channel = self.get_channel(KEY_CHANNEL_ID)
                     await channel.send(f"{schedule.send_reminder()} in {difference // 3600} hours and {(difference % 3600) // 60} minutes.")
                     
         # Clean up past schedules and their associated DMs - ULTRA ELEGANT VERSION
@@ -549,9 +563,9 @@ class MyClient(discord.Client):
         logger.info("Loaded state from file.")
 
         # Get roles for later use
-        self.role_mentions['healer'] = self.get_guild(CHANNEL_ID).get_role(HEALER_ID)
-        self.role_mentions['tank'] = self.get_guild(CHANNEL_ID).get_role(TANK_ID)
-        self.role_mentions['dps'] = self.get_guild(CHANNEL_ID).get_role(DPS_ID)
+        self.role_mentions['healer'] = self.get_guild(GUILD_ID).get_role(HEALER_ID)
+        self.role_mentions['tank'] = self.get_guild(GUILD_ID).get_role(TANK_ID)
+        self.role_mentions['dps'] = self.get_guild(GUILD_ID).get_role(DPS_ID)
 
         # Start hourly background task
         self.hourly_check.start()
@@ -567,25 +581,27 @@ class MyClient(discord.Client):
         if message.author.id == self.user.id:
             return
         
-        if message == '!keys':
+        if message.content == '!keys':
             if message.author.id in self.raiders:
                 try:
                     await message.author.send(
-                        self.raiders[message.author.id].current_runs()
+                        self.raiders[message.author.id].get_current_runs()
                     )
                 except discord.Forbidden:
                     logger.warning(f"Could not DM {message.author} for current runs")
 
-        if message.channel.id == CHANNEL_ID:
-            if message.content == '!avail':
+        if message.channel.id == AVAIL_CHANNEL_ID or message.channel.id == KEY_CHANNEL_ID:
+            if message.content == '!avail' and message.author.id == COORDINATOR_ID and message.channel.id == AVAIL_CHANNEL_ID:
                 self.reset_week()
-                channel = self.get_channel(CHANNEL_ID)
-                message = await channel.send(AVAILABILITY_MESSAGE)
+                date_start = datetime.now(timezone.utc)
+                date_end = (date_start + timedelta(days=7)).timestamp()
+                channel = self.get_channel(AVAIL_CHANNEL_ID)
+                message = await channel.send(dedent(AVAILABILITY_MESSAGE(date_start.timestamp(), date_end, self.get_guild(GUILD_ID).get_role(MYTHIC_PLUS_ID).mention)))
                 self.availability_message_id = message.id
                 await message.add_reaction(GREEN)
                 await message.add_reaction(YELLOW)
                 await message.add_reaction(RED)
-            elif message.content == '!key':
+            elif message.content == '!key' and message.channel.id == KEY_CHANNEL_ID:
                 if message.author.id in self.raiders:
                     try:
                         view = KeyRequestView(timeout=300)  # 5 minutes
@@ -595,8 +611,8 @@ class MyClient(discord.Client):
                         )
                         await view.wait()
                         # After wait, selections are on view if submitted
-                        if view.selected_level and view.selected_day and view.selected_start_time and view.selected_end_time:
-                            logger.info(f"Key request from {message.author}: Day={view.selected_day}, {view.selected_level}, {view.selected_start_time.strftime('%H:%M')} to {view.selected_end_time.strftime('%H:%M')}")
+                        if view.selected_level and view.selected_day and view.selected_start_time and view.run_type:
+                            logger.info(f"Key request from {message.author}: Day={view.selected_day}, {view.selected_level}, {view.selected_start_time.strftime('%H:%M')}, {view.run_type}")
                             # Check for existing schedule at same date and time
                             existing_schedule, existing_schedule_id = None, None
                             for sched_id, sched in self.schedules.items():
@@ -623,7 +639,7 @@ class MyClient(discord.Client):
                                         if existing_schedule.is_filled():
                                             await self.notify_schedule(existing_schedule)
                                         # Update the schedule message in channel
-                                        msg = await self.get_channel(CHANNEL_ID).fetch_message(existing_schedule_id)
+                                        msg = await self.get_channel(KEY_CHANNEL_ID).fetch_message(existing_schedule_id)
                                         await msg.edit(content=existing_schedule.send_message())
                                         save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
                                     else:
@@ -633,7 +649,7 @@ class MyClient(discord.Client):
                                             date_scheduled=view.selected_day,
                                             start_time=view.selected_start_time,
                                         )
-                                        message = await self.get_channel(CHANNEL_ID).send(schedule.send_message())
+                                        message = await self.get_channel(KEY_CHANNEL_ID).send(dedent(schedule.send_message()))
                                         await message.add_reaction('✅')  # Confirm attendance
                                         await message.add_reaction('❌')  # Remove attendance
 
@@ -651,7 +667,7 @@ class MyClient(discord.Client):
                                 date_scheduled=view.selected_day,
                                 start_time=view.selected_start_time,
                             )
-                            message = await self.get_channel(CHANNEL_ID).send(schedule.send_message())
+                            message = await self.get_channel(KEY_CHANNEL_ID).send(dedent(schedule.send_message()))
                             await message.add_reaction('✅')  # Confirm attendance
                             await message.add_reaction('❌')  # Remove attendance
 
@@ -674,7 +690,7 @@ class MyClient(discord.Client):
         if user.id == self.user.id:
             return
 
-        if reaction.message.channel.id == CHANNEL_ID and reaction.message.id == self.availability_message_id and reaction.emoji in [GREEN, YELLOW, RED]:
+        if reaction.message.channel.id == AVAIL_CHANNEL_ID and reaction.message.id == self.availability_message_id and reaction.emoji in [GREEN, YELLOW, RED]:
             if user is None:
                 return
 
@@ -722,7 +738,7 @@ class MyClient(discord.Client):
                 except discord.Forbidden:
                     logger.warning(f"Could not DM {user}")
 
-        elif reaction.message.channel.id == CHANNEL_ID and reaction.message.id in self.schedules and user.id in self.raiders:
+        elif reaction.message.channel.id == KEY_CHANNEL_ID and reaction.message.id in self.schedules and user.id in self.raiders:
             if reaction.emoji not in ['✅', '❌']:
                 return
             
@@ -763,7 +779,7 @@ class MyClient(discord.Client):
                 if schedule.is_filled():
                     await self.notify_schedule(schedule)
                 await self.message_user(raider, reaction.emoji, schedule)
-                message = await self.get_channel(CHANNEL_ID).fetch_message(schedule_id)
+                message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_id)
                 await message.edit(content=schedule.send_message())
             elif reaction.emoji == '❌':
                 schedule_id = self.dm_map[reaction.message.channel.id][reaction.message.id]
@@ -775,10 +791,9 @@ class MyClient(discord.Client):
                 if schedule.is_filled() != fill_status:
                     await self.notify_schedule(schedule)
                 await self.message_user(raider, reaction.emoji, schedule)
-                message = await self.get_channel(CHANNEL_ID).fetch_message(schedule_id)
+                message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_id)
                 await message.edit(content=schedule.send_message())
             
-            await reaction.message.edit(content=schedule.send_message())
             save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
             logger.info("%s signed up for schedule %s via DM", user, schedule)
 

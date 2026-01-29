@@ -44,7 +44,7 @@ class Raider:
         """Check if the raider is available for a given scheduled time."""
         return schedule not in self.current_runs
     
-    def current_runs(self) -> str:
+    def get_current_runs(self) -> str:
         """Return a string representation of the raider's current runs (only filled)."""
         return "Your current scheduled runs for the week that are filled are the following: \n" + '\n'.join([
             f"Day: {run.date_scheduled.strftime('%A')} Start Time: {run.start_time.strftime('%H:%M')} Level: {run.level}"

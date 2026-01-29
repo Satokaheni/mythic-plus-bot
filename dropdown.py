@@ -35,10 +35,7 @@ class WoWClassSelect(discord.ui.Select):
         # store the chosen value on the parent view for retrieval
         if self.view:
             self.view.selected_class = self.values[0]
-        await interaction.response.send_message(
-            f"You selected **{self.values[0].title()}** as your class.",
-            ephemeral=True
-        )
+        await interaction.response.defer()
 
 
 class PrimaryRoleSelect(discord.ui.Select):
@@ -59,10 +56,7 @@ class PrimaryRoleSelect(discord.ui.Select):
         """Handle primary role selection with validation against class roles."""
         if self.view:
             self.view.selected_primary = self.values[0]
-        await interaction.response.send_message(
-            f"Primary role set to **{self.values[0].upper()}**.",
-            ephemeral=True
-        )
+        await interaction.response.defer()
 
 class SecondaryRoleSelect(discord.ui.Select):
     """Dropdown select for choosing secondary role with class and primary role validation."""
@@ -85,22 +79,7 @@ class SecondaryRoleSelect(discord.ui.Select):
                 await interaction.response.send_message("Secondary role cannot be the same as primary role.", ephemeral=True)
                 return
             self.view.selected_secondary = self.values[0]
-        await interaction.response.send_message(
-            f"Secondary role set to **{self.values[0].upper()}**.",
-            ephemeral=True
-        )
-
-
-class SubmitButton(discord.ui.Button):
-    """Button to submit the WoW class and role selection."""
-    def __init__(self):
-        super().__init__(style=discord.ButtonStyle.primary, label="Submit")
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        """Handle submit button click and stop the view."""
-        await interaction.response.send_message("Selection received.", ephemeral=True)
-        if self.view:
-            self.view.stop()
+        await interaction.response.defer()
 
 
 class USTimezoneSelect(discord.ui.Select):
@@ -126,9 +105,32 @@ class USTimezoneSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction) -> None:
         if self.view:
             self.view.selected_timezone = self.values[0]
-        await interaction.response.send_message(
-            f"Timezone set to **{self.values[0]}**.", ephemeral=True
-        )
+        await interaction.response.defer()
+        
+
+class SubmitButton(discord.ui.Button):
+    """Button to submit the WoW class and role selection."""
+    def __init__(self):
+        super().__init__(style=discord.ButtonStyle.primary, label="Submit")
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        """Handle submit button click and stop the view."""
+        view = self.view
+        
+        # Build response message with user's selections
+        message = "**Your Selection:**\n"
+        if view.selected_class:
+            message += f"Class: **{view.selected_class.title()}**\n"
+        if view.selected_primary:
+            message += f"Primary Role: **{view.selected_primary.upper()}**\n"
+        if view.selected_secondary:
+            message += f"Secondary Role: **{view.selected_secondary.upper()}**\n"
+        if view.selected_timezone:
+            message += f"Timezone: **{view.selected_timezone}**"
+        
+        await interaction.response.send_message(message, ephemeral=True)
+        if view:
+            view.stop()
 
 class WoWSelectionView(discord.ui.View):
     """View containing dropdowns for WoW class, role, and timezone selection."""
@@ -170,10 +172,7 @@ class WoWLevelSelect(discord.ui.Select):
         # store the chosen value on the parent view for retrieval
         if self.view:
             self.view.selected_level = self.values[0]
-        await interaction.response.send_message(
-            f"You selected **{self.values[0].title()}** as your level.",
-            ephemeral=True
-        )
+        await interaction.response.defer()
 
 class WoWDaySelect(discord.ui.Select):
     """Dropdown select for choosing day for key request."""
@@ -199,11 +198,7 @@ class WoWDaySelect(discord.ui.Select):
         # store the chosen value on the parent view for retrieval
         if self.view:
             self.view.selected_day = self.values[0]
-        selected_date = datetime.fromisoformat(self.values[0]).strftime("%A, %B %d")
-        await interaction.response.send_message(
-            f"You selected **{selected_date}** as the day.",
-            ephemeral=True
-        )
+        await interaction.response.defer()
 
 class WoWTimeRangeSelect(discord.ui.Select):
     """Dropdown select for choosing start time for key request (12-hour am/pm format)."""
@@ -233,9 +228,7 @@ class WoWTimeRangeSelect(discord.ui.Select):
             dt_str = f"{self.view.selected_day} {start_time_str}"
             dt = datetime.strptime(dt_str, "%Y-%m-%d %I:%M %p")
             self.view.selected_start_time = dt
-        await interaction.response.send_message(
-            f"You selected **{self.values[0]}** as your start time.", ephemeral=True
-        )
+        await interaction.response.defer()
 
 
 class KeyRunTypeSelect(discord.ui.Select):
@@ -256,9 +249,7 @@ class KeyRunTypeSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction) -> None:
         if self.view:
             self.view.run_type = self.values[0]
-        await interaction.response.send_message(
-            f"You selected to run **{'one key' if self.values[0] == 'one' else 'multiple keys'}**.", ephemeral=True
-        )
+        await interaction.response.defer()
 
 
 class KeyRequestSubmitButton(discord.ui.Button):
@@ -270,7 +261,7 @@ class KeyRequestSubmitButton(discord.ui.Button):
         """Handle key request submission with validation and stop the view."""
         view = self.view
         # Validate selections
-        if not (view.selected_day and view.selected_dungeon and view.selected_level and view.selected_start_time):
+        if not (view.selected_day and view.run_type and view.selected_level and view.selected_start_time):
             await interaction.response.send_message("Please select all options before submitting.", ephemeral=True)
             return
 
@@ -278,7 +269,7 @@ class KeyRequestSubmitButton(discord.ui.Button):
         selected_date = datetime.fromisoformat(view.selected_day).strftime("%A, %B %d")
         start_str = view.selected_start_time.strftime("%I:%M %p")
         await interaction.response.send_message(
-            f"Key request submitted: Day={selected_date}, Dungeon={view.selected_dungeon.title()}, Level={view.selected_level}, Start={start_str}",
+            f"Key request submitted: Day={selected_date}, Number of Runs={view.run_type}, Level={view.selected_level}, Start={start_str}",
             ephemeral=True
         )
         view.stop()

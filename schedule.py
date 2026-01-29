@@ -53,23 +53,23 @@ class Schedule:
     def send_message(self) -> str:
         """Generate the formatted message for the schedule post."""
         message = f"""
-        Scheduled Mythic+ Run:
-        Time: <t:{int(self.date_scheduled.astimezone(timezone.utc).timestamp())}:F>
+            Scheduled Mythic+ Run:
+            Time: <t:{int(self.date_scheduled.astimezone(timezone.utc).timestamp())}:F>
 
-        Level: {self.level}
+            Level: {self.level}
 
-        Please React to this message to confirm your attendance.
-        Please Remove your reaction if you can no longer attend.
+            Please React to this message to confirm your attendance.
+            Please Remove your reaction if you can no longer attend.
 
-        Team:
-        Tank: {self.team['tank'].mention if self.team['tank'] else 'TBD'}
-        Healer: {self.team['healer'].mention if self.team['healer'] else 'TBD'}
-        DPS: {'TBD' if len(self.team['dps']) < 1 else self.team['dps'][0].mention}
-        DPS: {'TBD' if len(self.team['dps']) < 2 else self.team['dps'][1].mention}
-        DPS: {'TBD' if len(self.team['dps']) < 3 else self.team['dps'][2].mention}
-        Fill: {', '.join([f'{raider.mention} {raider.roles}' for raider in self.team['fill']]) if self.team['fill'] else 'None'}
-        React :green_check_mark: to confirm your attendance.
-        React :x: to remove yourself from the run.
+            Team:
+            Tank: {self.team['tank'].mention if self.team['tank'] else 'TBD'}
+            Healer: {self.team['healer'].mention if self.team['healer'] else 'TBD'}
+            DPS: {'TBD' if len(self.team['dps']) < 1 else self.team['dps'][0].mention}
+            DPS: {'TBD' if len(self.team['dps']) < 2 else self.team['dps'][1].mention}
+            DPS: {'TBD' if len(self.team['dps']) < 3 else self.team['dps'][2].mention}
+            Fill: {', '.join([f'{raider.mention} {raider.roles}' for raider in self.team['fill']]) if self.team['fill'] else 'None'}
+            React :white_check_mark: to confirm your attendance.
+            React :x: to remove yourself from the run.
         """
         return message
 
