@@ -66,9 +66,11 @@ class Raider:
         return runs
 
     def __eq__(self, other) -> bool:
-        """Check equality based on id, class, and roles."""
+        """Check equality based on user_id only."""
         if isinstance(other, Raider):
-            return (self.user_id == other.user_id and
-                    self.class_play == other.class_play and
-                    set(self.roles) == set(other.roles))
+            return self.user_id == other.user_id
         return NotImplemented
+    
+    def __hash__(self) -> int:
+        """Return hash based on user_id for use in sets and dicts."""
+        return hash(self.user_id)

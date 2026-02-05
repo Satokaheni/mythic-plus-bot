@@ -130,6 +130,10 @@ class Schedule:
     def is_filled(self) -> bool:
         """Return True if the schedule is full (5 signups)."""
         return self.full
+    
+    def has_raider(self, raider: Raider) -> bool:
+        """Check if a raider is already in this schedule."""
+        return raider in self.members
 
     def try_signup(self, raider: Raider) -> bool:
         """Attempt to sign up a raider. Returns True if they were added.
@@ -150,3 +154,7 @@ class Schedule:
                 self.start_time == other.start_time
             )
         return NotImplemented
+    
+    def __hash__(self) -> int:
+        """Return hash based on level, date, and start time for use in sets and dicts."""
+        return hash((self.level, self.date_scheduled, self.start_time))

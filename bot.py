@@ -178,7 +178,7 @@ class MyClient(discord.Client):
                             raider = r
                             break
                 
-                if raider and schedule not in raider.denied_runs and schedule not in raider.current_runs:
+                if raider and schedule not in raider.denied_runs and schedule not in raider.current_runs and not schedule.has_raider(raider):
                     # Determine which role is needed
                     role_needed = None
                     if raider.roles[0] in schedule.missing:
@@ -299,7 +299,7 @@ class MyClient(discord.Client):
             raider_tier_priority = tier_priority[raider_tier]
             
             # Ask if raider is at least as available as the schedule's current tier
-            if raider_tier_priority <= schedule_tier_priority and raider.check_availability(schedule) and schedule not in raider.denied_runs and schedule not in raider.current_runs:
+            if raider_tier_priority <= schedule_tier_priority and raider.check_availability(schedule) and schedule not in raider.denied_runs and schedule not in raider.current_runs and not schedule.has_raider(raider):
                 
                 # Check if raider's primary role can fill a missing spot
                 primary_role = raider.roles[0]
@@ -333,7 +333,7 @@ class MyClient(discord.Client):
                 # Check if raider's secondary role can fill a missing spot
                 secondary_role = raider.roles[1]
                 
-                if secondary_role and secondary_role in schedule.missing and raider.check_availability(schedule):
+                if secondary_role and secondary_role in schedule.missing and raider.check_availability(schedule) and not schedule.has_raider(raider):
                     # DM the raider
                     try:
                         dm_channel = await self.get_user(raider.user_id).create_dm()
@@ -383,8 +383,8 @@ class MyClient(discord.Client):
             if not raider.check_availability(schedule):
                 continue # Raider not available for this schedule
         
-            if schedule in raider.denied_runs or schedule in raider.current_runs:
-                continue # Raider has previously denied this schedule
+            if schedule in raider.denied_runs or schedule in raider.current_runs or schedule.has_raider(raider):
+                continue # Raider has previously denied this schedule or is already in it
 
             if primary:
                 if raider.roles[0] in schedule.missing and raider.check_availability(schedule):
@@ -412,7 +412,7 @@ class MyClient(discord.Client):
                     except discord.Forbidden:
                         logger.warning(f"Could not DM {raider.name} for schedule {schedule_id}")
             else:
-                if len(raider.roles) > 1 and raider.roles[1] in schedule.missing and not raider in schedule.members:
+                if len(raider.roles) > 1 and raider.roles[1] in schedule.missing and not schedule.has_raider(raider):
                     try:
                         dm_channel = await self.get_user(raider.user_id).create_dm()
                         dm = await dm_channel.send(dedent(
@@ -426,6 +426,11 @@ class MyClient(discord.Client):
                         await dm.add_reaction('✅')
                         await dm.add_reaction('❌')
 
+                        # Track timestamp
+                        if dm_channel.id not in self.dm_timestamps:
+                            self.dm_timestamps[dm_channel.id] = {}
+                        self.dm_timestamps[dm_channel.id][dm.id] = datetime.now(timezone.utc)
+                        
                         if not dm_channel.id in self.dm_map:
                             self.dm_map[dm_channel.id] = {}
                         self.dm_map[dm_channel.id][dm.id] = schedule_id
