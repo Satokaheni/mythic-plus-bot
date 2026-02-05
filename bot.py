@@ -178,7 +178,7 @@ class MyClient(discord.Client):
                             raider = r
                             break
                 
-                if raider and schedule not in raider.denied_runs:
+                if raider and schedule not in raider.denied_runs and schedule not in raider.current_runs:
                     # Determine which role is needed
                     role_needed = None
                     if raider.roles[0] in schedule.missing:
@@ -299,7 +299,7 @@ class MyClient(discord.Client):
             raider_tier_priority = tier_priority[raider_tier]
             
             # Ask if raider is at least as available as the schedule's current tier
-            if raider_tier_priority <= schedule_tier_priority and raider.check_availability(schedule) and schedule not in raider.denied_runs:
+            if raider_tier_priority <= schedule_tier_priority and raider.check_availability(schedule) and schedule not in raider.denied_runs and schedule not in raider.current_runs:
                 
                 # Check if raider's primary role can fill a missing spot
                 primary_role = raider.roles[0]
@@ -383,7 +383,7 @@ class MyClient(discord.Client):
             if not raider.check_availability(schedule):
                 continue # Raider not available for this schedule
         
-            if schedule in raider.denied_runs:
+            if schedule in raider.denied_runs or schedule in raider.current_runs:
                 continue # Raider has previously denied this schedule
 
             if primary:
@@ -412,14 +412,14 @@ class MyClient(discord.Client):
                     except discord.Forbidden:
                         logger.warning(f"Could not DM {raider.name} for schedule {schedule_id}")
             else:
-                if len(raider.roles) > 1 and raider.roles[1] in schedule.missing and raider.check_availability(schedule):
+                if len(raider.roles) > 1 and raider.roles[1] in schedule.missing and not raider in schedule.members:
                     try:
                         dm_channel = await self.get_user(raider.user_id).create_dm()
                         dm = await dm_channel.send(dedent(
                             f"""
                             Hello {raider.name}, a spot has opened up for (Level {schedule.level})
                             Run on <t:{int(schedule.date_scheduled.astimezone(timezone.utc).timestamp())}:F>.
-                            Your primary role ({raider.roles[1]}) is needed.
+                            Your secondary role ({raider.roles[1]}) is needed.
                                 React with :white_check_mark: if you would like to go, or :x: to decline.
                             """
                         ))
@@ -555,22 +555,27 @@ class MyClient(discord.Client):
     # ---------------------------
     # Startup
     # ---------------------------
-    async def on_ready(self):
-        """Called when the bot is ready. Loads state from file."""
-        logger.info("Logged in as %s", self.user)
-
+    async def setup_hook(self) -> None:
+        """Calls before on ready to set up all environmental variables"""
         self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps = load_state()
         logger.info("Loaded state from file.")
 
-        # Get roles for later use
-        self.role_mentions['healer'] = self.get_guild(GUILD_ID).get_role(HEALER_ID)
-        self.role_mentions['tank'] = self.get_guild(GUILD_ID).get_role(TANK_ID)
-        self.role_mentions['dps'] = self.get_guild(GUILD_ID).get_role(DPS_ID)
-
         # Start hourly background task
-        self.hourly_check.start()
+        if not self.hourly_check.is_running():
+            self.hourly_check.start()
+        
         if self.availability_message_id:
             await self.get_message_history()
+    
+    async def on_ready(self):
+        """Called when the bot is ready. Loads state from file."""
+        logger.info("Logged in as %s", self.user)
+        
+        # Get roles for later use
+        if not self.role_mentions:
+            self.role_mentions['healer'] = self.get_guild(GUILD_ID).get_role(HEALER_ID)
+            self.role_mentions['tank'] = self.get_guild(GUILD_ID).get_role(TANK_ID)
+            self.role_mentions['dps'] = self.get_guild(GUILD_ID).get_role(DPS_ID)
         
 
     # ---------------------------
@@ -590,6 +595,41 @@ class MyClient(discord.Client):
                 except discord.Forbidden:
                     logger.warning(f"Could not DM {message.author} for current runs")
 
+        if message.content == '!cleanup' and message.author.id == COORDINATOR_ID:
+            if message.channel.id == AVAIL_CHANNEL_ID or message.channel.id == KEY_CHANNEL_ID:
+                try:
+                    # Purge both channels
+                    avail_channel = self.get_channel(AVAIL_CHANNEL_ID)
+                    key_channel = self.get_channel(KEY_CHANNEL_ID)
+                    avail_deleted = await avail_channel.purge()
+                    key_deleted = await key_channel.purge()
+                    logger.info("Cleanup: purged %d messages from AVAIL and %d from KEY channel.", len(avail_deleted), len(key_deleted))
+
+                    # Reset all state except raiders
+                    self.schedules = {}
+                    self.availability = {GREEN: [], YELLOW: [], RED: []}
+                    self.availability_message_id = None
+                    self.dm_map = {}
+                    self.dm_timestamps = {}
+                    for raider in self.raiders.values():
+                        raider.current_runs = []
+                        raider.denied_runs = []
+
+                    save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
+                    logger.info("Cleanup: state reset complete. Raiders preserved: %d", len(self.raiders))
+
+                    # Confirm in whichever channel the command was issued
+                    await message.channel.send("✅ Cleanup complete. Both channels have been purged and all state (except raiders) has been reset.")
+                except discord.Forbidden:
+                    logger.warning("Cleanup: missing permissions to purge one or both channels.")
+                    await message.channel.send("❌ Missing permissions to purge one or both channels.")
+                except Exception as exc:
+                    logger.exception("Cleanup: unexpected error: %s", exc)
+                    await message.channel.send("❌ An unexpected error occurred during cleanup.")
+            else:
+                await message.channel.send("❌ `!cleanup` must be used in the availability or key channel.")
+            return
+
         if message.channel.id == AVAIL_CHANNEL_ID or message.channel.id == KEY_CHANNEL_ID:
             if message.content == '!avail' and message.author.id == COORDINATOR_ID and message.channel.id == AVAIL_CHANNEL_ID:
                 self.reset_week()
@@ -606,7 +646,7 @@ class MyClient(discord.Client):
                     try:
                         view = KeyRequestView(timeout=300)  # 5 minutes
                         await message.author.send(
-                            "Request a key: Select dungeon, level, start time, and end time.",
+                            "Request a key: Select Level, Date, Time and How many Keys you are wanting to do.",
                             view=view
                         )
                         await view.wait()
@@ -747,7 +787,7 @@ class MyClient(discord.Client):
                 raider = self.raiders[user.id]
                 schedule.raider_signup(raider)
                 raider.add_run(schedule)
-                await reaction.message.edit(content=schedule.send_message())
+                await reaction.message.edit(content=dedent(schedule.send_message()))
                 await self.message_user(raider, reaction.emoji, schedule)
                 if schedule.is_filled():
                     await self.notify_schedule(schedule)
@@ -761,7 +801,7 @@ class MyClient(discord.Client):
                 raider.remove_run(schedule)
                 if schedule.is_filled() != fill_status:
                     await self.notify_schedule(schedule)
-                await reaction.message.edit(content=schedule.send_message())
+                await reaction.message.edit(content=dedent(schedule.send_message()))
                 await self.message_user(raider, reaction.emoji, schedule)
                 save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
                 logger.info("%s removed from schedule %s", user, reaction.message.id)
@@ -780,7 +820,8 @@ class MyClient(discord.Client):
                     await self.notify_schedule(schedule)
                 await self.message_user(raider, reaction.emoji, schedule)
                 message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_id)
-                await message.edit(content=schedule.send_message())
+                await message.edit(content=dedent(schedule.send_message()))
+                logger.info("%s signed up for schedule %s via DM", user, schedule)
             elif reaction.emoji == '❌':
                 schedule_id = self.dm_map[reaction.message.channel.id][reaction.message.id]
                 raider = self.raiders[user.id]
@@ -792,10 +833,10 @@ class MyClient(discord.Client):
                     await self.notify_schedule(schedule)
                 await self.message_user(raider, reaction.emoji, schedule)
                 message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_id)
-                await message.edit(content=schedule.send_message())
+                await message.edit(content=dedent(schedule.send_message()))
+                logger.info("%s denied schedule %s via DM", user, schedule)
             
             save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
-            logger.info("%s signed up for schedule %s via DM", user, schedule)
 
 
 

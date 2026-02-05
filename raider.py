@@ -46,10 +46,24 @@ class Raider:
     
     def get_current_runs(self) -> str:
         """Return a string representation of the raider's current runs (only filled)."""
-        return "Your current scheduled runs for the week that are filled are the following: \n" + '\n'.join([
-            f"Day: {run.date_scheduled.strftime('%A')} Start Time: {run.start_time.strftime('%H:%M')} Level: {run.level}"
-            for run in self.current_runs if run.is_filled()
-        ])
+        
+        filled_runs = [run for run in self.current_runs if run.is_filled()]
+        non_filled = [run for run in self.current_runs if not run.is_filled()]
+        
+        runs = ""
+        
+        if len(filled_runs) > 0:
+            runs += "Your current scheduled runs for the week that are filled are the following: \n" + '\n'.join([
+                f"Day: {run.date_scheduled.strftime('%A')} Start Time: {run.start_time.strftime('%H:%M')} Level: {run.level}"
+                for run in self.current_runs if run.is_filled()
+            ])
+        if len(non_filled):
+            runs += "Your current scheduled runs for the week that are not filled yet are the following: \n" + '\n'.join([
+                f"Day: {run.date_scheduled.strftime('%A')} Start Time: {run.start_time.strftime('%H:%M')} Level: {run.level}"
+                for run in self.current_runs if not run.is_filled()
+            ])
+        
+        return runs
 
     def __eq__(self, other) -> bool:
         """Check equality based on id, class, and roles."""

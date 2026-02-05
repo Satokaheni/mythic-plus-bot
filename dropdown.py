@@ -2,10 +2,12 @@
 
 from datetime import datetime, timedelta
 from typing import Optional
-
+from logging import getLogger
 import discord
 
 from utils import ROLES_DICT
+
+logger = getLogger('discord')
 
 # ---------------------------------
 # Dropdown For WoW Class and Roles
@@ -203,10 +205,13 @@ class WoWDaySelect(discord.ui.Select):
 class WoWTimeRangeSelect(discord.ui.Select):
     """Dropdown select for choosing start time for key request (12-hour am/pm format)."""
     def __init__(self):
-        times = []
-        for hour in range(1, 13):
-            times.append(f"{hour}:00 AM")
-            times.append(f"{hour}:00 PM")
+        times, am, pm = [], [], []
+        for hour in range(1, 12):
+            am.append(f"{hour}:00 AM")
+            pm.append(f"{hour}:00 PM")
+        am.insert(0, "12:00 AM")
+        pm.insert(0, "12:00 PM")
+        times = am + pm
         options = [discord.SelectOption(label=t, value=t) for t in times]
         super().__init__(
             placeholder="Choose start time (am/pm)",
@@ -262,6 +267,7 @@ class KeyRequestSubmitButton(discord.ui.Button):
         view = self.view
         # Validate selections
         if not (view.selected_day and view.run_type and view.selected_level and view.selected_start_time):
+            logger.info(f"Selected Day: {view.selected_day} Run Type: {view.run_type} Level: {view.selected_level} Time: {view.selected_start_time}")
             await interaction.response.send_message("Please select all options before submitting.", ephemeral=True)
             return
 
@@ -286,7 +292,6 @@ class KeyRequestView(discord.ui.View):
     def __init__(self, timeout: int = 300) -> None:  # 5 minutes timeout
         super().__init__(timeout=timeout)
         # attributes to hold the user's choices
-        self.selected_dungeon: Optional[str] = None
         self.selected_level: Optional[str] = None
         self.selected_day: Optional[datetime] = None
         self.selected_start_time: Optional[datetime] = None  # now datetime
