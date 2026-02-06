@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta
 from typing import Optional, TYPE_CHECKING
 from logging import getLogger
+from textwrap import dedent
 import discord
 
 from utils import ROLES_DICT, save_state
@@ -52,7 +53,7 @@ class ScheduleButtonView(discord.ui.View):
             try:
                 # Send registration form via DM
                 selection_view = WoWSelectionView(timeout=180)  # 3 minutes timeout
-                await user.send(
+                dm_message = await user.send(
                     "👋 Welcome! Before you can sign up for runs, please choose your **World of Warcraft class** and **roles**:",
                     view=selection_view
                 )
@@ -90,7 +91,7 @@ class ScheduleButtonView(discord.ui.View):
                     raider.add_run(schedule)
                     
                     # Update the message with new embed and view
-                    embed, view, content = schedule.send_message(bot.role_mentions)
+                    embed, view, content = schedule.send_message(bot.role_mentions, bot)
                     await interaction.message.edit(content=content if content else None, embed=embed, view=view)
                     
                     await bot.message_user(raider, '✅', schedule)
@@ -131,7 +132,7 @@ class ScheduleButtonView(discord.ui.View):
             raider.add_run(schedule)
             
             # Update the message with new embed and view
-            embed, view, content = schedule.send_message(bot.role_mentions)
+            embed, view, content = schedule.send_message(bot.role_mentions, bot)
             await interaction.message.edit(content=content if content else None, embed=embed, view=view)
             
             await bot.message_user(raider, '✅', schedule)
@@ -178,7 +179,7 @@ class ScheduleButtonView(discord.ui.View):
                 await bot.notify_schedule(schedule)
             
             # Update the message with new embed and view
-            embed, view, content = schedule.send_message(bot.role_mentions)
+            embed, view, content = schedule.send_message(bot.role_mentions, bot)
             await interaction.message.edit(content=content if content else None, embed=embed, view=view)
             
             await bot.message_user(raider, '❌', schedule)
