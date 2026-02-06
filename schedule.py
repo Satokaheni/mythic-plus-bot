@@ -158,3 +158,6 @@ class Schedule:
     def __hash__(self) -> int:
         """Return hash based on level, date, and start time for use in sets and dicts."""
         return hash((self.level, self.date_scheduled, self.start_time))
+
+    def __str__(self) -> str:
+        return f"{self.level}, {self.date_scheduled}, {self.members}"

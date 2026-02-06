@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from typing import Dict, Tuple
 from textwrap import dedent
 
-from dropdown import WoWSelectionView, KeyRequestView
+from views import WoWSelectionView, KeyRequestView
 from raider import Raider
 from schedule import Schedule
 from utils import (
@@ -599,6 +599,11 @@ class MyClient(discord.Client):
                     )
                 except discord.Forbidden:
                     logger.warning(f"Could not DM {message.author} for current runs")
+                    
+                try:
+                    await message.delete()
+                except discord.Forbidden:
+                    logger.warning(f"Could not delete !keys commands from {message.author}")
 
         if message.content == '!cleanup' and message.author.id == COORDINATOR_ID:
             if message.channel.id == AVAIL_CHANNEL_ID or message.channel.id == KEY_CHANNEL_ID:
@@ -616,9 +621,9 @@ class MyClient(discord.Client):
                     self.availability_message_id = None
                     self.dm_map = {}
                     self.dm_timestamps = {}
-                    for raider in self.raiders.values():
-                        raider.current_runs = []
-                        raider.denied_runs = []
+                    for raider in self.raiders:
+                        self.raiders[raider].current_runs = []
+                        self.raiders[raider].denied_runs = []
 
                     save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
                     logger.info("Cleanup: state reset complete. Raiders preserved: %d", len(self.raiders))
@@ -641,99 +646,177 @@ class MyClient(discord.Client):
                 date_start = datetime.now(timezone.utc)
                 date_end = (date_start + timedelta(days=7)).timestamp()
                 channel = self.get_channel(AVAIL_CHANNEL_ID)
-                message = await channel.send(dedent(AVAILABILITY_MESSAGE(date_start.timestamp(), date_end, self.get_guild(GUILD_ID).get_role(MYTHIC_PLUS_ID).mention)))
-                self.availability_message_id = message.id
-                await message.add_reaction(GREEN)
-                await message.add_reaction(YELLOW)
-                await message.add_reaction(RED)
+                msg = await channel.send(dedent(AVAILABILITY_MESSAGE(date_start.timestamp(), date_end, self.get_guild(GUILD_ID).get_role(MYTHIC_PLUS_ID).mention)))
+                self.availability_message_id = msg.id
+                await msg.add_reaction(GREEN)
+                await msg.add_reaction(YELLOW)
+                await msg.add_reaction(RED)
+
+                try:
+                    await message.delete()
+                except discord.Forbidden:
+                    logger.warning(f"Could not delete !avail commands from {message.author}")
+                
             elif message.content == '!key' and message.channel.id == KEY_CHANNEL_ID:
-                if message.author.id in self.raiders:
+                # Check if user is a raider
+                if message.author.id not in self.raiders:
                     try:
-                        view = KeyRequestView(timeout=300)  # 5 minutes
+                        # User is not a raider, prompt them to select class/roles first
+                        selection_view = WoWSelectionView(timeout=180)  # 3 minutes timeout
                         await message.author.send(
-                            "Request a key: Select Level, Date, Time and How many Keys you are wanting to do.",
-                            view=view
+                            "Before scheduling a key, please choose your **World of Warcraft class** and **roles**:",
+                            view=selection_view
                         )
-                        await view.wait()
-                        # After wait, selections are on view if submitted
-                        if view.selected_level and view.selected_day and view.selected_start_time and view.run_type:
-                            logger.info(f"Key request from {message.author}: Day={view.selected_day}, {view.selected_level}, {view.selected_start_time.strftime('%H:%M')}, {view.run_type}")
-                            # Check for existing schedule at same date and time
-                            existing_schedule, existing_schedule_id = None, None
-                            for sched_id, sched in self.schedules.items():
-                                if sched.date_scheduled == view.selected_day and sched.start_time.time() == view.selected_start_time.time():
-                                    existing_schedule = sched
-                                    existing_schedule_id = sched_id
-                                    break
-                            if existing_schedule and sum(role in existing_schedule.missing for role in self.raiders[message.author.id].roles):
-                                # Ask user if they want to join existing schedule
-                                dm = await message.author.send(
-                                    f"A run already exists at this time (Level {existing_schedule.level}). Would you like to join that run instead?\nReact with ✅ to join, or ❌ to list your key request.")
-                                await dm.add_reaction('✅')
-                                await dm.add_reaction('❌')
-                                
-                                def check(reaction, user):
-                                    return user == message.author and str(reaction.emoji) in ['✅', '❌'] and reaction.message.id == dm.id
-                                try:
-                                    reaction, _ = await self.wait_for('reaction_add', timeout=120.0, check=check)
-                                    if str(reaction.emoji) == '✅':
-                                        existing_schedule.raider_signup(self.raiders[message.author.id])
-                                        self.raiders[message.author.id].add_run(existing_schedule)
-                                        await message.author.send(f"You have been added to the existing run on {existing_schedule.date_scheduled} at {existing_schedule.start_time.strftime('%I:%M %p')}.")
-                                        # Optionally notify if filled
-                                        if existing_schedule.is_filled():
-                                            await self.notify_schedule(existing_schedule)
-                                        # Update the schedule message in channel
-                                        msg = await self.get_channel(KEY_CHANNEL_ID).fetch_message(existing_schedule_id)
-                                        await msg.edit(content=existing_schedule.send_message())
-                                        save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
-                                    else:
-                                        schedule = Schedule(
-                                            raider_scheduled=self.raiders[message.author.id],
-                                            level=view.selected_level,
-                                            date_scheduled=view.selected_day,
-                                            start_time=view.selected_start_time,
-                                        )
-                                        message = await self.get_channel(KEY_CHANNEL_ID).send(dedent(schedule.send_message()))
-                                        await message.add_reaction('✅')  # Confirm attendance
-                                        await message.add_reaction('❌')  # Remove attendance
-
-                                        self.schedules[message.id] = schedule
-                                        save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
-                                        # Start background task to fill remaining spots from availability
-                                        self.loop.create_task(self.fill_remaining_spots(message.id))
-                                except asyncio.TimeoutError:
-                                    await message.author.send("No response received. Key request cancelled.")
-                                return
-                            # No existing schedule, create new
-                            schedule = Schedule(
-                                raider_scheduled=self.raiders[message.author.id],
-                                level=view.selected_level,
-                                date_scheduled=view.selected_day,
-                                start_time=view.selected_start_time,
-                            )
-                            message = await self.get_channel(KEY_CHANNEL_ID).send(dedent(schedule.send_message()))
-                            await message.add_reaction('✅')  # Confirm attendance
-                            await message.add_reaction('❌')  # Remove attendance
-
-                            self.schedules[message.id] = schedule
+                        
+                        # Wait for the user to click Submit (or timeout)
+                        await selection_view.wait()
+                        
+                        # Build roles list from selections
+                        roles = []
+                        if selection_view.selected_primary:
+                            roles.append(selection_view.selected_primary)
+                        if selection_view.selected_secondary and selection_view.selected_secondary != selection_view.selected_primary:
+                            roles.append(selection_view.selected_secondary)
+                        
+                        # If user selected a class and at least one role, create a Raider
+                        if selection_view.selected_class and roles:
+                            self.raiders[message.author.id] = Raider(message.author, selection_view.selected_class, roles, selection_view.selected_timezone)
+                            logger.info(f"New raider from !key command: {message.author}: class={selection_view.selected_class} roles={roles} timezone={selection_view.selected_timezone}")
                             save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
-                            # Start background task to fill remaining spots from availability
-                            self.loop.create_task(self.fill_remaining_spots(message.id))
                         else:
-                            logger.info(f"Key request timed out or cancelled for {message.author}")
+                            await message.author.send("Registration cancelled or incomplete. Please use !key again to try.")
+                            logger.info(f"No valid selection from {message.author} (timed out or incomplete)")
+                            return
                     except discord.Forbidden:
-                        logger.warning(f"Could not DM {message.author} for key request")
-                else:
-                    await message.channel.send(f"{message.author.mention}, you need to sign up first by reacting to the availability message.")
+                        logger.warning(f"Could not DM {message.author} for class/role selection")
+                        return
+                
+                # Now proceed with key request (user is guaranteed to be a raider at this point)
+                try:
+                    view = KeyRequestView(timeout=300)  # 5 minutes
+                    await message.author.send(
+                        "Request a key: Select Level, Date, Time and How many Keys you are wanting to do.",
+                        view=view
+                    )
+                    await view.wait()
+                    # After wait, selections are on view if submitted
+                    if view.selected_level and view.selected_day and view.selected_start_time and view.run_type:
+                        logger.info(f"Key request from {message.author}: Day={view.selected_day}, {view.selected_level}, {view.selected_start_time.strftime('%H:%M')}, {view.run_type}")
+                        # Check for existing schedule at same date and time
+                        existing_schedule, existing_schedule_id = None, None
+                        for sched_id, sched in self.schedules.items():
+                            if sched.date_scheduled == view.selected_day and sched.start_time.time() == view.selected_start_time.time():
+                                existing_schedule = sched
+                                existing_schedule_id = sched_id
+                                break
+                        if existing_schedule and sum(role in existing_schedule.missing for role in self.raiders[message.author.id].roles):
+                            # Ask user if they want to join existing schedule
+                            dm = await message.author.send(
+                                f"A run already exists at this time (Level {existing_schedule.level}). Would you like to join that run instead?\nReact with ✅ to join, or ❌ to list your key request.")
+                            await dm.add_reaction('✅')
+                            await dm.add_reaction('❌')
+                            
+                            def check(reaction, user):
+                                return user == message.author and str(reaction.emoji) in ['✅', '❌'] and reaction.message.id == dm.id
+                            try:
+                                reaction, _ = await self.wait_for('reaction_add', timeout=120.0, check=check)
+                                if str(reaction.emoji) == '✅':
+                                    existing_schedule.raider_signup(self.raiders[message.author.id])
+                                    self.raiders[message.author.id].add_run(existing_schedule)
+                                    await message.author.send(f"You have been added to the existing run on {existing_schedule.date_scheduled} at {existing_schedule.start_time.strftime('%I:%M %p')}.")
+                                    # Optionally notify if filled
+                                    if existing_schedule.is_filled():
+                                        await self.notify_schedule(existing_schedule)
+                                    # Update the schedule message in channel
+                                    msg = await self.get_channel(KEY_CHANNEL_ID).fetch_message(existing_schedule_id)
+                                    await msg.edit(content=existing_schedule.send_message())
+                                    save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
+                                else:
+                                    schedule = Schedule(
+                                        raider_scheduled=self.raiders[message.author.id],
+                                        level=view.selected_level,
+                                        date_scheduled=view.selected_day,
+                                        start_time=view.selected_start_time,
+                                    )
+                                    msg = await self.get_channel(KEY_CHANNEL_ID).send(dedent(schedule.send_message()))
+                                    await msg.add_reaction('✅')  # Confirm attendance
+                                    await msg.add_reaction('❌')  # Remove attendance
+
+                                    self.schedules[message.id] = schedule
+                                    self.raiders[message.author.id].add_run(schedule)
+                                    save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
+                                    # Start background task to fill remaining spots from availability
+                                    self.loop.create_task(self.fill_remaining_spots(message.id))
+                            except asyncio.TimeoutError:
+                                await message.author.send("No response received. Key request cancelled.")
+                            return
+                        # No existing schedule, create new
+                        schedule = Schedule(
+                            raider_scheduled=self.raiders[message.author.id],
+                            level=view.selected_level,
+                            date_scheduled=view.selected_day,
+                            start_time=view.selected_start_time,
+                        )
+                        msg = await self.get_channel(KEY_CHANNEL_ID).send(dedent(schedule.send_message()))
+                        await msg.add_reaction('✅')  # Confirm attendance
+                        await msg.add_reaction('❌')  # Remove attendance
+
+                        self.schedules[message.id] = schedule
+                        self.raiders[message.author.id].add_run(schedule)
+                        save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
+                        # Start background task to fill remaining spots from availability
+                        self.loop.create_task(self.fill_remaining_spots(message.id))
+                    else:
+                        logger.info(f"Key request timed out or cancelled for {message.author}")
+                except discord.Forbidden:
+                    logger.warning(f"Could not DM {message.author} for key request")
+            try:
+                await message.delete()
+            except discord.Forbidden:
+                logger.warning(f"Could not delete !key commands from {message.author}")
 
     # ---------------------------
     # Reaction Listener
     # ---------------------------
-    async def on_reaction_add(self, reaction: discord.Reaction, user: discord.Member):
+    async def on_reaction_add(self, reaction: discord.Reaction, user: discord.Member):        
         """Handle reaction additions for availability signup or schedule signup."""
+        
         if user.id == self.user.id:
             return
+        
+        logger.info(f"Reaction added: {user.display_name}, {reaction.emoji} Raider: {user.id in self.raiders} ID in schedules: {reaction.message.id in self.schedules}")
+        
+        if user.id not in self.raiders:
+            try:
+                # User is not a raider, prompt them to select class/roles first
+                selection_view = WoWSelectionView(timeout=180)  # 3 minutes timeout
+                await user.send(
+                    "Before scheduling a key, please choose your **World of Warcraft class** and **roles**:",
+                    view=selection_view
+                )
+                
+                # Wait for the user to click Submit (or timeout)
+                await selection_view.wait()
+                
+                # Build roles list from selections
+                roles = []
+                if selection_view.selected_primary:
+                    roles.append(selection_view.selected_primary)
+                if selection_view.selected_secondary and selection_view.selected_secondary != selection_view.selected_primary:
+                    roles.append(selection_view.selected_secondary)
+                
+                # If user selected a class and at least one role, create a Raider
+                if selection_view.selected_class and roles:
+                    self.raiders[user.id] = Raider(user, selection_view.selected_class, roles, selection_view.selected_timezone)
+                    logger.info(f"New raider from !key command: {user}: class={selection_view.selected_class} roles={roles} timezone={selection_view.selected_timezone}")
+                    save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
+                else:
+                    await user.send("Registration cancelled or incomplete. Please use !key again to try.")
+                    logger.info(f"No valid selection from {user} (timed out or incomplete)")
+                    return
+            except discord.Forbidden:
+                logger.warning(f"Could not DM {user} for class/role selection")
+                return
 
         if reaction.message.channel.id == AVAIL_CHANNEL_ID and reaction.message.id == self.availability_message_id and reaction.emoji in [GREEN, YELLOW, RED]:
             if user is None:
@@ -790,26 +873,29 @@ class MyClient(discord.Client):
             if reaction.emoji == '✅':
                 schedule = self.schedules[reaction.message.id]
                 raider = self.raiders[user.id]
-                schedule.raider_signup(raider)
-                raider.add_run(schedule)
-                await reaction.message.edit(content=dedent(schedule.send_message()))
-                await self.message_user(raider, reaction.emoji, schedule)
-                if schedule.is_filled():
-                    await self.notify_schedule(schedule)
-                save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
-                logger.info("%s signed up for schedule %s", user, reaction.message.id)
+                logger.info(f"Raider: {raider.name} Current Runs: {raider.current_runs} Schedule Members: {schedule.members}")
+                if raider.check_availability(schedule) and not schedule in raider.current_runs:
+                    schedule.raider_signup(raider)
+                    raider.add_run(schedule)
+                    await reaction.message.edit(content=dedent(schedule.send_message()))
+                    await self.message_user(raider, reaction.emoji, schedule)
+                    if schedule.is_filled():
+                        await self.notify_schedule(schedule)
+                    save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
+                    logger.info("%s signed up for schedule %s", user, reaction.message.id)
             elif reaction.emoji == '❌':
                 schedule = self.schedules[reaction.message.id]
                 raider = self.raiders[user.id]
-                fill_status = schedule.is_filled()
-                schedule.raider_remove(raider)
-                raider.remove_run(schedule)
-                if schedule.is_filled() != fill_status:
-                    await self.notify_schedule(schedule)
-                await reaction.message.edit(content=dedent(schedule.send_message()))
-                await self.message_user(raider, reaction.emoji, schedule)
-                save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
-                logger.info("%s removed from schedule %s", user, reaction.message.id)
+                if schedule in raider.current_runs:
+                    fill_status = schedule.is_filled()
+                    schedule.raider_remove(raider)
+                    raider.remove_run(schedule)
+                    if schedule.is_filled() != fill_status:
+                        await self.notify_schedule(schedule)
+                    await reaction.message.edit(content=dedent(schedule.send_message()))
+                    await self.message_user(raider, reaction.emoji, schedule)
+                    save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
+                    logger.info("%s removed from schedule %s", user, reaction.message.id)
 
         elif reaction.message.channel.id in self.dm_map and user.id in self.raiders:
             if reaction.emoji not in ['✅', '❌']:
@@ -819,27 +905,31 @@ class MyClient(discord.Client):
                 schedule_id = self.dm_map[reaction.message.channel.id][reaction.message.id]
                 raider = self.raiders[user.id]
                 schedule = self.schedules[schedule_id]
-                schedule.raider_signup(raider)
-                raider.add_run(schedule)
-                if schedule.is_filled():
-                    await self.notify_schedule(schedule)
-                await self.message_user(raider, reaction.emoji, schedule)
-                message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_id)
-                await message.edit(content=dedent(schedule.send_message()))
-                logger.info("%s signed up for schedule %s via DM", user, schedule)
+                if raider.check_availability(schedule) and not schedule in raider.current_runs:
+                    schedule.raider_signup(raider)
+                    raider.add_run(schedule)
+                    if schedule.is_filled():
+                        await self.notify_schedule(schedule)
+                    await self.message_user(raider, reaction.emoji, schedule)
+                    message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_id)
+                    await message.edit(content=dedent(schedule.send_message()))
+                    logger.info("%s signed up for schedule %s via DM", user, schedule)
             elif reaction.emoji == '❌':
                 schedule_id = self.dm_map[reaction.message.channel.id][reaction.message.id]
                 raider = self.raiders[user.id]
                 schedule = self.schedules[schedule_id]
-                fill_status = schedule.is_filled()
-                schedule.raider_remove(raider)
-                raider.remove_run(schedule)
-                if schedule.is_filled() != fill_status:
-                    await self.notify_schedule(schedule)
+                if schedule in raider.current_runs:
+                    fill_status = schedule.is_filled()
+                    schedule.raider_remove(raider)
+                    raider.remove_run(schedule)
+                    if schedule.is_filled() != fill_status:
+                        await self.notify_schedule(schedule)
                 await self.message_user(raider, reaction.emoji, schedule)
                 message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_id)
                 await message.edit(content=dedent(schedule.send_message()))
                 logger.info("%s denied schedule %s via DM", user, schedule)
+                del self.dm_map[reaction.message.channel.id][reaction.message.id]
+                del self.dm_timestamps[reaction.message.channel.id][reaction.message.id]
             
             save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
 

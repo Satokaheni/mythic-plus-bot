@@ -74,3 +74,6 @@ class Raider:
     def __hash__(self) -> int:
         """Return hash based on user_id for use in sets and dicts."""
         return hash(self.user_id)
+    
+    def __str__(self) -> str:
+        return f"{self.name}"
