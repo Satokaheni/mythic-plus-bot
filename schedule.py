@@ -8,26 +8,7 @@ import discord
 
 if TYPE_CHECKING:
     from discord import Interaction
-
-
-class ScheduleButtonView(discord.ui.View):
-    """View containing signup and removal buttons for a schedule."""
-    
-    def __init__(self, schedule: 'Schedule'):
-        super().__init__(timeout=None)  # Persistent view
-        self.schedule = schedule
-    
-    @discord.ui.button(label="Sign Up", style=discord.ButtonStyle.success, emoji="✅", custom_id="signup")
-    async def signup_button(self, interaction: 'Interaction', button: discord.ui.Button):
-        """Handle signup button click."""
-        # This will be handled by the bot's on_interaction event
-        await interaction.response.defer()
-    
-    @discord.ui.button(label="Remove", style=discord.ButtonStyle.danger, emoji="❌", custom_id="remove")
-    async def remove_button(self, interaction: 'Interaction', button: discord.ui.Button):
-        """Handle remove button click."""
-        # This will be handled by the bot's on_interaction event
-        await interaction.response.defer()
+    from bot import MyClient
 
 
 class Schedule:
@@ -76,15 +57,18 @@ class Schedule:
         if filled:
             self.team['fill'].remove(filled)
 
-    def send_message(self, role_mentions: dict = None) -> tuple[Embed, ScheduleButtonView, str]:
+    def send_message(self, role_mentions: dict = None, bot_client: 'MyClient' = None) -> tuple[Embed, 'discord.ui.View', str]:
         """Generate a Discord embed and button view for the schedule post.
         
         Args:
             role_mentions: Optional dict mapping role names to Discord role objects for mentions
+            bot_client: The bot client instance for handling button interactions
             
         Returns:
             Tuple of (embed, view, content) where content contains role pings if needed
         """
+        from views import ScheduleButtonView
+        
         # Create the embed with a title and color
         # Use different colors based on fill status
         if self.is_filled():
@@ -174,7 +158,7 @@ class Schedule:
         embed.set_footer(text="Click 'Sign Up' to confirm attendance • Click 'Remove' to remove yourself")
         
         # Create the button view
-        view = ScheduleButtonView(self)
+        view = ScheduleButtonView(self, bot_client) if bot_client else None
         
         # Generate content for role mentions if schedule is not full
         content = ""

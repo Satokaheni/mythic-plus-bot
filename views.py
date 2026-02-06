@@ -1,13 +1,194 @@
 """Discord UI components for WoW class/role and key request selections."""
 
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from logging import getLogger
 import discord
 
-from utils import ROLES_DICT
+from utils import ROLES_DICT, save_state
+
+if TYPE_CHECKING:
+    from schedule import Schedule
+    from bot import MyClient
+    from raider import Raider
 
 logger = getLogger('discord')
+
+# ---------------------------------
+# Schedule Button View
+# ---------------------------------
+
+class ScheduleButtonView(discord.ui.View):
+    """View containing signup and removal buttons for a schedule."""
+    
+    def __init__(self, schedule: 'Schedule', bot_client: 'MyClient'):
+        super().__init__(timeout=None)  # Persistent view
+        self.schedule = schedule
+        self.bot_client = bot_client
+    
+    @discord.ui.button(label="Sign Up", style=discord.ButtonStyle.success, emoji="✅", custom_id="signup")
+    async def signup_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Handle signup button click."""
+        from views import WoWSelectionView
+        from raider import Raider
+        
+        user = interaction.user
+        schedule = self.schedule
+        bot = self.bot_client
+        
+        # Message must be a schedule
+        if interaction.message.id not in bot.schedules:
+            await interaction.response.send_message("❌ This is not a valid schedule.", ephemeral=True)
+            return
+        
+        # Handle unregistered users - prompt them to register
+        if user.id not in bot.raiders:
+            # Respond to the interaction first to prevent timeout
+            await interaction.response.send_message(
+                "📝 You're not registered yet! Please check your DMs to select your class and roles.",
+                ephemeral=True
+            )
+            
+            try:
+                # Send registration form via DM
+                selection_view = WoWSelectionView(timeout=180)  # 3 minutes timeout
+                await user.send(
+                    "👋 Welcome! Before you can sign up for runs, please choose your **World of Warcraft class** and **roles**:",
+                    view=selection_view
+                )
+                
+                # Wait for the user to complete the form
+                await selection_view.wait()
+                
+                # Build roles list from selections
+                roles = []
+                if selection_view.selected_primary:
+                    roles.append(selection_view.selected_primary)
+                if selection_view.selected_secondary and selection_view.selected_secondary != selection_view.selected_primary:
+                    roles.append(selection_view.selected_secondary)
+                
+                # Validate that user completed the form
+                if not selection_view.selected_class or not roles or not selection_view.selected_timezone:
+                    await user.send("❌ Registration incomplete. Please try clicking the button again and fill out all fields.")
+                    return
+                
+                # Create the new raider
+                bot.raiders[user.id] = Raider(
+                    user, 
+                    selection_view.selected_class, 
+                    roles, 
+                    selection_view.selected_timezone
+                )
+                
+                logger.info(f"New raider registered via button: {user.display_name}: class={selection_view.selected_class} roles={roles} timezone={selection_view.selected_timezone}")
+                
+                # Now process the signup action
+                raider = bot.raiders[user.id]
+                
+                if raider.check_availability(schedule) and schedule not in raider.current_runs:
+                    schedule.raider_signup(raider)
+                    raider.add_run(schedule)
+                    
+                    # Update the message with new embed and view
+                    embed, view, content = schedule.send_message(bot.role_mentions)
+                    await interaction.message.edit(content=content if content else None, embed=embed, view=view)
+                    
+                    await bot.message_user(raider, '✅', schedule)
+                    
+                    if schedule.is_filled():
+                        await bot.notify_schedule(schedule)
+                    
+                    save_state(bot.raiders, bot.schedules, bot.availability, bot.availability_message_id, bot.dm_map, bot.dm_timestamps)
+                    logger.info("%s signed up for schedule %s", user, interaction.message.id)
+                    
+                    await user.send("✅ Registration complete! You've been signed up for the run.")
+                else:
+                    await user.send("❌ Registration complete, but you're already signed up or unavailable for this run.")
+                
+            except discord.Forbidden:
+                logger.warning(f"Could not DM {user} for registration")
+                try:
+                    await interaction.followup.send(
+                        "❌ I couldn't send you a DM. Please enable DMs from server members and try again.",
+                        ephemeral=True
+                    )
+                except:
+                    pass
+            except Exception as e:
+                logger.error(f"Error during button registration for {user}: {e}")
+                try:
+                    await user.send(f"❌ An error occurred during registration: {e}")
+                except:
+                    pass
+            
+            return
+        
+        # User is registered, process normally
+        raider = bot.raiders[user.id]
+        
+        if raider.check_availability(schedule) and schedule not in raider.current_runs:
+            schedule.raider_signup(raider)
+            raider.add_run(schedule)
+            
+            # Update the message with new embed and view
+            embed, view, content = schedule.send_message(bot.role_mentions)
+            await interaction.message.edit(content=content if content else None, embed=embed, view=view)
+            
+            await bot.message_user(raider, '✅', schedule)
+            
+            if schedule.is_filled():
+                await bot.notify_schedule(schedule)
+            
+            save_state(bot.raiders, bot.schedules, bot.availability, bot.availability_message_id, bot.dm_map, bot.dm_timestamps)
+            logger.info("%s signed up for schedule %s", user, interaction.message.id)
+            
+            await interaction.response.send_message("✅ You've been signed up for this run!", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ You're already signed up or unavailable for this run.", ephemeral=True)
+    
+    @discord.ui.button(label="Remove", style=discord.ButtonStyle.danger, emoji="❌", custom_id="remove")
+    async def remove_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Handle remove button click."""
+        user = interaction.user
+        schedule = self.schedule
+        bot = self.bot_client
+        
+        # Message must be a schedule
+        if interaction.message.id not in bot.schedules:
+            await interaction.response.send_message("❌ This is not a valid schedule.", ephemeral=True)
+            return
+        
+        # Handle unregistered users
+        if user.id not in bot.raiders:
+            await interaction.response.send_message(
+                "📝 You're not registered yet, so you can't be signed up for this run.",
+                ephemeral=True
+            )
+            return
+        
+        # User is registered, process normally
+        raider = bot.raiders[user.id]
+        
+        if schedule in raider.current_runs:
+            fill_status = schedule.is_filled()
+            schedule.raider_remove(raider)
+            raider.remove_run(schedule)
+            
+            if schedule.is_filled() != fill_status:
+                await bot.notify_schedule(schedule)
+            
+            # Update the message with new embed and view
+            embed, view, content = schedule.send_message(bot.role_mentions)
+            await interaction.message.edit(content=content if content else None, embed=embed, view=view)
+            
+            await bot.message_user(raider, '❌', schedule)
+            
+            save_state(bot.raiders, bot.schedules, bot.availability, bot.availability_message_id, bot.dm_map, bot.dm_timestamps)
+            logger.info("%s removed from schedule %s", user, interaction.message.id)
+            
+            await interaction.response.send_message("❌ You've been removed from this run.", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ You're not signed up for this run.", ephemeral=True)
 
 # ---------------------------------
 # Dropdown For WoW Class and Roles
