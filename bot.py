@@ -73,22 +73,6 @@ class MyClient(discord.Client):
     # User Defined Functions
     # ---------------------------
 
-    def reset_week(self):
-        """
-            Reset the availability lists for all colors.
-            Resets each raider's current and denied runs for the new week.
-        """
-        
-        self.availability = {
-            GREEN: [],
-            YELLOW: [],
-            RED: []
-        }
-
-        for raider in self.raiders.values():
-            raider.current_runs = []
-            raider.denied_runs = []
-
     async def message_user(self, raider: Raider, emoji: str, schedule: Schedule):
         """Send a direct message to a raider based on their availability reaction."""
         try:
@@ -120,11 +104,14 @@ class MyClient(discord.Client):
         message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_post)
         await message.delete()
 
-        new_message = schedule.send_message()
-        for role in schedule.missing:
-            new_message += f"\n{self.role_mentions[role].mention} needed!"
-
-        new_message = await self.get_channel(KEY_CHANNEL_ID).send(dedent(new_message))
+        embed, view, content = schedule.send_message(self.role_mentions)
+        
+        # Post with role mentions if there are missing roles
+        new_message = await self.get_channel(KEY_CHANNEL_ID).send(
+            content=content if content else None,
+            embed=embed,
+            view=view
+        )
 
         return new_message.id, schedule
 
@@ -642,7 +629,6 @@ class MyClient(discord.Client):
 
         if message.channel.id == AVAIL_CHANNEL_ID or message.channel.id == KEY_CHANNEL_ID:
             if message.content == '!avail' and message.author.id == COORDINATOR_ID and message.channel.id == AVAIL_CHANNEL_ID:
-                self.reset_week()
                 date_start = datetime.now(timezone.utc)
                 date_end = (date_start + timedelta(days=7)).timestamp()
                 channel = self.get_channel(AVAIL_CHANNEL_ID)
@@ -729,7 +715,8 @@ class MyClient(discord.Client):
                                         await self.notify_schedule(existing_schedule)
                                     # Update the schedule message in channel
                                     msg = await self.get_channel(KEY_CHANNEL_ID).fetch_message(existing_schedule_id)
-                                    await msg.edit(content=existing_schedule.send_message())
+                                    embed, view, content = existing_schedule.send_message(self.role_mentions)
+                                    await msg.edit(content=content if content else None, embed=embed, view=view)
                                     save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
                                 else:
                                     schedule = Schedule(
@@ -738,11 +725,14 @@ class MyClient(discord.Client):
                                         date_scheduled=view.selected_day,
                                         start_time=view.selected_start_time,
                                     )
-                                    msg = await self.get_channel(KEY_CHANNEL_ID).send(dedent(schedule.send_message()))
-                                    await msg.add_reaction('✅')  # Confirm attendance
-                                    await msg.add_reaction('❌')  # Remove attendance
+                                    embed, view_buttons, content = schedule.send_message(self.role_mentions)
+                                    msg = await self.get_channel(KEY_CHANNEL_ID).send(
+                                        content=content if content else None,
+                                        embed=embed,
+                                        view=view_buttons
+                                    )
 
-                                    self.schedules[message.id] = schedule
+                                    self.schedules[msg.id] = schedule
                                     self.raiders[message.author.id].add_run(schedule)
                                     save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
                                     # Start background task to fill remaining spots from availability
@@ -757,11 +747,14 @@ class MyClient(discord.Client):
                             date_scheduled=view.selected_day,
                             start_time=view.selected_start_time,
                         )
-                        msg = await self.get_channel(KEY_CHANNEL_ID).send(dedent(schedule.send_message()))
-                        await msg.add_reaction('✅')  # Confirm attendance
-                        await msg.add_reaction('❌')  # Remove attendance
+                        embed, view_buttons, content = schedule.send_message(self.role_mentions)
+                        msg = await self.get_channel(KEY_CHANNEL_ID).send(
+                            content=content if content else None,
+                            embed=embed,
+                            view=view_buttons
+                        )
 
-                        self.schedules[message.id] = schedule
+                        self.schedules[msg.id] = schedule
                         self.raiders[message.author.id].add_run(schedule)
                         save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
                         # Start background task to fill remaining spots from availability
@@ -785,38 +778,6 @@ class MyClient(discord.Client):
             return
         
         logger.info(f"Reaction added: {user.display_name}, {reaction.emoji} Raider: {user.id in self.raiders} ID in schedules: {reaction.message.id in self.schedules}")
-        
-        if user.id not in self.raiders:
-            try:
-                # User is not a raider, prompt them to select class/roles first
-                selection_view = WoWSelectionView(timeout=180)  # 3 minutes timeout
-                await user.send(
-                    "Before scheduling a key, please choose your **World of Warcraft class** and **roles**:",
-                    view=selection_view
-                )
-                
-                # Wait for the user to click Submit (or timeout)
-                await selection_view.wait()
-                
-                # Build roles list from selections
-                roles = []
-                if selection_view.selected_primary:
-                    roles.append(selection_view.selected_primary)
-                if selection_view.selected_secondary and selection_view.selected_secondary != selection_view.selected_primary:
-                    roles.append(selection_view.selected_secondary)
-                
-                # If user selected a class and at least one role, create a Raider
-                if selection_view.selected_class and roles:
-                    self.raiders[user.id] = Raider(user, selection_view.selected_class, roles, selection_view.selected_timezone)
-                    logger.info(f"New raider from !key command: {user}: class={selection_view.selected_class} roles={roles} timezone={selection_view.selected_timezone}")
-                    save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
-                else:
-                    await user.send("Registration cancelled or incomplete. Please use !key again to try.")
-                    logger.info(f"No valid selection from {user} (timed out or incomplete)")
-                    return
-            except discord.Forbidden:
-                logger.warning(f"Could not DM {user} for class/role selection")
-                return
 
         if reaction.message.channel.id == AVAIL_CHANNEL_ID and reaction.message.id == self.availability_message_id and reaction.emoji in [GREEN, YELLOW, RED]:
             if user is None:
@@ -866,37 +827,8 @@ class MyClient(discord.Client):
                 except discord.Forbidden:
                     logger.warning(f"Could not DM {user}")
 
-        elif reaction.message.channel.id == KEY_CHANNEL_ID and reaction.message.id in self.schedules and user.id in self.raiders:
-            if reaction.emoji not in ['✅', '❌']:
-                return
-            
-            if reaction.emoji == '✅':
-                schedule = self.schedules[reaction.message.id]
-                raider = self.raiders[user.id]
-                logger.info(f"Raider: {raider.name} Current Runs: {raider.current_runs} Schedule Members: {schedule.members}")
-                if raider.check_availability(schedule) and not schedule in raider.current_runs:
-                    schedule.raider_signup(raider)
-                    raider.add_run(schedule)
-                    await reaction.message.edit(content=dedent(schedule.send_message()))
-                    await self.message_user(raider, reaction.emoji, schedule)
-                    if schedule.is_filled():
-                        await self.notify_schedule(schedule)
-                    save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
-                    logger.info("%s signed up for schedule %s", user, reaction.message.id)
-            elif reaction.emoji == '❌':
-                schedule = self.schedules[reaction.message.id]
-                raider = self.raiders[user.id]
-                if schedule in raider.current_runs:
-                    fill_status = schedule.is_filled()
-                    schedule.raider_remove(raider)
-                    raider.remove_run(schedule)
-                    if schedule.is_filled() != fill_status:
-                        await self.notify_schedule(schedule)
-                    await reaction.message.edit(content=dedent(schedule.send_message()))
-                    await self.message_user(raider, reaction.emoji, schedule)
-                    save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
-                    logger.info("%s removed from schedule %s", user, reaction.message.id)
-
+        # DM reactions for schedule signup/removal
+        # Note: Main channel uses buttons (handled in on_interaction), not reactions
         elif reaction.message.channel.id in self.dm_map and user.id in self.raiders:
             if reaction.emoji not in ['✅', '❌']:
                 return
@@ -912,7 +844,8 @@ class MyClient(discord.Client):
                         await self.notify_schedule(schedule)
                     await self.message_user(raider, reaction.emoji, schedule)
                     message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_id)
-                    await message.edit(content=dedent(schedule.send_message()))
+                    embed, view, content = schedule.send_message(self.role_mentions)
+                    await message.edit(content=content if content else None, embed=embed, view=view)
                     logger.info("%s signed up for schedule %s via DM", user, schedule)
             elif reaction.emoji == '❌':
                 schedule_id = self.dm_map[reaction.message.channel.id][reaction.message.id]
@@ -926,14 +859,177 @@ class MyClient(discord.Client):
                         await self.notify_schedule(schedule)
                 await self.message_user(raider, reaction.emoji, schedule)
                 message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_id)
-                await message.edit(content=dedent(schedule.send_message()))
+                embed, view, content = schedule.send_message(self.role_mentions)
+                await message.edit(content=content if content else None, embed=embed, view=view)
                 logger.info("%s denied schedule %s via DM", user, schedule)
                 del self.dm_map[reaction.message.channel.id][reaction.message.id]
                 del self.dm_timestamps[reaction.message.channel.id][reaction.message.id]
             
             save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
 
+    # ---------------------------
+    # Interaction Listener
+    # ---------------------------
 
+    async def on_interaction(self, interaction: discord.Interaction):
+        """Handle button interactions for schedule signup and removal in the main channel."""
+        # Only process button interactions
+        if interaction.type != discord.InteractionType.component:
+            return
+        
+        # Check if this is a schedule button interaction
+        if interaction.data.get('custom_id') not in ['signup', 'remove']:
+            return
+        
+        # Only handle interactions in the main KEY_CHANNEL
+        if interaction.channel_id != KEY_CHANNEL_ID:
+            return
+        
+        user = interaction.user
+        
+        # Message must be a schedule
+        if interaction.message.id not in self.schedules:
+            await interaction.response.send_message("❌ This is not a valid schedule.", ephemeral=True)
+            return
+        
+        schedule = self.schedules[interaction.message.id]
+        
+        # Handle unregistered users - prompt them to register
+        if user.id not in self.raiders:
+            # Respond to the interaction first to prevent timeout
+            await interaction.response.send_message(
+                "📝 You're not registered yet! Please check your DMs to select your class and roles.",
+                ephemeral=True
+            )
+            
+            try:
+                # Send registration form via DM
+                selection_view = WoWSelectionView(timeout=180)  # 3 minutes timeout
+                dm_message = await user.send(
+                    "👋 Welcome! Before you can sign up for runs, please choose your **World of Warcraft class** and **roles**:",
+                    view=selection_view
+                )
+                
+                # Wait for the user to complete the form
+                await selection_view.wait()
+                
+                # Build roles list from selections
+                roles = []
+                if selection_view.selected_primary:
+                    roles.append(selection_view.selected_primary)
+                if selection_view.selected_secondary and selection_view.selected_secondary != selection_view.selected_primary:
+                    roles.append(selection_view.selected_secondary)
+                
+                # Validate that user completed the form
+                if not selection_view.selected_class or not roles or not selection_view.selected_timezone:
+                    await user.send("❌ Registration incomplete. Please try clicking the button again and fill out all fields.")
+                    return
+                
+                # Create the new raider
+                self.raiders[user.id] = Raider(
+                    user, 
+                    selection_view.selected_class, 
+                    roles, 
+                    selection_view.selected_timezone
+                )
+                
+                logger.info(f"New raider registered via button: {user.display_name}: class={selection_view.selected_class} roles={roles} timezone={selection_view.selected_timezone}")
+                
+                # Now process the original button action
+                raider = self.raiders[user.id]
+                
+                # Handle signup button
+                if interaction.data.get('custom_id') == 'signup':
+                    if raider.check_availability(schedule) and schedule not in raider.current_runs:
+                        schedule.raider_signup(raider)
+                        raider.add_run(schedule)
+                        
+                        # Update the message with new embed and view
+                        embed, view, content = schedule.send_message(self.role_mentions)
+                        await interaction.message.edit(content=content if content else None, embed=embed, view=view)
+                        
+                        await self.message_user(raider, '✅', schedule)
+                        
+                        if schedule.is_filled():
+                            await self.notify_schedule(schedule)
+                        
+                        save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
+                        logger.info("%s signed up for schedule %s", user, interaction.message.id)
+                        
+                        await user.send("✅ Registration complete! You've been signed up for the run.")
+                    else:
+                        await user.send("❌ Registration complete, but you're already signed up or unavailable for this run.")
+                
+                # Remove button doesn't make sense for new users
+                elif interaction.data.get('custom_id') == 'remove':
+                    await user.send("✅ Registration complete! However, you weren't signed up for this run, so there's nothing to remove.")
+                
+            except discord.Forbidden:
+                logger.warning(f"Could not DM {user} for registration")
+                # Try to follow up on the original interaction
+                try:
+                    await interaction.followup.send(
+                        "❌ I couldn't send you a DM. Please enable DMs from server members and try again.",
+                        ephemeral=True
+                    )
+                except:
+                    pass
+            except Exception as e:
+                logger.error(f"Error during button registration for {user}: {e}")
+                try:
+                    await user.send(f"❌ An error occurred during registration: {e}")
+                except:
+                    pass
+            
+            return
+        
+        # User is registered, process normally
+        raider = self.raiders[user.id]
+        
+        # Handle signup button
+        if interaction.data.get('custom_id') == 'signup':
+            if raider.check_availability(schedule) and schedule not in raider.current_runs:
+                schedule.raider_signup(raider)
+                raider.add_run(schedule)
+                
+                # Update the message with new embed and view
+                embed, view, content = schedule.send_message(self.role_mentions)
+                await interaction.message.edit(content=content if content else None, embed=embed, view=view)
+                
+                await self.message_user(raider, '✅', schedule)
+                
+                if schedule.is_filled():
+                    await self.notify_schedule(schedule)
+                
+                save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
+                logger.info("%s signed up for schedule %s", user, interaction.message.id)
+                
+                await interaction.response.send_message("✅ You've been signed up for this run!", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ You're already signed up or unavailable for this run.", ephemeral=True)
+        
+        # Handle remove button
+        elif interaction.data.get('custom_id') == 'remove':
+            if schedule in raider.current_runs:
+                fill_status = schedule.is_filled()
+                schedule.raider_remove(raider)
+                raider.remove_run(schedule)
+                
+                if schedule.is_filled() != fill_status:
+                    await self.notify_schedule(schedule)
+                
+                # Update the message with new embed and view
+                embed, view, content = schedule.send_message(self.role_mentions)
+                await interaction.message.edit(content=content if content else None, embed=embed, view=view)
+                
+                await self.message_user(raider, '❌', schedule)
+                
+                save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
+                logger.info("%s removed from schedule %s", user, interaction.message.id)
+                
+                await interaction.response.send_message("❌ You've been removed from this run.", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ You're not signed up for this run.", ephemeral=True)
 
     # ---------------------------
     # Error Handling
