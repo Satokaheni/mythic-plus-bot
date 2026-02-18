@@ -53,7 +53,7 @@ class ScheduleButtonView(discord.ui.View):
             try:
                 # Send registration form via DM
                 selection_view = WoWSelectionView(timeout=180)  # 3 minutes timeout
-                dm_message = await user.send(
+                await user.send(
                     "👋 Welcome! Before you can sign up for runs, please choose your **World of Warcraft class** and **roles**:",
                     view=selection_view
                 )
@@ -85,7 +85,7 @@ class ScheduleButtonView(discord.ui.View):
                 
                 # Now process the signup action
                 raider = bot.raiders[user.id]
-                
+                logger.info(f"Raider: {raider} current runs: {raider.current_runs} sign up: {schedule}")
                 if raider.check_availability(schedule) and schedule not in raider.current_runs:
                     schedule.raider_signup(raider)
                     raider.add_run(schedule)
@@ -126,6 +126,7 @@ class ScheduleButtonView(discord.ui.View):
         
         # User is registered, process normally
         raider = bot.raiders[user.id]
+        logger.info(f"Raider: {raider} current runs: {raider.current_runs} sign up: {schedule}")
         
         if raider.check_availability(schedule) and schedule not in raider.current_runs:
             schedule.raider_signup(raider)
@@ -359,13 +360,15 @@ class WoWLevelSelect(discord.ui.Select):
         await interaction.response.defer()
 
 class WoWDaySelect(discord.ui.Select):
-    """Dropdown select for choosing day for key request."""
+    """Dropdown select for choosing day for key request. Only shows today and future dates."""
     def __init__(self):
         today = datetime.now().date()
         days = []
-        for i in range(7):  # Next 7 days
+        for i in range(7):  # Next 7 days starting from today
             date = today + timedelta(days=i)
             label = date.strftime("%A, %B %d")  # e.g., "Monday, January 16"
+            if i == 0:
+                label += " (Today)"
             value = date.isoformat()  # e.g., "2026-01-16"
             days.append(discord.SelectOption(label=label, value=value))
 
@@ -414,6 +417,15 @@ class WoWTimeRangeSelect(discord.ui.Select):
             from datetime import datetime
             dt_str = f"{self.view.selected_day} {start_time_str}"
             dt = datetime.strptime(dt_str, "%Y-%m-%d %I:%M %p")
+
+            # Reject times in the past when today is selected
+            if dt < datetime.now():
+                await interaction.response.send_message(
+                    "⚠️ That time has already passed. Please choose a future time.",
+                    ephemeral=True
+                )
+                return
+
             self.view.selected_start_time = dt
         await interaction.response.defer()
 
@@ -451,6 +463,14 @@ class KeyRequestSubmitButton(discord.ui.Button):
         if not (view.selected_day and view.run_type and view.selected_level and view.selected_start_time):
             logger.info(f"Selected Day: {view.selected_day} Run Type: {view.run_type} Level: {view.selected_level} Time: {view.selected_start_time}")
             await interaction.response.send_message("Please select all options before submitting.", ephemeral=True)
+            return
+
+        # Reject submissions where the chosen date/time is in the past
+        if view.selected_start_time < datetime.now():
+            await interaction.response.send_message(
+                "⚠️ The selected date and time are in the past. Please choose a future time.",
+                ephemeral=True
+            )
             return
 
         # If valid, proceed

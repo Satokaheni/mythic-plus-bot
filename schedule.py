@@ -234,6 +234,34 @@ class Schedule:
     def is_filled(self) -> bool:
         """Return True if the schedule is full (5 signups)."""
         return self.full
+
+    def is_past(self) -> bool:
+        """Return True if the schedule's start time has already passed."""
+        return self.start_time.astimezone(timezone.utc) < datetime.now(timezone.utc)
+
+    def format_dm_roster(self) -> str:
+        """Return a formatted string showing the current roster and open spots for DMs."""
+        tank = self.team['tank'].name if self.team['tank'] else '*Open*'
+        healer = self.team['healer'].name if self.team['healer'] else '*Open*'
+        dps_slots = [p.name for p in self.team['dps']] + ['*Open*'] * (3 - len(self.team['dps']))
+
+        open_parts = []
+        if 'tank' in self.missing:
+            open_parts.append('🛡️ Tank')
+        if 'healer' in self.missing:
+            open_parts.append('💚 Healer')
+        if 'dps' in self.missing:
+            dps_needed = 3 - len(self.team['dps'])
+            open_parts.append(f'⚔️ DPS ({dps_needed} needed)')
+
+        roster = (
+            f"**Current Roster:**\n"
+            f"🛡️ Tank: {tank}\n"
+            f"💚 Healer: {healer}\n"
+            f"⚔️ DPS: {', '.join(dps_slots)}\n\n"
+            f"**Open Spots:** {', '.join(open_parts) if open_parts else 'None'}"
+        )
+        return roster
     
     def has_raider(self, raider: Raider) -> bool:
         """Check if a raider is already in this schedule."""
