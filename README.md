@@ -1,5 +1,9 @@
 # Mythic+ Bot
 
+![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
+![Python](https://img.shields.io/badge/python-3.9+-green.svg)
+![Discord.py](https://img.shields.io/badge/discord.py-2.0+-blue.svg)
+
 A Discord bot for managing World of Warcraft Mythic+ raid scheduling and team coordination.
 
 ## Features
@@ -73,7 +77,9 @@ The bot automatically creates 7-day raid schedules. Players can:
 
 ### Commands
 
-- `!keys` - Request a Mythic+ key run with custom parameters
+- `!key` - Request a Mythic+ key run with custom parameters (works in KEY_CHANNEL)
+- `!modify` - Update your class, roles, and timezone (works in KEY_CHANNEL or DMs)
+- `!avail` - Post a new availability message for the week (coordinator only)
 
 ## User Interface
 
@@ -217,6 +223,40 @@ State is restored on bot startup.
 - International timezone support
 - Player performance/DPS tracking
 - Equipment and stat suggestions
+
+## Changelog
+
+### Version 2.0.0 (Current)
+
+#### New Features
+- **!modify Command**: Raiders can now update their class, roles, and timezone via `!modify` command (works in KEY_CHANNEL or DMs)
+- **Timezone-Aware Scheduling**: Key request times are now displayed in the raider's own timezone
+- **Roster Information in DMs**: All DM notifications now include current roster and open spots
+- **Smart Conflict Detection**: Bot alerts coordinator when multiple unfilled schedules can form a complete team (1 tank, 1 healer, 3 DPS) within 5 hours
+- **DM Retry System**: Automatically retries unanswered DMs after 2 hours for unfilled schedules
+- **Empty Schedule Cleanup**: Schedules are automatically deleted when all players remove themselves (0 signups)
+- **Past Schedule Cleanup**: Old schedules and their DMs are automatically cleaned up after they've started
+
+#### Improvements
+- **Performance**: Converted raider run tracking from O(n) lists to O(1) sets for faster lookups
+- **Interaction Handling**: Fixed "unknown interaction" errors by deferring responses immediately
+- **Message Deletion**: Improved error handling for message deletion with proper NotFound exception catching
+- **Data Migration**: Added automatic migration for converting old list-based data to sets on bot startup
+- **Secondary Role Selection**: Added "none" option for raiders with only one role
+
+#### Bug Fixes
+- Fixed NotFound errors when deleting command messages
+- Fixed interaction timeout errors in button handlers
+- Fixed AttributeError with raider.member attribute
+- Fixed channel cache misses with fetch_channel fallback
+- Fixed timezone comparison issues in past schedule detection
+- Fixed empty schedule edge cases
+
+#### Technical Changes
+- Migrated `current_runs` and `denied_runs` from lists to sets
+- Added timezone parameter to KeyRequestView and WoWTimeRangeSelect
+- All schedule times are now timezone-aware datetime objects
+- Improved state persistence with automatic data migration
 
 ## Support
 

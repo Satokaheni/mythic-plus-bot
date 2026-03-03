@@ -1,7 +1,7 @@
 """Schedule class for managing WoW Mythic+ raid team composition."""
 
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 from raider import Raider
 from discord import Embed, Color
 import discord
@@ -14,9 +14,10 @@ if TYPE_CHECKING:
 class Schedule:
     """Represents a WoW Mythic+ raid schedule with team composition and signup management."""
     def __init__(self, raider_scheduled: Raider, level: str,
-                 date_scheduled: str, start_time: datetime):
+                 date_scheduled: str, start_time: datetime, run_type: str = "one"):
         """Initialize a new schedule with the scheduling raider and details."""
         self.level = level
+        self.run_type = run_type  # "one" or "multiple"
         # Parse date_scheduled as UTC
         self.date_scheduled = datetime.strptime(date_scheduled, "%Y-%m-%d").replace(tzinfo=raider_scheduled.timezone)
         # Ensure start_time is in correct timezone
@@ -30,6 +31,7 @@ class Schedule:
         }
         self.members = []
         self.missing = ['tank', 'healer', 'dps']
+        self.note: Optional[str] = None
         self.signup = 0
         self.tier_reached = '🟢'
         self.primary = True
@@ -81,7 +83,7 @@ class Schedule:
         embed = Embed(
             title="⚔️ Scheduled Mythic+ Run",
             color=color,
-            timestamp=self.date_scheduled.astimezone(timezone.utc)
+            timestamp=self.start_time.astimezone(timezone.utc)
         )
         
         # Add the level field
@@ -90,7 +92,15 @@ class Schedule:
             value=f"**{self.level}**",
             inline=True
         )
-        
+
+        # Add run type field (one or multiple keys)
+        run_type_display = "🔑 One Key" if self.run_type == "one" else "🔑🔑 Multiple Keys"
+        embed.add_field(
+            name="📝 Run Type",
+            value=f"**{run_type_display}**",
+            inline=True
+        )
+
         # Add status field showing missing roles
         if self.is_filled():
             status_value = "✅ **FULL** - Ready to go!"
@@ -116,7 +126,7 @@ class Schedule:
         # Add the scheduled time field
         embed.add_field(
             name="🕐 Scheduled Time",
-            value=f"<t:{int(self.date_scheduled.astimezone(timezone.utc).timestamp())}:F>",
+            value=f"<t:{int(self.start_time.astimezone(timezone.utc).timestamp())}:F>",
             inline=False
         )
         
@@ -154,6 +164,10 @@ class Schedule:
                 inline=False
             )
         
+        # Add note if present
+        if self.note:
+            embed.add_field(name="📝 Note", value=self.note, inline=False)
+
         # Add instructions footer
         embed.set_footer(text="Click 'Sign Up' to confirm attendance • Click 'Remove' to remove yourself")
         
@@ -182,9 +196,16 @@ class Schedule:
             Reminder for {self.team['tank'].mention} {self.team['healer'].mention} {self.team['dps'][0].mention} {self.team['dps'][1].mention} {self.team['dps'][2].mention}
         """
 
-    def raider_signup(self, raider: Raider):
-        """Add a raider to the schedule, assigning them to appropriate roles."""
-        role = raider.roles[0] if raider.roles[0] in self.missing else (raider.roles[1] if len(raider.roles) > 1 and raider.roles[1] in self.missing else raider.roles[0])
+    def raider_signup(self, raider: Raider, role: Optional[str] = None):
+        """Add a raider to the schedule, assigning them to appropriate roles.
+
+        Args:
+            raider: The raider to sign up.
+            role: Specific role to sign up as. If None, auto-selects the best
+                  available role from the raider's registered roles.
+        """
+        if role is None:
+            role = raider.roles[0] if raider.roles[0] in self.missing else (raider.roles[1] if len(raider.roles) > 1 and raider.roles[1] in self.missing else raider.roles[0])
         
         if role == 'tank' and not self.team['tank']:
             self.team['tank'] = raider

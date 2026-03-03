@@ -62,7 +62,16 @@ def load_state() -> Tuple[Dict[Any, Any], Dict[Any, Any], Dict[str, Any], int, D
     try:
         with open('state.pkl', 'rb') as state_file:
             data = pickle.load(state_file)
-        return data['raiders'], data['schedules'], data['availability'], data['availability_message_id'], data['dm_map'], data['dm_timestamps']
+
+        # Migrate raiders: convert list-based current_runs/denied_runs to sets
+        raiders = data['raiders']
+        for raider in raiders.values():
+            if isinstance(raider.current_runs, list):
+                raider.current_runs = set(raider.current_runs)
+            if isinstance(raider.denied_runs, list):
+                raider.denied_runs = set(raider.denied_runs)
+
+        return raiders, data['schedules'], data['availability'], data['availability_message_id'], data['dm_map'], data['dm_timestamps']
     except (FileNotFoundError, pickle.UnpicklingError, EOFError, KeyError) as exc:
         logger.warning("Error loading state.pkl: %s. Using default state.", exc)
         return {}, {}, {}, 0, {}, {}

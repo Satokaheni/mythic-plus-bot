@@ -39,8 +39,62 @@ class Raider:
         self.denied_runs.add(schedule)
 
     def check_availability(self, schedule: 'Schedule') -> bool:
-        """Check if the raider is available for a given scheduled time."""
-        return schedule not in self.current_runs
+        """Check if the raider is available for a given scheduled time.
+
+        Rules:
+        - Cannot join if already in this exact schedule
+        - Cannot join if another single-key schedule is within 1 hour
+        - Cannot join if a multiple-key schedule is within 2 hours (before or after)
+        - Cannot join another schedule if already in a multiple-key run within 2 hours
+        """
+        # Check if already in this exact schedule
+        if schedule in self.current_runs:
+            return False
+
+        for current_schedule in self.current_runs:
+            # Calculate time difference between schedules (in seconds)
+            time_diff = abs((schedule.start_time - current_schedule.start_time).total_seconds())
+
+            # If either schedule is multiple keys, require 2 hour gap
+            if schedule.run_type == "multiple" or current_schedule.run_type == "multiple":
+                if time_diff < 7200:  # 2 hours = 7200 seconds
+                    return False
+            # For single-key runs, require 1 hour gap
+            else:
+                if time_diff < 3600:  # 1 hour = 3600 seconds
+                    return False
+
+        return True
+
+    def get_schedule_conflict_reason(self, schedule: 'Schedule') -> str:
+        """Get a human-readable reason why a raider cannot join a schedule.
+        Returns empty string if no conflict.
+        """
+        # Check if already in this exact schedule
+        if schedule in self.current_runs:
+            return "You're already signed up for this run."
+
+        for current_schedule in self.current_runs:
+            # Calculate time difference between schedules
+            time_diff_seconds = abs((schedule.start_time - current_schedule.start_time).total_seconds())
+            time_diff_hours = time_diff_seconds / 3600
+
+            # Format the conflicting schedule time
+            conflict_time = f"<t:{int(current_schedule.start_time.timestamp())}:t>"
+
+            # If either schedule is multiple keys, check 2 hour gap
+            if schedule.run_type == "multiple" or current_schedule.run_type == "multiple":
+                if time_diff_seconds < 7200:  # 2 hours
+                    if current_schedule.run_type == "multiple":
+                        return f"❌ Conflict: You're signed up for a **multiple-key** run at {conflict_time}, which requires a 2+ hour gap. Time difference: {time_diff_hours:.1f} hours."
+                    else:
+                        return f"❌ Conflict: This is a **multiple-key** run, but you have another run at {conflict_time} within 2 hours. Time difference: {time_diff_hours:.1f} hours."
+            # For single-key runs, check 1 hour gap
+            else:
+                if time_diff_seconds < 3600:  # 1 hour
+                    return f"❌ Conflict: You have another run at {conflict_time}, which is less than 1 hour away. Time difference: {time_diff_hours:.1f} hours."
+
+        return ""  # No conflict
     
     def get_current_runs(self) -> str:
         """Return a string representation of the raider's current runs (only filled)."""
