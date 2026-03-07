@@ -37,6 +37,7 @@ class Schedule:
         self.primary = True
         self.asks = 0
         self.posted = datetime.now(timezone.utc)
+        self.organizer_id: int = raider_scheduled.user_id
         self.raider_signup(raider_scheduled)
 
     def _check_fill(self):
@@ -228,6 +229,62 @@ class Schedule:
         self.members.append(raider)
         if self.signup == 5:
             self.full = True
+
+    def try_displace_off_roler(self, new_raider: Raider, effective_role: str) -> Optional['Raider']:
+        """Check if an off-role slot occupant can be displaced to make room for a main-role player.
+
+        Displacement only occurs when ALL of these hold:
+        - effective_role is new_raider's main role (roles[0])
+        - The schedule starts more than 8 hours from now
+        - The current occupant of that slot has a different main role (they filled off-role)
+
+        Returns the displaced Raider if displacement occurred, None otherwise.
+        The displaced raider is fully removed from the slot and their current_runs.
+        """
+        from datetime import datetime, timezone
+
+        if effective_role != new_raider.roles[0]:
+            return None
+
+        seconds_until = (self.start_time.astimezone(timezone.utc) - datetime.now(timezone.utc)).total_seconds()
+        if seconds_until <= 8 * 3600:
+            return None
+
+        displaced = None
+        if effective_role in ('tank', 'healer'):
+            occupant = self.team[effective_role]
+            if occupant is not None and occupant.roles[0] != effective_role:
+                displaced = occupant
+        elif effective_role == 'dps' and len(self.team['dps']) >= 3:
+            for dps_player in self.team['dps']:
+                if dps_player.roles[0] != 'dps':
+                    displaced = dps_player
+                    break
+
+        if displaced is None:
+            return None
+
+        # Remove displaced raider from their slot without triggering fill queue
+        if effective_role == 'tank':
+            self.team['tank'] = None
+            if 'tank' not in self.missing:
+                self.missing.append('tank')
+        elif effective_role == 'healer':
+            self.team['healer'] = None
+            if 'healer' not in self.missing:
+                self.missing.append('healer')
+        elif effective_role == 'dps':
+            self.team['dps'].remove(displaced)
+            if 'dps' not in self.missing:
+                self.missing.append('dps')
+
+        self.signup -= 1
+        self.full = False
+        if displaced in self.members:
+            self.members.remove(displaced)
+        displaced.current_runs.discard(self)
+
+        return displaced
 
     def raider_remove(self, raider: Raider):
         """Remove a raider from the schedule and update team composition."""

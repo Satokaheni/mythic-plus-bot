@@ -13,7 +13,7 @@ from textwrap import dedent
 
 from zoneinfo import ZoneInfo
 
-from views import WoWSelectionView, KeyRequestView
+from views import WoWSelectionView, KeyRequestView, KeyRequestButtonView
 from raider import Raider
 from schedule import Schedule
 from utils import (
@@ -42,6 +42,44 @@ HEALER_ID = int(os.getenv('HEALER_ROLE_ID'))
 DPS_ID = int(os.getenv('DPS_ROLE_ID'))
 COORDINATOR_ID = int(os.getenv('COORDINATOR_ID'))
 MYTHIC_PLUS_ID = int(os.getenv('MYTHIC_PLUS_ID'))
+# ---------------------------
+# Version & Changelog
+# ---------------------------
+BOT_VERSION = "1.0.1"
+
+_VERSION_FILE = "version.txt"
+
+def _read_last_version() -> str:
+    try:
+        with open(_VERSION_FILE, "r") as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return ""
+
+def _write_version(version: str) -> None:
+    with open(_VERSION_FILE, "w") as f:
+        f.write(version)
+
+def _read_changelog(version: str) -> list[str]:
+    """Read bullet-point entries for a given version from CHANGELOG.md."""
+    try:
+        with open("CHANGELOG.md", "r") as f:
+            lines = f.read().splitlines()
+    except FileNotFoundError:
+        return []
+    in_section = False
+    entries = []
+    for line in lines:
+        if line.startswith(f"## [{version}]"):
+            in_section = True
+            continue
+        if in_section:
+            if line.startswith("## ["):
+                break
+            if line.startswith("- "):
+                entries.append(line[2:])
+    return entries
+
 AVAILABILITY_MESSAGE: str = lambda x, y, z: f"""
 React to this message to set your availability for this week's mythic plus runs
 <t:{int(x)}:F> to <t:{int(y)}:F>
@@ -133,8 +171,11 @@ class MyClient(discord.Client):
         """
         Delete and repost message if it's been up for over 24 hours.
         """
-        message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_post)
-        await message.delete()
+        try:
+            message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_post)
+            await message.delete()
+        except (discord.NotFound, discord.Forbidden):
+            pass
 
         embed, view, content = schedule.send_message(self.role_mentions, self)
         schedule.posted = datetime.now(timezone.utc)
@@ -469,6 +510,34 @@ class MyClient(discord.Client):
         self.schedules[schedule_id] = schedule
         save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
 
+    async def _notify_schedule_changed(self, schedule: Schedule, message: str, organizer_id: int):
+        """DM all schedule members except the organizer about a change or cancellation."""
+        for raider in list(schedule.members):
+            if raider.user_id == organizer_id:
+                continue
+            try:
+                user = self.get_user(raider.user_id)
+                if user:
+                    await user.send(message)
+            except discord.Forbidden:
+                logger.warning("Could not notify %s of schedule change", raider.name)
+
+    async def _notify_displaced(self, displaced: Raider, schedule: Schedule, role: str):
+        """DM a raider who was bumped from a slot by a main-role signup."""
+        try:
+            ts = int(schedule.start_time.astimezone(timezone.utc).timestamp())
+            user = self.get_user(displaced.user_id)
+            if user:
+                await user.send(
+                    f"⚠️ **You've been removed from a run**\n\n"
+                    f"A player signed up for **{role.title()}** as their main role, "
+                    f"replacing you (who was filling that slot as a secondary role).\n"
+                    f"**Run:** Level {schedule.level} on <t:{ts}:F>\n\n"
+                    f"You may still sign up for another available role if one is open."
+                )
+        except discord.Forbidden:
+            logger.warning(f"Could not notify displaced raider {displaced.name}")
+
     async def notify_schedule(self, schedule: Schedule):
         """DM all members of a filled schedule (tank, healer, dps) with the day of week and time in their timezone."""
         members = []
@@ -619,12 +688,162 @@ class MyClient(discord.Client):
                     self.reminder_messages.setdefault(schedule_id, []).append(reminder_msg.id)
 
     # ---------------------------
+    # Key Request Flow
+    # ---------------------------
+    async def _do_key_request_flow(self, user: discord.User):
+        """Run the full key request flow via DM for the given user."""
+        if user.id not in self.raiders:
+            try:
+                selection_view = WoWSelectionView(timeout=300)
+                await user.send(
+                    "Before scheduling a key, please choose your **World of Warcraft class** and **roles** if you have only one role please ignore the secondary selection:",
+                    view=selection_view
+                )
+                await selection_view.wait()
+
+                roles = []
+                if selection_view.selected_primary:
+                    roles.append(selection_view.selected_primary)
+                if selection_view.selected_secondary and selection_view.selected_secondary != selection_view.selected_primary:
+                    roles.append(selection_view.selected_secondary)
+
+                if selection_view.selected_class and roles:
+                    self.raiders[user.id] = Raider(user, selection_view.selected_class, roles, selection_view.selected_timezone)
+                    logger.info(f"New raider from key request: {user}: class={selection_view.selected_class} roles={roles} timezone={selection_view.selected_timezone}")
+                    save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
+                else:
+                    await user.send("Registration cancelled or incomplete. Please try again.")
+                    logger.info(f"No valid selection from {user} (timed out or incomplete)")
+                    return
+            except discord.Forbidden:
+                logger.warning(f"Could not DM {user} for class/role selection")
+                return
+
+        try:
+            raider = self.raiders[user.id]
+            view = KeyRequestView(timezone_str=str(raider.timezone), timeout=300)
+            await user.send(
+                "Request a key: Select Level, Date, Time and How many Keys you are wanting to do.",
+                view=view
+            )
+            await view.wait()
+
+            if view.selected_level and view.selected_day and view.selected_start_time and view.run_type:
+                logger.info(f"Key request from {user}: Day={view.selected_day}, {view.selected_level}, {view.selected_start_time.strftime('%H:%M')}, {view.run_type}")
+
+                raider = self.raiders[user.id]
+                temp_schedule = Schedule(
+                    raider_scheduled=raider,
+                    level=view.selected_level,
+                    date_scheduled=view.selected_day,
+                    start_time=view.selected_start_time,
+                    run_type=view.run_type
+                )
+                temp_schedule.raider_remove(raider)
+
+                if not raider.check_availability(temp_schedule):
+                    conflict_reason = raider.get_schedule_conflict_reason(temp_schedule)
+                    await user.send(f"⚠️ **Cannot create schedule**\n\n{conflict_reason}")
+                    logger.info(f"Key request denied for {user} due to schedule conflict")
+                    return
+
+                existing_schedule, existing_schedule_id = None, None
+                for sched_id, sched in self.schedules.items():
+                    if sched.date_scheduled == view.selected_day and sched.start_time.time() == view.selected_start_time.time():
+                        existing_schedule = sched
+                        existing_schedule_id = sched_id
+                        break
+
+                if existing_schedule and sum(role in existing_schedule.missing for role in self.raiders[user.id].roles):
+                    dm = await user.send(
+                        f"A run already exists at this time (Level {existing_schedule.level}). Would you like to join that run instead?\nReact with ✅ to join, or ❌ to list your key request.")
+                    await dm.add_reaction('✅')
+                    await dm.add_reaction('❌')
+
+                    def check(reaction, u):
+                        return u == user and str(reaction.emoji) in ['✅', '❌'] and reaction.message.id == dm.id
+
+                    try:
+                        reaction, _ = await self.wait_for('reaction_add', timeout=120.0, check=check)
+                        if str(reaction.emoji) == '✅':
+                            if not self.raiders[user.id].check_availability(existing_schedule):
+                                conflict_reason = self.raiders[user.id].get_schedule_conflict_reason(existing_schedule)
+                                await user.send(f"⚠️ **Cannot join this run**\n\n{conflict_reason}")
+                                return
+
+                            existing_schedule.raider_signup(self.raiders[user.id])
+                            self.raiders[user.id].add_run(existing_schedule)
+                            await user.send(f"✅ You have been added to the existing run on {existing_schedule.date_scheduled} at {existing_schedule.start_time.strftime('%I:%M %p')}.")
+                            if existing_schedule.is_filled():
+                                await self.notify_schedule(existing_schedule)
+                            msg = await self.get_channel(KEY_CHANNEL_ID).fetch_message(existing_schedule_id)
+                            embed, view_buttons, content = existing_schedule.send_message(self.role_mentions, self)
+                            await msg.edit(content=content if content else None, embed=embed, view=view_buttons)
+                            save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
+                        else:
+                            schedule = Schedule(
+                                raider_scheduled=self.raiders[user.id],
+                                level=view.selected_level,
+                                date_scheduled=view.selected_day,
+                                start_time=view.selected_start_time,
+                                run_type=view.run_type
+                            )
+                            schedule.note = view.note
+                            embed, view_buttons, content = schedule.send_message(self.role_mentions, self)
+                            msg = await self.get_channel(KEY_CHANNEL_ID).send(
+                                content=content if content else None,
+                                embed=embed,
+                                view=view_buttons
+                            )
+                            self.schedules[msg.id] = schedule
+                            self.raiders[user.id].add_run(schedule)
+                            save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
+                            self.loop.create_task(self.fill_remaining_spots(msg.id))
+                    except asyncio.TimeoutError:
+                        await user.send("No response received. Key request cancelled.")
+                    return
+
+                # No existing schedule, create new
+                schedule = Schedule(
+                    raider_scheduled=self.raiders[user.id],
+                    level=view.selected_level,
+                    date_scheduled=view.selected_day,
+                    start_time=view.selected_start_time,
+                    run_type=view.run_type
+                )
+                schedule.note = view.note
+                embed, view_buttons, content = schedule.send_message(self.role_mentions, self)
+                msg = await self.get_channel(KEY_CHANNEL_ID).send(
+                    content=content if content else None,
+                    embed=embed,
+                    view=view_buttons
+                )
+                self.schedules[msg.id] = schedule
+                self.raiders[user.id].add_run(schedule)
+                save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
+                self.loop.create_task(self.fill_remaining_spots(msg.id))
+            else:
+                logger.info(f"Key request timed out or cancelled for {user}")
+        except discord.Forbidden:
+            logger.warning(f"Could not DM {user} for key request")
+
+    # ---------------------------
     # Startup
     # ---------------------------
     async def setup_hook(self) -> None:
         """Calls before on ready to set up all environmental variables"""
+        from views import ScheduleButtonView
         self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps = load_state()
         logger.info("Loaded state from file.")
+
+        # Register persistent views so buttons work after bot restarts
+        self.add_view(KeyRequestButtonView(self))
+
+        # Re-register each existing schedule's button view so interactions
+        # still work after a restart (discord.py routes by message_id)
+        for schedule_id, schedule in self.schedules.items():
+            self.add_view(ScheduleButtonView(schedule, self), message_id=schedule_id)
+        logger.info("Re-registered %d schedule views", len(self.schedules))
 
         # Start hourly background task
         if not self.hourly_check.is_running():
@@ -643,6 +862,36 @@ class MyClient(discord.Client):
         # Fetch message history now that channels are cached
         if self.availability_message_id:
             await self.get_message_history()
+
+        # Post changelog if the bot version has changed since last run
+        last_version = _read_last_version()
+        if last_version != BOT_VERSION:
+            changelog_channel = self.get_channel(AVAIL_CHANNEL_ID)
+            entries = _read_changelog(BOT_VERSION)
+            if changelog_channel and entries:
+                changes = "\n".join(f"- {line}" for line in entries)
+                await changelog_channel.send(
+                    f"🤖 **Bot updated to v{BOT_VERSION}**\n\n"
+                    f"**What's new:**\n{changes}"
+                )
+                logger.info("Posted changelog for v%s", BOT_VERSION)
+            _write_version(BOT_VERSION)
+
+        # Ensure the persistent key request button is pinned in KEY_CHANNEL
+        key_channel = self.get_channel(KEY_CHANNEL_ID)
+        if key_channel:
+            pins = await key_channel.pins()
+            button_exists = any(
+                p.author.id == self.user.id and p.components
+                for p in pins
+            )
+            if not button_exists:
+                button_msg = await key_channel.send(
+                    "⚔️ **Schedule a Mythic+ Run**\nClick the button below to create a key request.",
+                    view=KeyRequestButtonView(self)
+                )
+                await button_msg.pin()
+                logger.info("on_ready: posted and pinned missing key request button in KEY_CHANNEL")
         
 
     # ---------------------------
@@ -763,11 +1012,13 @@ class MyClient(discord.Client):
         if message.content == '!cleanup' and message.author.id == COORDINATOR_ID:
             if message.channel.id == AVAIL_CHANNEL_ID or message.channel.id == KEY_CHANNEL_ID:
                 try:
-                    # Purge both channels
+                    # Purge both channels, skipping pinned messages
                     avail_channel = self.get_channel(AVAIL_CHANNEL_ID)
                     key_channel = self.get_channel(KEY_CHANNEL_ID)
-                    avail_deleted = await avail_channel.purge()
-                    key_deleted = await key_channel.purge()
+                    avail_pins = {m.id for m in await avail_channel.pins()}
+                    key_pins = {m.id for m in await key_channel.pins()}
+                    avail_deleted = await avail_channel.purge(check=lambda m: m.id not in avail_pins)
+                    key_deleted = await key_channel.purge(check=lambda m: m.id not in key_pins)
                     logger.info("Cleanup: purged %d messages from AVAIL and %d from KEY channel.", len(avail_deleted), len(key_deleted))
 
                     # Reset all state except raiders
@@ -811,160 +1062,30 @@ class MyClient(discord.Client):
                 except discord.Forbidden:
                     logger.warning(f"Could not delete !avail commands from {message.author}")
                 
+            elif message.content == '!setup' and message.author.id == COORDINATOR_ID and message.channel.id == KEY_CHANNEL_ID:
+                try:
+                    await message.delete()
+                except (discord.Forbidden, discord.NotFound):
+                    pass
+                channel = self.get_channel(KEY_CHANNEL_ID)
+                # Unpin and delete any previous bot button messages to keep channel clean
+                for pinned in await channel.pins():
+                    if pinned.author.id == self.user.id and pinned.components:
+                        await pinned.unpin()
+                        await pinned.delete()
+                button_msg = await channel.send(
+                    "⚔️ **Schedule a Mythic+ Run**\nClick the button below to create a key request.",
+                    view=KeyRequestButtonView(self)
+                )
+                await button_msg.pin()
+                logger.info("Setup: posted and pinned key request button in KEY_CHANNEL")
+
             elif message.content == '!key' and message.channel.id == KEY_CHANNEL_ID:
                 try:
                     await message.delete()
                 except (discord.Forbidden, discord.NotFound):
                     logger.warning(f"Could not delete !key message from {message.author}")
-                # Check if user is a raider
-                if message.author.id not in self.raiders:
-                    try:
-                        # User is not a raider, prompt them to select class/roles first
-                        selection_view = WoWSelectionView(timeout=180)  # 3 minutes timeout
-                        await message.author.send(
-                            "Before scheduling a key, please choose your **World of Warcraft class** and **roles** if you have only one role please ignore the secondary selection:",
-                            view=selection_view
-                        )
-                        
-                        # Wait for the user to click Submit (or timeout)
-                        await selection_view.wait()
-                        
-                        # Build roles list from selections
-                        roles = []
-                        if selection_view.selected_primary:
-                            roles.append(selection_view.selected_primary)
-                        if selection_view.selected_secondary and selection_view.selected_secondary != selection_view.selected_primary:
-                            roles.append(selection_view.selected_secondary)
-                        
-                        # If user selected a class and at least one role, create a Raider
-                        if selection_view.selected_class and roles:
-                            self.raiders[message.author.id] = Raider(message.author, selection_view.selected_class, roles, selection_view.selected_timezone)
-                            logger.info(f"New raider from !key command: {message.author}: class={selection_view.selected_class} roles={roles} timezone={selection_view.selected_timezone}")
-                            save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
-                        else:
-                            await message.author.send("Registration cancelled or incomplete. Please use !key again to try.")
-                            logger.info(f"No valid selection from {message.author} (timed out or incomplete)")
-                            return
-                    except discord.Forbidden:
-                        logger.warning(f"Could not DM {message.author} for class/role selection")
-                        return
-                
-                # Now proceed with key request (user is guaranteed to be a raider at this point)
-                try:
-                    raider = self.raiders[message.author.id]
-                    view = KeyRequestView(timezone_str=str(raider.timezone), timeout=300)  # 5 minutes
-                    await message.author.send(
-                        "Request a key: Select Level, Date, Time and How many Keys you are wanting to do.",
-                        view=view
-                    )
-                    await view.wait()
-                    # After wait, selections are on view if submitted
-                    if view.selected_level and view.selected_day and view.selected_start_time and view.run_type:
-                        logger.info(f"Key request from {message.author}: Day={view.selected_day}, {view.selected_level}, {view.selected_start_time.strftime('%H:%M')}, {view.run_type}")
-
-                        # Check if the raider has schedule conflicts with the requested time
-                        raider = self.raiders[message.author.id]
-                        temp_schedule = Schedule(
-                            raider_scheduled=raider,
-                            level=view.selected_level,
-                            date_scheduled=view.selected_day,
-                            start_time=view.selected_start_time,
-                            run_type=view.run_type
-                        )
-                        # Remove the raider from the temp schedule since we're just checking
-                        temp_schedule.raider_remove(raider)
-
-                        if not raider.check_availability(temp_schedule):
-                            conflict_reason = raider.get_schedule_conflict_reason(temp_schedule)
-                            await message.author.send(f"⚠️ **Cannot create schedule**\n\n{conflict_reason}")
-                            logger.info(f"Key request denied for {message.author} due to schedule conflict")
-                            return
-
-                        # Check for existing schedule at same date and time
-                        existing_schedule, existing_schedule_id = None, None
-                        for sched_id, sched in self.schedules.items():
-                            if sched.date_scheduled == view.selected_day and sched.start_time.time() == view.selected_start_time.time():
-                                existing_schedule = sched
-                                existing_schedule_id = sched_id
-                                break
-                        if existing_schedule and sum(role in existing_schedule.missing for role in self.raiders[message.author.id].roles):
-                            # Ask user if they want to join existing schedule
-                            dm = await message.author.send(
-                                f"A run already exists at this time (Level {existing_schedule.level}). Would you like to join that run instead?\nReact with ✅ to join, or ❌ to list your key request.")
-                            await dm.add_reaction('✅')
-                            await dm.add_reaction('❌')
-                            
-                            def check(reaction, user):
-                                return user == message.author and str(reaction.emoji) in ['✅', '❌'] and reaction.message.id == dm.id
-                            try:
-                                reaction, _ = await self.wait_for('reaction_add', timeout=120.0, check=check)
-                                if str(reaction.emoji) == '✅':
-                                    # Check for schedule conflicts before joining
-                                    if not self.raiders[message.author.id].check_availability(existing_schedule):
-                                        conflict_reason = self.raiders[message.author.id].get_schedule_conflict_reason(existing_schedule)
-                                        await message.author.send(f"⚠️ **Cannot join this run**\n\n{conflict_reason}")
-                                        return
-
-                                    existing_schedule.raider_signup(self.raiders[message.author.id])
-                                    self.raiders[message.author.id].add_run(existing_schedule)
-                                    await message.author.send(f"✅ You have been added to the existing run on {existing_schedule.date_scheduled} at {existing_schedule.start_time.strftime('%I:%M %p')}.")
-                                    # Optionally notify if filled
-                                    if existing_schedule.is_filled():
-                                        await self.notify_schedule(existing_schedule)
-                                    # Update the schedule message in channel
-                                    msg = await self.get_channel(KEY_CHANNEL_ID).fetch_message(existing_schedule_id)
-                                    embed, view, content = existing_schedule.send_message(self.role_mentions, self)
-                                    await msg.edit(content=content if content else None, embed=embed, view=view)
-                                    save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
-                                else:
-                                    schedule = Schedule(
-                                        raider_scheduled=self.raiders[message.author.id],
-                                        level=view.selected_level,
-                                        date_scheduled=view.selected_day,
-                                        start_time=view.selected_start_time,
-                                        run_type=view.run_type
-                                    )
-                                    schedule.note = view.note
-                                    embed, view_buttons, content = schedule.send_message(self.role_mentions, self)
-                                    msg = await self.get_channel(KEY_CHANNEL_ID).send(
-                                        content=content if content else None,
-                                        embed=embed,
-                                        view=view_buttons
-                                    )
-
-                                    self.schedules[msg.id] = schedule
-                                    self.raiders[message.author.id].add_run(schedule)
-                                    save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
-                                    # Start background task to fill remaining spots from availability
-                                    self.loop.create_task(self.fill_remaining_spots(msg.id))
-                            except asyncio.TimeoutError:
-                                await message.author.send("No response received. Key request cancelled.")
-                            return
-                        # No existing schedule, create new
-                        schedule = Schedule(
-                            raider_scheduled=self.raiders[message.author.id],
-                            level=view.selected_level,
-                            date_scheduled=view.selected_day,
-                            start_time=view.selected_start_time,
-                            run_type=view.run_type
-                        )
-                        schedule.note = view.note
-                        embed, view_buttons, content = schedule.send_message(self.role_mentions, self)
-                        msg = await self.get_channel(KEY_CHANNEL_ID).send(
-                            content=content if content else None,
-                            embed=embed,
-                            view=view_buttons
-                        )
-
-                        self.schedules[msg.id] = schedule
-                        self.raiders[message.author.id].add_run(schedule)
-                        save_state(self.raiders, self.schedules, self.availability, self.availability_message_id, self.dm_map, self.dm_timestamps)
-                        # Start background task to fill remaining spots from availability
-                        self.loop.create_task(self.fill_remaining_spots(msg.id))
-                    else:
-                        logger.info(f"Key request timed out or cancelled for {message.author}")
-                except discord.Forbidden:
-                    logger.warning(f"Could not DM {message.author} for key request")
+                await self._do_key_request_flow(message.author)
 
             # Delete !key and !avail commands from KEY_CHANNEL
             elif message.content in ['!key', '!avail'] and message.channel.id == KEY_CHANNEL_ID:
@@ -1043,15 +1164,52 @@ class MyClient(discord.Client):
                 raider = self.raiders[user.id]
                 schedule = self.schedules[schedule_id]
                 if raider.check_availability(schedule) and not schedule in raider.current_runs:
-                    schedule.raider_signup(raider)
-                    raider.add_run(schedule)
+                    displaced = schedule.try_displace_off_roler(raider, raider.roles[0])
+                    if displaced:
+                        await self._notify_displaced(displaced, schedule, raider.roles[0])
+
                     if schedule.is_filled():
-                        await self.notify_schedule(schedule)
-                    await self.message_user(raider, reaction.emoji, schedule)
-                    message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_id)
-                    embed, view, content = schedule.send_message(self.role_mentions, self)
-                    await message.edit(content=content if content else None, embed=embed, view=view)
-                    logger.info("%s signed up for schedule %s via DM", user, schedule)
+                        # Schedule still full after displacement attempt — ask if they want fill spot
+                        dm_channel = reaction.message.channel
+                        ts = int(schedule.start_time.astimezone(timezone.utc).timestamp())
+                        fill_msg = await dm_channel.send(
+                            f"⚠️ The Level {schedule.level} run on <t:{ts}:F> is already **full**.\n"
+                            f"Would you like to be added as a **fill** in case someone drops?\n"
+                            f"React with ✅ to join as fill or ❌ to decline."
+                        )
+                        await fill_msg.add_reaction('✅')
+                        await fill_msg.add_reaction('❌')
+
+                        def fill_check(r, u):
+                            return u == user and str(r.emoji) in ['✅', '❌'] and r.message.id == fill_msg.id
+
+                        try:
+                            fill_reaction, _ = await self.wait_for('reaction_add', timeout=120.0, check=fill_check)
+                            if str(fill_reaction.emoji) == '✅':
+                                schedule.raider_signup(raider)
+                                raider.add_run(schedule)
+                                await dm_channel.send(
+                                    f"✅ You've been added as a fill for the Level {schedule.level} run on "
+                                    f"<t:{ts}:F>. You'll be notified if a spot opens up!"
+                                )
+                                key_msg = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_id)
+                                embed, view, content = schedule.send_message(self.role_mentions, self)
+                                await key_msg.edit(content=content if content else None, embed=embed, view=view)
+                                logger.info("%s added as fill for schedule %s via DM", user, schedule)
+                            else:
+                                await dm_channel.send("❌ Understood, you won't be added to this run.")
+                        except asyncio.TimeoutError:
+                            pass
+                    else:
+                        schedule.raider_signup(raider)
+                        raider.add_run(schedule)
+                        if schedule.is_filled():
+                            await self.notify_schedule(schedule)
+                        await self.message_user(raider, reaction.emoji, schedule)
+                        message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_id)
+                        embed, view, content = schedule.send_message(self.role_mentions, self)
+                        await message.edit(content=content if content else None, embed=embed, view=view)
+                        logger.info("%s signed up for schedule %s via DM", user, schedule)
             elif reaction.emoji == '❌':
                 schedule_id = self.dm_map[reaction.message.channel.id][reaction.message.id]
                 raider = self.raiders[user.id]

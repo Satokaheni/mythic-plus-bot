@@ -87,6 +87,9 @@ class ScheduleButtonView(discord.ui.View):
                 raider = bot.raiders[user.id]
                 logger.info(f"Raider: {raider} current runs: {raider.current_runs} sign up: {schedule}")
                 if raider.check_availability(schedule) and schedule not in raider.current_runs:
+                    displaced = schedule.try_displace_off_roler(raider, raider.roles[0])
+                    if displaced:
+                        await bot._notify_displaced(displaced, schedule, raider.roles[0])
                     schedule.raider_signup(raider)
                     raider.add_run(schedule)
                     
@@ -153,6 +156,11 @@ class ScheduleButtonView(discord.ui.View):
             selected_role = role_view.selected_role
         else:
             await interaction.response.defer(ephemeral=True)
+
+        effective_role = selected_role if selected_role is not None else raider.roles[0]
+        displaced = schedule.try_displace_off_roler(raider, effective_role)
+        if displaced:
+            await bot._notify_displaced(displaced, schedule, effective_role)
 
         schedule.raider_signup(raider, selected_role)
         raider.add_run(schedule)
@@ -228,6 +236,229 @@ class ScheduleButtonView(discord.ui.View):
             logger.info("%s removed from schedule %s", user, interaction.message.id)
         else:
             await interaction.followup.send("❌ You're not signed up for this run.", ephemeral=True)
+
+    @discord.ui.button(label="Manage", style=discord.ButtonStyle.secondary, emoji="⚙️", custom_id="manage_schedule")
+    async def manage_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Handle manage button — organizer only."""
+        bot = self.bot_client
+        schedule = self.schedule
+
+        if interaction.message.id not in bot.schedules:
+            await interaction.response.send_message("❌ This is not a valid schedule.", ephemeral=True)
+            return
+
+        if interaction.user.id != schedule.organizer_id:
+            await interaction.response.send_message("❌ Only the organizer can manage this schedule.", ephemeral=True)
+            return
+
+        await interaction.response.send_message(
+            "⚙️ **Manage Schedule** — What would you like to do?",
+            view=ManageScheduleView(schedule, bot, interaction.message),
+            ephemeral=True
+        )
+
+
+# ---------------------------------
+# Schedule Management Views
+# ---------------------------------
+
+class ManageScheduleView(discord.ui.View):
+    """Ephemeral view for the organizer to delete or modify a schedule."""
+
+    def __init__(self, schedule: 'Schedule', bot_client: 'MyClient', message: discord.Message):
+        super().__init__(timeout=120)
+        self.schedule = schedule
+        self.bot_client = bot_client
+        self.message = message
+
+    @discord.ui.button(label="Delete Run", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "⚠️ Are you sure you want to delete this run? All members will be notified.",
+            view=ConfirmDeleteView(self.schedule, self.bot_client, self.message),
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="Modify Run", style=discord.ButtonStyle.primary, emoji="✏️")
+    async def modify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(
+            ModifyScheduleModal(self.schedule, self.bot_client, self.message)
+        )
+
+
+class ConfirmDeleteView(discord.ui.View):
+    """Ephemeral confirmation view for permanently deleting a schedule."""
+
+    def __init__(self, schedule: 'Schedule', bot_client: 'MyClient', message: discord.Message):
+        super().__init__(timeout=60)
+        self.schedule = schedule
+        self.bot_client = bot_client
+        self.message = message
+
+    @discord.ui.button(label="Yes, Delete", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def confirm_delete(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from datetime import timezone
+        bot = self.bot_client
+        schedule = self.schedule
+
+        await interaction.response.defer(ephemeral=True)
+
+        ts = int(schedule.start_time.astimezone(timezone.utc).timestamp())
+        await bot._notify_schedule_changed(
+            schedule,
+            f"❌ **Run Cancelled**\nThe scheduled run (Key Level: **{schedule.level}**, <t:{ts}:F>) has been **cancelled** by the organizer.",
+            schedule.organizer_id
+        )
+
+        for member in list(schedule.members):
+            member.current_runs.discard(schedule)
+
+        try:
+            await self.message.delete()
+        except discord.NotFound:
+            pass
+
+        if self.message.id in bot.schedules:
+            del bot.schedules[self.message.id]
+
+        save_state(bot.raiders, bot.schedules, bot.availability, bot.availability_message_id, bot.dm_map, bot.dm_timestamps)
+        logger.info("Schedule %s deleted by organizer", self.message.id)
+
+        await interaction.followup.send("✅ Run deleted. All members have been notified.", ephemeral=True)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary, emoji="↩️")
+    async def cancel_delete(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="❌ Deletion cancelled.", view=None)
+
+
+class ModifyScheduleModal(discord.ui.Modal, title="Modify Schedule"):
+    """Modal for editing a schedule's key level, date, time, and note."""
+
+    def __init__(self, schedule: 'Schedule', bot_client: 'MyClient', message: discord.Message):
+        super().__init__()
+        self.schedule = schedule
+        self.bot_client = bot_client
+        self.message = message
+
+        local_dt = schedule.start_time
+        date_str = local_dt.strftime("%Y-%m-%d")
+        time_str = local_dt.strftime("%I:%M %p").lstrip("0")
+
+        self.level_input = discord.ui.TextInput(
+            label="Key Level",
+            default=schedule.level,
+            required=True,
+            max_length=20,
+        )
+        self.date_input = discord.ui.TextInput(
+            label="Date",
+            placeholder="YYYY-MM-DD",
+            default=date_str,
+            required=True,
+            max_length=10,
+        )
+        self.time_input = discord.ui.TextInput(
+            label="Start Time (24h HH:MM or H:MM AM/PM)",
+            placeholder="e.g. 19:00 or 7:00 PM",
+            default=time_str,
+            required=True,
+            max_length=10,
+        )
+        self.note_input = discord.ui.TextInput(
+            label="Note (optional)",
+            default=schedule.note or "",
+            required=False,
+            max_length=200,
+            style=discord.TextStyle.paragraph,
+        )
+        self.add_item(self.level_input)
+        self.add_item(self.date_input)
+        self.add_item(self.time_input)
+        self.add_item(self.note_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        from datetime import timezone, datetime as dt
+        bot = self.bot_client
+        schedule = self.schedule
+
+        new_level = self.level_input.value.strip()
+        new_note = self.note_input.value.strip() or None
+        date_str = self.date_input.value.strip()
+        time_str = self.time_input.value.strip()
+
+        # Parse date
+        try:
+            new_date = dt.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            await interaction.response.send_message("❌ Invalid date format. Use YYYY-MM-DD.", ephemeral=True)
+            return
+
+        # Parse time (accept 24h or 12h AM/PM)
+        new_time = None
+        for fmt in ("%H:%M", "%I:%M %p", "%I:%M%p"):
+            try:
+                new_time = dt.strptime(time_str, fmt)
+                break
+            except ValueError:
+                continue
+        if new_time is None:
+            await interaction.response.send_message(
+                "❌ Invalid time format. Use HH:MM (24h) or H:MM AM/PM.", ephemeral=True
+            )
+            return
+
+        orig_tz = schedule.start_time.tzinfo
+        new_start_time = dt(
+            new_date.year, new_date.month, new_date.day,
+            new_time.hour, new_time.minute, tzinfo=orig_tz
+        )
+
+        if new_start_time.astimezone(timezone.utc) < dt.now(timezone.utc):
+            await interaction.response.send_message(
+                "❌ The new date/time is in the past. Please choose a future time.", ephemeral=True
+            )
+            return
+
+        changes = []
+        if new_level != schedule.level:
+            changes.append(f"Key Level: **{schedule.level}** → **{new_level}**")
+        if new_start_time != schedule.start_time:
+            old_ts = int(schedule.start_time.astimezone(timezone.utc).timestamp())
+            new_ts = int(new_start_time.astimezone(timezone.utc).timestamp())
+            changes.append(f"Time: <t:{old_ts}:F> → <t:{new_ts}:F>")
+        if new_note != schedule.note:
+            old_note_display = schedule.note or "*(none)*"
+            new_note_display = new_note or "*(none)*"
+            changes.append(f"Note: {old_note_display} → {new_note_display}")
+
+        if not changes:
+            await interaction.response.send_message("✅ No changes made.", ephemeral=True)
+            return
+
+        schedule.level = new_level
+        schedule.note = new_note
+        schedule.start_time = new_start_time
+        schedule.date_scheduled = new_start_time.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        embed, view, content = schedule.send_message(bot.role_mentions, bot)
+        try:
+            await self.message.edit(content=content if content else None, embed=embed, view=view)
+        except discord.NotFound:
+            pass
+
+        new_ts = int(new_start_time.astimezone(timezone.utc).timestamp())
+        changes_text = "\n".join(f"• {c}" for c in changes)
+        await bot._notify_schedule_changed(
+            schedule,
+            f"✏️ **Run Modified**\nThe scheduled run at <t:{new_ts}:F> has been updated:\n{changes_text}",
+            schedule.organizer_id
+        )
+
+        save_state(bot.raiders, bot.schedules, bot.availability, bot.availability_message_id, bot.dm_map, bot.dm_timestamps)
+        logger.info("Schedule %s modified by organizer", self.message.id)
+
+        await interaction.response.send_message(f"✅ Run updated!\n{changes_text}", ephemeral=True)
+
 
 # ---------------------------------
 # Role Selection for Multi-Role Raiders
@@ -623,3 +854,26 @@ class KeyRequestView(discord.ui.View):
         self.add_item(WoWTimeRangeSelect(timezone_str))
         self.add_item(KeyRunTypeSelect())
         self.add_item(KeyRequestSubmitButton())
+
+
+# ---------------------------------
+# Persistent Button — KEY_CHANNEL
+# ---------------------------------
+
+class KeyRequestButtonView(discord.ui.View):
+    """Persistent view with a single button posted in KEY_CHANNEL to start a key request."""
+
+    def __init__(self, bot_client: 'MyClient'):
+        super().__init__(timeout=None)  # Persistent — survives bot restarts
+        self.bot_client = bot_client
+
+    @discord.ui.button(
+        label="CLICK TO CREATE A REQUEST",
+        style=discord.ButtonStyle.success,
+        emoji="⚔️",
+        custom_id="create_key_request"
+    )
+    async def create_request(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Open the key request flow via DM when the button is clicked."""
+        await interaction.response.send_message("📬 Check your DMs to create a key request!", ephemeral=True)
+        await self.bot_client._do_key_request_flow(interaction.user)
