@@ -16,6 +16,9 @@ dependencies = [
 dev = [
     "black>=23.0.0",
     "ruff>=0.1.0",
+    "pytest>=7.0",
+    "pytest-mock>=3.0",
+    "freezegun>=1.0",
 ]
 
 [tool.black]
@@ -30,3 +33,7 @@ ignore = ["E501"]
 
 [tool.ruff.isort]
 known-first-party = ["bot", "raider", "schedule", "views", "utils"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
