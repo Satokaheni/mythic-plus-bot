@@ -146,6 +146,15 @@ def test_remove_dps_reopens_slot(make_raider, make_schedule):
     assert "dps" in sched.missing
 
 
+def test_remove_clears_raider_current_runs(make_raider, make_schedule):
+    tank = make_raider(user_id=1, roles=["tank"])
+    sched = make_schedule(raider=tank)
+    tank.add_run(sched)
+    assert sched in tank.current_runs
+    sched.raider_remove(tank)
+    assert sched not in tank.current_runs
+
+
 def test_remove_decrements_signup(make_raider, make_schedule):
     tank = make_raider(user_id=1, roles=["tank"])
     sched = make_schedule(raider=tank)
