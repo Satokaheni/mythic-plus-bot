@@ -1,4 +1,32 @@
+# Environment
 .env
+
+# Python
 __pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.eggs/
+
+# Distribution / packaging
+dist/
+build/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# State files
+state.json
 state.pkl
+state.json.tmp
+
+# Editors
 .vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
