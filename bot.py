@@ -17,6 +17,7 @@ from raider import Raider
 from schedule import Schedule
 from utils import GREEN, RED, YELLOW, load_state, save_state
 from views import KeyRequestButtonView, KeyRequestView, PrePostAddRaiderView, RoleSelectView, WoWSelectionView
+import eventlog
 import undermine
 import watchlist
 from watchlist import Watchlist
@@ -692,6 +693,26 @@ class MyClient(discord.Client):
         # Clean up past schedules and their associated DMs
         now = datetime.now(timezone.utc)
         past_schedule_ids = {sid for sid, s in self.schedules.items() if s.start_time.astimezone(timezone.utc) < now}
+
+        # Record completed runs to the event log before their schedules are removed
+        for _sid in past_schedule_ids:
+            _sched = self.schedules.get(_sid)
+            if _sched is None:
+                continue
+            _roster = []
+            if _sched.team["tank"]:
+                _roster.append(_sched.team["tank"].user_id)
+            if _sched.team["healer"]:
+                _roster.append(_sched.team["healer"].user_id)
+            _roster.extend(r.user_id for r in _sched.team["dps"])
+            eventlog.log_event(
+                "run_completed",
+                ts_utc=_sched.start_time,
+                run_id=_sid,
+                level=_sched.level,
+                run_type=_sched.run_type,
+                roster=_roster,
+            )
 
         # Delete past schedule messages and their reminder messages from the key channel
         if past_schedule_ids:
@@ -1484,6 +1505,16 @@ class MyClient(discord.Client):
                 if self.raiders[user.id] not in self.availability[reaction.emoji]:
                     self.availability[reaction.emoji].append(self.raiders[user.id])
                     await self.new_availability_signup_fill_schedule(self.raiders[user.id], reaction.emoji)
+
+                    _now = datetime.now(timezone.utc)
+                    eventlog.log_event(
+                        "avail_reaction",
+                        ts_utc=_now,
+                        user_id=user.id,
+                        tz=self.raiders[user.id].timezone,
+                        emoji=str(reaction.emoji),
+                        week_of=eventlog.week_of(_now),
+                    )
             else:
                 try:
                     view = WoWSelectionView(timeout=180)  # 3 minutes timeout
@@ -1512,6 +1543,16 @@ class MyClient(discord.Client):
 
                         await self.new_availability_signup_fill_schedule(self.raiders[user.id], reaction.emoji)
 
+                        _now = datetime.now(timezone.utc)
+                        eventlog.log_event(
+                            "avail_reaction",
+                            ts_utc=_now,
+                            user_id=user.id,
+                            tz=self.raiders[user.id].timezone,
+                            emoji=str(reaction.emoji),
+                            week_of=eventlog.week_of(_now),
+                        )
+
                         save_state(
                             self.raiders,
                             self.schedules,
@@ -1539,6 +1580,13 @@ class MyClient(discord.Client):
                 schedule = self.schedules.get(schedule_id)
                 if schedule is None:
                     return
+                eventlog.log_event(
+                    "offer_accepted",
+                    ts_utc=schedule.start_time,
+                    user_id=user.id,
+                    tz=raider.timezone,
+                    run_id=schedule_id,
+                )
                 if raider.check_availability(schedule) and schedule not in raider.current_runs:
                     displaced = schedule.try_displace_off_roler(raider, raider.roles[0])
                     if displaced:
@@ -1602,6 +1650,13 @@ class MyClient(discord.Client):
                 schedule = self.schedules.get(schedule_id)
                 if schedule is None:
                     return
+                eventlog.log_event(
+                    "offer_declined",
+                    ts_utc=schedule.start_time,
+                    user_id=user.id,
+                    tz=raider.timezone,
+                    run_id=schedule_id,
+                )
                 if schedule in raider.current_runs:
                     fill_status = schedule.is_filled()
                     schedule.raider_remove(raider)
