@@ -124,8 +124,18 @@ class Schedule:
         embed.add_field(
             name="🕐 Scheduled Time",
             value=f"<t:{int(self.start_time.astimezone(timezone.utc).timestamp())}:F>",
-            inline=False,
+            inline=True,
         )
+
+        # Add organizer field
+        embed.add_field(
+            name="📣 Posted By",
+            value=f"<@{self.organizer_id}>",
+            inline=True,
+        )
+
+        # Spacer to complete the 3-column row (Scheduled Time | Posted By | blank)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
 
         # Add team composition
         tank_value = self.team["tank"].mention if self.team["tank"] else "`🔍 NEEDED`"
