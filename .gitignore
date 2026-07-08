@@ -27,6 +27,7 @@ state.pkl
 state.json.tmp
 watches.json
 watches.json.tmp
+events.jsonl
 
 # Editors
 .vscode/
