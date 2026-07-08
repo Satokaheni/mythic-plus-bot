@@ -102,19 +102,31 @@ Every event is a flat JSON object:
 
 ### Event types (Phase 1a)
 
+Four types, all logged from the bot's **flow layer** (`on_reaction_add`,
+`hourly_check`) — never from the domain model (`Raider`/`Schedule`), so logging
+adds no model coupling and does not pollute the test suite.
+
 | type | when | key fields | signal |
 |------|------|-----------|--------|
-| `avail_reaction` | user reacts 🟢/🟡/🔴 on the availability post | `emoji`, `week_of` (ISO date of that week's Tuesday) | weak weekly prior |
-| `run_created` | a schedule is created | `organizer_id`, `level`, `run_type`, `run_id`; `ts_utc`=run start | positive (organizer) |
-| `run_joined` | a raider is assigned a slot (signup / DM-accept assignment) | `role`, `run_id`; `ts_utc`=run start | positive |
-| `offer_accepted` | raider reacts ✅ to a fill/offer DM | `run_id`; `ts_utc`=run start | positive |
-| `offer_declined` | raider reacts ❌ to a fill/offer DM | `run_id`; `ts_utc`=run start | **negative** (not free then) |
-| `run_completed` | a run's start time passes (in `hourly_check`, before message deletion) | `level`, `run_type`, `roster` (list of user_ids), `run_id`; one record per run | strongest positive per rostered member |
+| `avail_reaction` | user reacts 🟢/🟡/🔴 on the availability post | `emoji`, `week_of` (ISO date of that week's Tuesday); single-user | weak weekly prior |
+| `offer_accepted` | raider reacts ✅ to a fill/offer DM | `run_id`; `ts_utc`=run start; single-user (local slot = run's slot in their tz) | positive |
+| `offer_declined` | raider reacts ❌ to a fill/offer DM | `run_id`; `ts_utc`=run start; single-user | **negative** (not free then) |
+| `run_completed` | a run's start time passes (in `hourly_check`, before message deletion) | `level`, `run_type`, `roster` (list of user_ids: tank+healer+dps), `run_id`; one record per run | strongest positive per rostered member |
 
-Note on `run_completed`: it is one record with a `roster` list (`user_id` null
-at the top level). Phase 2 expands the roster into per-member slot observations.
-Storing it once keeps the log compact and preserves the final team at run time
-(distinct from `run_joined`, which captures the earlier commitment moment).
+Note on `run_completed`: it is one record with a `roster` list and `user_id`
+null at the top level (the run has multiple members with different timezones, so
+its `local_weekday`/`local_block` are null). Phase 2 expands the roster into
+per-member slot observations using each member's stored timezone. This is the
+**primary positive attendance signal** — it captures who was on the final team.
+
+**Dropped during planning** (redundant with `run_completed`, and messier to
+hook): `run_created` (no clean creation choke point — creation is scattered
+across the key-request / pre-post / repost paths — and the organizer + run
+existence are already in the completed roster) and `run_joined` (would require
+hooking the domain `Raider.add_run`, coupling the model to IO and polluting
+tests, or instrumenting 10 scattered call sites; redundant with `run_completed`
+for attendance). If the "signed up then dropped" signal later proves valuable,
+`run_joined` can be added at the flow-layer signup call sites.
 
 ### Module API (`eventlog.py`)
 
@@ -143,18 +155,14 @@ raider's `timezone` so the local slot is derived. Every call is best-effort
 (the helper swallows IO errors).
 
 1. **Availability reaction** — in `on_reaction_add`, the availability-channel
-   branch that appends to `self.availability[emoji]`: log `avail_reaction`.
-2. **Run created** — where a new `Schedule` is added to `self.schedules`
-   (key-request completion and the pre-post add-raider flow): log `run_created`
-   keyed by the new message id.
-3. **Run joined** — in the signup assignment path (`raider_signup` call sites in
-   the button/role-select views, and the DM-accept assignment): log `run_joined`
-   per assigned raider.
-4. **Offer accepted / declined** — in `on_reaction_add`, the `dm_map` ✅/❌
-   branch: log `offer_accepted` / `offer_declined`.
-5. **Run completed** — in `hourly_check`, in the block that computes
+   branch that appends to `self.availability[emoji]` (both the existing-raider
+   and new-raider paths): log `avail_reaction`.
+2. **Offer accepted / declined** — in `on_reaction_add`, the `dm_map` ✅/❌
+   branch, after the schedule is resolved: log `offer_accepted` on ✅ and
+   `offer_declined` on ❌, with `ts_utc`=the run's start time.
+3. **Run completed** — in `hourly_check`, in the block that computes
    `past_schedule_ids` and deletes messages: before removing each past schedule,
-   log one `run_completed` with its roster.
+   log one `run_completed` with its roster (tank + healer + dps user_ids).
 
 ## Retention Change
 
@@ -166,10 +174,10 @@ beyond what happens today — the durable record lives in the log.
 
 ## Forward-Compatibility with Phase 1b (Raider.io)
 
-- The Raider.io backfill will append `run_completed`/`run_joined`-style events
-  with `source="raiderio"` and `run_id=<keystone_run_id>`, deduped against
-  existing `run_id`s. No schema change — the `source` and `run_id` fields exist
-  from day one for exactly this.
+- The Raider.io backfill will append `run_completed`-style events (each M+ run
+  → one attendance record) with `source="raiderio"` and
+  `run_id=<keystone_run_id>`, deduped against existing `run_id`s. No schema
+  change — the `source` and `run_id` fields exist from day one for exactly this.
 - `local_slot` and the record shape are shared, so backfilled runs bucket
   identically to in-guild runs.
 
