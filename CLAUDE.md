@@ -8,7 +8,7 @@ This file reflects the **current state** of the codebase. Rewrite relevant secti
 
 A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Mythic+ runs. Manages team assembly, availability tracking, DM outreach, and schedule lifecycle.
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 **Entry point:** `bot.py` (`MyClient` class)
 
 ---
@@ -22,6 +22,7 @@ A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Myt
 | `raider.py` | `Raider` class — player profile, availability checks, run tracking |
 | `views.py` | All Discord UI: buttons, dropdowns, modals, ephemeral/persistent views |
 | `utils.py` | Constants, state persistence (save/load JSON), class/role dicts |
+| `eventlog.py` | Append-only availability/attendance event log for forecasting data |
 | `undermine.py` | Async Undermine Exchange API client |
 | `watchlist.py` | `Watch`/`Watchlist` classes — price-watch state, buy-signal detection, formatters |
 | `version.txt` | Current version string (triggers changelog DM on startup if changed) |
@@ -99,6 +100,14 @@ Called when fill status changes (run becomes full or drops below full). DMs all 
 ### Off-Role Displacement
 If a main-role player signs up and an off-role filler holds the slot (>8 hrs before run), the filler is bumped to fill queue and notified.
 
+### Event Logging (forecasting data)
+`eventlog.py` appends best-effort records to `events.jsonl` to build a dataset for a future automatic scheduler (Phase 2). Four event types are logged from the bot's flow layer:
+- `avail_reaction` — 🟢/🟡/🔴 weekly availability reactions (`on_reaction_add`)
+- `offer_accepted` / `offer_declined` — DM ✅/❌ responses to run offers (`on_reaction_add`)
+- `run_completed` — final roster of a run whose scheduled time has passed (`hourly_check`)
+
+`hourly_check` now writes the `run_completed` event **before** deleting a passed run's Discord message, so completed-run history is preserved instead of discarded. Logging never raises and never blocks a bot flow — failures are caught and logged, not surfaced to users.
+
 ### Price Watch (Undermine)
 Owner-only feature gated to `BANKER_ID` — tracks region-wide commodity prices on the Undermine Exchange API (region from `UNDERMINE_REGION`, default `us`; auth via `UNDERMINE_API_KEY`).
 - `price_watch_check` — an hourly background task that sweeps every watched item ID, fetches the current price and the item's last 14 days of daily price history, and evaluates a buy signal: fires when the current price is **strictly below** a rolling low band (a percentile of that item's own daily history).
@@ -154,6 +163,7 @@ In `manage_button` (views.py):
 - Deserialization is a 4-pass process: raiders → schedules → wiring (cross-references) → reconciliation
 - Legacy `state.pkl` migration supported
 - Price-watch state is persisted separately to `watches.json` (see `watchlist.py`)
+- Event log is persisted separately to `events.jsonl` (gitignored, append-only JSONL, see `eventlog.py`) — not part of `state.json` and not migrated
 
 ---
 

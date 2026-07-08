@@ -1,3 +1,8 @@
+## [1.2.0]
+
+### Improvements
+- The bot now logs availability reactions, DM offer accept/declines, and completed-run rosters to a local event log (events.jsonl), and no longer discards run history — building the dataset for a future automatic scheduler.
+
 ## [1.1.0]
 ### Improvements
 - Added an owner-only Undermine Exchange price watch: `!watch`, `!unwatch`, and `!watches` let the banker track region-wide commodities and receive a DM when a price dips into a self-adjusting "pounce" low.
