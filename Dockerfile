@@ -12,7 +12,7 @@ COPY pyproject.toml .
 RUN pip install --no-cache-dir "discord.py>=2.0.0" "python-dotenv>=1.0.0"
 
 # Copy source files
-COPY bot.py raider.py schedule.py views.py utils.py ./
+COPY bot.py raider.py schedule.py views.py utils.py undermine.py watchlist.py eventlog.py ./
 
 # Run as non-root user
 RUN useradd -m botuser && chown -R botuser:botuser /app
