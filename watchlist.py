@@ -2,7 +2,9 @@
 
 import logging
 import math
-from typing import List
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import List, Optional
 
 logger = logging.getLogger("discord")
 
@@ -52,3 +54,38 @@ def percentile(values: List[float], p: float) -> float:
 def median(values: List[float]) -> float:
     """Median = 50th percentile."""
     return percentile(values, 50)
+
+
+@dataclass
+class Watch:
+    """A single watched commodity and its adaptive detection state."""
+
+    item_id: int
+    label: str
+    percentile: float = START_PERCENTILE
+    state: str = "idle"  # "idle" -> armed; "alerted" -> already pinged this dip
+    alert_history: List[datetime] = field(default_factory=list)
+    last_adjusted_at: Optional[datetime] = None
+    added_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class Signal:
+    """Result of evaluating a watch against current + historical prices."""
+
+    fired: bool
+    enough_history: bool
+    price: int
+    median: float
+    low_band: float
+    quantity: int
+
+
+def evaluate(now_price: int, quantity: int, daily_prices: List[int], watch: Watch) -> Signal:
+    """Decide whether the current price sits in the item's recent low band."""
+    window = daily_prices[-BASELINE_WINDOW_DAYS:]
+    if len(window) < MIN_HISTORY_DAYS:
+        return Signal(False, False, now_price, 0.0, 0.0, quantity)
+    m = median(window)
+    low = percentile(window, watch.percentile)
+    return Signal(now_price < low, True, now_price, m, low, quantity)
