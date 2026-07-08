@@ -31,7 +31,7 @@ def test_median_matches_p50():
 
 from datetime import datetime, timezone
 
-from watchlist import Watch, evaluate
+from watchlist import Watch, Signal, evaluate, process_signal
 
 
 def _watch(percentile=35.0):
@@ -65,3 +65,46 @@ def test_evaluate_uses_only_last_window_days():
     history = [100] * 16 + [1000] * 14
     sig = evaluate(950, 500, history, _watch())
     assert sig.median == 1000  # noise outside the window is ignored
+
+
+def _now():
+    return datetime(2026, 7, 8, tzinfo=timezone.utc)
+
+
+def test_process_signal_alerts_once_on_entry():
+    w = _watch()
+    sig = Signal(fired=True, enough_history=True, price=700, median=1000, low_band=800, quantity=5)
+    assert process_signal(w, sig, _now()) is True
+    assert w.state == "alerted"
+    assert len(w.alert_history) == 1
+
+
+def test_process_signal_silent_while_still_low():
+    w = _watch()
+    w.state = "alerted"
+    sig = Signal(fired=True, enough_history=True, price=700, median=1000, low_band=800, quantity=5)
+    assert process_signal(w, sig, _now()) is False
+    assert w.alert_history == []
+
+
+def test_process_signal_rearms_above_median():
+    w = _watch()
+    w.state = "alerted"
+    sig = Signal(fired=False, enough_history=True, price=1100, median=1000, low_band=800, quantity=5)
+    assert process_signal(w, sig, _now()) is False
+    assert w.state == "idle"
+
+
+def test_process_signal_stays_alerted_between_low_band_and_median():
+    w = _watch()
+    w.state = "alerted"
+    sig = Signal(fired=False, enough_history=True, price=900, median=1000, low_band=800, quantity=5)
+    assert process_signal(w, sig, _now()) is False
+    assert w.state == "alerted"
+
+
+def test_process_signal_ignores_insufficient_history():
+    w = _watch()
+    sig = Signal(fired=False, enough_history=False, price=700, median=0.0, low_band=0.0, quantity=5)
+    assert process_signal(w, sig, _now()) is False
+    assert w.state == "idle"

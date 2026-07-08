@@ -89,3 +89,19 @@ def evaluate(now_price: int, quantity: int, daily_prices: List[int], watch: Watc
     m = median(window)
     low = percentile(window, watch.percentile)
     return Signal(now_price < low, True, now_price, m, low, quantity)
+
+
+def process_signal(watch: Watch, signal: Signal, now: datetime) -> bool:
+    """Apply anti-spam rules. Returns True iff an alert DM should be sent now."""
+    if not signal.enough_history:
+        return False
+    if signal.fired:
+        if watch.state == "idle":
+            watch.state = "alerted"
+            watch.alert_history.append(now)
+            return True
+        return False
+    # Not firing: re-arm only once the price recovers above the median.
+    if signal.price > signal.median:
+        watch.state = "idle"
+    return False
