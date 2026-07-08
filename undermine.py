@@ -1,5 +1,6 @@
 """Async client for the Undermine Exchange commodities API."""
 
+import asyncio
 import logging
 import os
 from dataclasses import dataclass
@@ -44,7 +45,7 @@ async def _get_json(session: aiohttp.ClientSession, path: str) -> Optional[dict]
                 logger.warning("Undermine API %s returned status %s", path, resp.status)
                 return None
             return await resp.json()
-    except aiohttp.ClientError as exc:
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
         logger.warning("Undermine API request failed for %s: %s", path, exc)
         return None
 

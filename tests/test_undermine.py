@@ -1,6 +1,8 @@
 """Tests for the Undermine Exchange API client parsers."""
 
-from undermine import NowResult, _parse_daily, _parse_now
+import asyncio
+
+from undermine import NowResult, _get_json, _parse_daily, _parse_now
 
 
 def test_parse_now_extracts_price_and_quantity():
@@ -29,3 +31,49 @@ def test_parse_daily_returns_prices_in_order():
 
 def test_parse_daily_handles_empty():
     assert _parse_daily({"result": {}}) == []
+
+
+class _FakeResp:
+    """Minimal async context manager mimicking aiohttp's response object."""
+
+    def __init__(self, status=200, json_exc=None):
+        self.status = status
+        self._json_exc = json_exc
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+    async def json(self):
+        if self._json_exc:
+            raise self._json_exc
+        return {}
+
+
+class _FakeSession:
+    """get() returns a resp context manager, or raises the given exception."""
+
+    def __init__(self, resp=None, get_exc=None):
+        self._resp = resp
+        self._get_exc = get_exc
+
+    def get(self, url, headers=None):
+        if self._get_exc:
+            raise self._get_exc
+        return self._resp
+
+
+def test_get_json_returns_none_on_timeout():
+    # asyncio.TimeoutError is not a subclass of aiohttp.ClientError — must be
+    # caught explicitly so a slow request degrades to None instead of raising.
+    session = _FakeSession(get_exc=asyncio.TimeoutError())
+    assert asyncio.run(_get_json(session, "/x")) is None
+
+
+def test_get_json_returns_none_on_bad_json():
+    # json.JSONDecodeError/UnicodeDecodeError (ValueError subclasses) from a
+    # corrupt/truncated 200 body must also degrade to None, not raise.
+    session = _FakeSession(resp=_FakeResp(status=200, json_exc=ValueError("bad json")))
+    assert asyncio.run(_get_json(session, "/x")) is None
