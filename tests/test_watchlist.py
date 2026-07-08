@@ -195,6 +195,37 @@ def test_load_missing_file_is_empty():
     assert Watchlist.load(str("does_not_exist_watches.json")).all() == []
 
 
+def test_load_skips_malformed_entry_keeps_valid(tmp_path):
+    import json
+    path = str(tmp_path / "watches.json")
+    valid = {
+        "item_id": 21877,
+        "label": "Cloth",
+        "percentile": 35.0,
+        "state": "idle",
+        "alert_history": [],
+        "last_adjusted_at": None,
+        "added_at": datetime(2026, 7, 1, tzinfo=timezone.utc).isoformat(),
+    }
+    malformed = {"label": "no item_id or added_at"}  # from_dict will KeyError
+    # Malformed entry listed FIRST: under the old whole-loop try/except, an
+    # exception on this entry aborted the loop before the valid entry (which
+    # comes after) was ever processed, dropping it too. Ordering this way
+    # actually exercises the "one bad entry drops everything after it" bug.
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"version": 1, "watches": [malformed, valid]}, f)
+    wl = Watchlist.load(path)
+    assert len(wl.all()) == 1
+    assert wl.get(21877) is not None
+
+
+def test_load_whole_file_corruption_is_empty(tmp_path):
+    path = str(tmp_path / "watches.json")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("{not valid json")
+    assert Watchlist.load(path).all() == []
+
+
 def test_format_alert_contains_key_facts():
     w = _watch()
     sig = Signal(fired=True, enough_history=True, price=700, median=1000.0, low_band=800.0, quantity=1234)

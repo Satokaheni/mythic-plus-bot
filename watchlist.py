@@ -186,11 +186,15 @@ class Watchlist:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            for entry in data.get("watches", []):
+        except (json.JSONDecodeError, ValueError) as exc:
+            logger.warning("Error loading %s: %s. Starting with empty watchlist.", path, exc)
+            return wl
+        for entry in data.get("watches", []):
+            try:
                 watch = Watch.from_dict(entry)
                 wl._watches[watch.item_id] = watch
-        except (json.JSONDecodeError, KeyError, ValueError) as exc:
-            logger.warning("Error loading %s: %s. Starting with empty watchlist.", path, exc)
+            except (KeyError, ValueError, TypeError) as exc:
+                logger.warning("Skipping malformed watch entry in %s: %s", path, exc)
         return wl
 
 
