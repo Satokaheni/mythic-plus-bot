@@ -26,7 +26,8 @@ per item auto-tunes how aggressive the "low" trigger is.
 
 ## Non-Goals (YAGNI)
 
-- No per-raider watchlists — **owner-only** (`COORDINATOR_ID`).
+- No per-raider watchlists — **owner-only**, gated to the **`BANKER_ID`** user
+  (the guild's AH banker; already defined in `.env`).
 - No single-realm item watches — **region-wide commodities only**.
 - No Blizzard/Wowhead name resolution — the owner supplies a friendly label.
   (Item **ID is the canonical key**: it pins down name *and* quality, which a
@@ -41,6 +42,7 @@ New environment variables (in `.env`):
 |-----|---------|---------|
 | `UNDERMINE_API_KEY` | Undermine API key (`Authorization: ApiKey …`) | *(required, already added)* |
 | `UNDERMINE_REGION` | Region for commodity data (`us`/`eu`/`tw`/`kr`) | `us` |
+| `BANKER_ID` | Discord user ID allowed to use price-watch (already defined) | *(required, already present)* |
 
 Tunable constants (in `watchlist.py` or `utils.py`):
 
@@ -111,7 +113,7 @@ Owns the watched items, the pure detection math, and persistence.
   alongside `hourly_check`. Guards with `is_ready()` up front; wraps each
   item in `try/except` so one bad fetch never kills the sweep. Saves
   `watches.json` at the end.
-- Owner-gated commands (checked against `COORDINATOR_ID`), usable in DM or the
+- Owner-gated commands (checked against `BANKER_ID`), usable in DM or the
   key channel:
   - `!watch <itemId> [label...]` — add/update a watch.
   - `!unwatch <itemId>` — remove a watch.
