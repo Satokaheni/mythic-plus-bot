@@ -1472,6 +1472,18 @@ class MyClient(discord.Client):
                 except (discord.Forbidden, discord.NotFound):
                     logger.warning(f"Could not delete command from {message.author} (message not found or forbidden)")
 
+    def _log_avail_reaction(self, raider, emoji) -> None:
+        """Log an availability-reaction event (best-effort)."""
+        now = datetime.now(timezone.utc)
+        eventlog.log_event(
+            "avail_reaction",
+            ts_utc=now,
+            user_id=raider.user_id,
+            tz=raider.timezone,
+            emoji=str(emoji),
+            week_of=eventlog.week_of(now),
+        )
+
     # ---------------------------
     # Reaction Listener
     # ---------------------------
@@ -1506,15 +1518,7 @@ class MyClient(discord.Client):
                     self.availability[reaction.emoji].append(self.raiders[user.id])
                     await self.new_availability_signup_fill_schedule(self.raiders[user.id], reaction.emoji)
 
-                    _now = datetime.now(timezone.utc)
-                    eventlog.log_event(
-                        "avail_reaction",
-                        ts_utc=_now,
-                        user_id=user.id,
-                        tz=self.raiders[user.id].timezone,
-                        emoji=str(reaction.emoji),
-                        week_of=eventlog.week_of(_now),
-                    )
+                    self._log_avail_reaction(self.raiders[user.id], reaction.emoji)
             else:
                 try:
                     view = WoWSelectionView(timeout=180)  # 3 minutes timeout
@@ -1543,15 +1547,7 @@ class MyClient(discord.Client):
 
                         await self.new_availability_signup_fill_schedule(self.raiders[user.id], reaction.emoji)
 
-                        _now = datetime.now(timezone.utc)
-                        eventlog.log_event(
-                            "avail_reaction",
-                            ts_utc=_now,
-                            user_id=user.id,
-                            tz=self.raiders[user.id].timezone,
-                            emoji=str(reaction.emoji),
-                            week_of=eventlog.week_of(_now),
-                        )
+                        self._log_avail_reaction(self.raiders[user.id], reaction.emoji)
 
                         save_state(
                             self.raiders,
