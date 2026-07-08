@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mythic-plus-bot"
+version = "1.0.0"
+description = "Discord bot for managing WoW Mythic+ raid scheduling and availability"
+requires-python = ">=3.9"
+dependencies = [
+    "discord.py>=2.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "pytest>=7.0",
+    "pytest-mock>=3.0",
+    "freezegun>=1.0",
+]
+
+[tool.black]
+line-length = 120
+target-version = ["py39", "py310", "py311"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.ruff.isort]
+known-first-party = ["bot", "raider", "schedule", "views", "utils"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
