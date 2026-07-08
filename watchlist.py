@@ -3,7 +3,7 @@
 import logging
 import math
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 logger = logging.getLogger("discord")
@@ -105,3 +105,17 @@ def process_signal(watch: Watch, signal: Signal, now: datetime) -> bool:
     if signal.price > signal.median:
         watch.state = "idle"
     return False
+
+
+def auto_tune(watch: Watch, now: datetime) -> None:
+    """Adjust the low-band percentile: fast-loosen when starved, slow-tighten when flooding."""
+    if watch.last_adjusted_at is not None and (now - watch.last_adjusted_at) < timedelta(hours=ADJUST_INTERVAL_HOURS):
+        return
+    old_enough = (now - watch.added_at) >= timedelta(days=STARVE_DAYS)
+    recent_starve = [t for t in watch.alert_history if t >= now - timedelta(days=STARVE_DAYS)]
+    recent_flood = [t for t in watch.alert_history if t >= now - timedelta(days=FLOOD_DAYS)]
+    if old_enough and not recent_starve:
+        watch.percentile = min(PERCENTILE_MAX, watch.percentile + LOOSEN_STEP)
+    elif len(recent_flood) >= FLOOD_ALERTS:
+        watch.percentile = max(PERCENTILE_MIN, watch.percentile - TIGHTEN_STEP)
+    watch.last_adjusted_at = now

@@ -1,6 +1,6 @@
 """Tests for the price-watch state, detection, and formatting logic."""
 
-from watchlist import Watch, Signal, evaluate, format_gold, median, percentile, process_signal
+from watchlist import Watch, Signal, auto_tune, evaluate, format_gold, median, percentile, process_signal
 
 
 def test_format_gold_full_denominations():
@@ -29,7 +29,7 @@ def test_median_matches_p50():
     assert median([1, 2, 3, 4]) == 2.5
 
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 def _watch(percentile=35.0):
@@ -106,3 +106,49 @@ def test_process_signal_ignores_insufficient_history():
     sig = Signal(fired=False, enough_history=False, price=700, median=0.0, low_band=0.0, quantity=5)
     assert process_signal(w, sig, _now()) is False
     assert w.state == "idle"
+
+
+def test_auto_tune_loosens_when_starved():
+    now = _now()
+    w = Watch(item_id=1, label="x", percentile=35.0, added_at=now - timedelta(days=30))
+    auto_tune(w, now)
+    assert w.percentile == 40.0  # +5, no alerts ever
+    assert w.last_adjusted_at == now
+
+
+def test_auto_tune_skips_new_watch():
+    now = _now()
+    w = Watch(item_id=1, label="x", percentile=35.0, added_at=now - timedelta(days=2))
+    auto_tune(w, now)
+    assert w.percentile == 35.0  # too young to loosen
+
+
+def test_auto_tune_tightens_when_flooded():
+    now = _now()
+    w = Watch(item_id=1, label="x", percentile=35.0, added_at=now - timedelta(days=30))
+    w.alert_history = [now - timedelta(days=1), now - timedelta(days=2)]  # 2 in last 7 days
+    auto_tune(w, now)
+    assert w.percentile == 34.0  # -1
+
+
+def test_auto_tune_respects_24h_interval():
+    now = _now()
+    w = Watch(item_id=1, label="x", percentile=35.0, added_at=now - timedelta(days=30))
+    w.last_adjusted_at = now - timedelta(hours=5)
+    auto_tune(w, now)
+    assert w.percentile == 35.0  # too soon, unchanged
+
+
+def test_auto_tune_clamps_to_max():
+    now = _now()
+    w = Watch(item_id=1, label="x", percentile=48.0, added_at=now - timedelta(days=30))
+    auto_tune(w, now)
+    assert w.percentile == 50.0  # 48 + 5 clamped to 50
+
+
+def test_auto_tune_clamps_to_min():
+    now = _now()
+    w = Watch(item_id=1, label="x", percentile=10.0, added_at=now - timedelta(days=30))
+    w.alert_history = [now - timedelta(days=1), now - timedelta(days=2)]
+    auto_tune(w, now)
+    assert w.percentile == 10.0  # already at floor
