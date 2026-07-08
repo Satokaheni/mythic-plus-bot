@@ -21,6 +21,12 @@ dev = [
     "freezegun>=1.0",
 ]
 
+# The bot is a flat collection of top-level modules (no package dir), so list
+# them explicitly — otherwise setuptools' flat-layout auto-discovery refuses to
+# build with "Multiple top-level modules discovered".
+[tool.setuptools]
+py-modules = ["bot", "raider", "schedule", "utils", "views", "undermine", "watchlist"]
+
 [tool.black]
 line-length = 120
 target-version = ["py39", "py310", "py311"]
@@ -32,7 +38,7 @@ select = ["E", "F", "W", "I"]
 ignore = ["E501"]
 
 [tool.ruff.isort]
-known-first-party = ["bot", "raider", "schedule", "views", "utils"]
+known-first-party = ["bot", "raider", "schedule", "views", "utils", "undermine", "watchlist"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
