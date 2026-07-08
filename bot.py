@@ -1169,6 +1169,68 @@ class MyClient(discord.Client):
         if message.author.id == self.user.id:
             return
 
+        if message.content.startswith("!watch ") and message.author.id == BANKER_ID:
+            parts = message.content.split(maxsplit=2)
+            if message.guild is not None:
+                try:
+                    await message.delete()
+                except (discord.Forbidden, discord.NotFound):
+                    pass
+            if len(parts) < 2 or not parts[1].isdigit():
+                await message.author.send("Usage: `!watch <itemId> [label]`")
+                return
+            item_id = int(parts[1])
+            label = parts[2] if len(parts) > 2 else f"Item {item_id}"
+            self.watchlist.add(item_id, label)
+            self.watchlist.save()
+            await message.author.send(f"👁️ Now watching **{label}** (item {item_id}).")
+            return
+
+        if message.content.startswith("!unwatch ") and message.author.id == BANKER_ID:
+            parts = message.content.split()
+            if message.guild is not None:
+                try:
+                    await message.delete()
+                except (discord.Forbidden, discord.NotFound):
+                    pass
+            if len(parts) < 2 or not parts[1].isdigit():
+                await message.author.send("Usage: `!unwatch <itemId>`")
+                return
+            item_id = int(parts[1])
+            if self.watchlist.remove(item_id):
+                self.watchlist.save()
+                await message.author.send(f"🚫 Stopped watching item {item_id}.")
+            else:
+                await message.author.send(f"Item {item_id} was not being watched.")
+            return
+
+        if message.content == "!watches" and message.author.id == BANKER_ID:
+            if message.guild is not None:
+                try:
+                    await message.delete()
+                except (discord.Forbidden, discord.NotFound):
+                    pass
+            watches = self.watchlist.all()
+            if not watches:
+                await message.author.send("No items are being watched. Add one with `!watch <itemId> [label]`.")
+                return
+            lines = []
+            async with aiohttp.ClientSession() as session:
+                for watch in watches:
+                    try:
+                        now_result = await undermine.fetch_now(session, watch.item_id)
+                        daily = await undermine.fetch_daily(session, watch.item_id)
+                        sig = (
+                            watchlist.evaluate(now_result.price, now_result.quantity, daily, watch)
+                            if now_result
+                            else None
+                        )
+                    except Exception:  # noqa: BLE001 - display best-effort
+                        sig = None
+                    lines.append(watchlist.format_watch_line(watch, sig))
+            await message.author.send("**Watched items:**\n" + "\n".join(lines))
+            return
+
         if message.content == "!keys":
             if message.author.id in self.raiders:
                 try:
