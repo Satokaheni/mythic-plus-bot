@@ -1,6 +1,6 @@
 """Tests for the price-watch state, detection, and formatting logic."""
 
-from watchlist import Watch, Signal, Watchlist, auto_tune, evaluate, format_gold, median, percentile, process_signal
+from watchlist import Watch, Signal, Watchlist, auto_tune, evaluate, format_alert, format_gold, format_watch_line, median, percentile, process_signal
 
 
 def test_format_gold_full_denominations():
@@ -193,3 +193,29 @@ def test_save_load_round_trip(tmp_path):
 
 def test_load_missing_file_is_empty():
     assert Watchlist.load(str("does_not_exist_watches.json")).all() == []
+
+
+def test_format_alert_contains_key_facts():
+    w = _watch()
+    sig = Signal(fired=True, enough_history=True, price=700, median=1000.0, low_band=800.0, quantity=1234)
+    text = format_alert(w, sig)
+    assert "Netherweave Cloth" in text
+    assert "21877" in text
+    assert "30% below" in text  # (1 - 700/1000) * 100
+    assert "1,234" in text
+    assert "wowhead.com/item=21877" in text
+
+
+def test_format_watch_line_insufficient_data():
+    w = _watch()
+    line = format_watch_line(w, None)
+    assert "insufficient data" in line
+    assert "21877" in line
+
+
+def test_format_watch_line_with_signal():
+    w = _watch()
+    sig = Signal(fired=False, enough_history=True, price=1000, median=1000.0, low_band=800.0, quantity=5)
+    line = format_watch_line(w, sig)
+    assert "Netherweave Cloth" in line
+    assert "p35" in line

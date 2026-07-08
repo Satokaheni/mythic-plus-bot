@@ -6,6 +6,7 @@ import math
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from textwrap import dedent
 from typing import List, Optional
 
 logger = logging.getLogger("discord")
@@ -191,3 +192,28 @@ class Watchlist:
         except (json.JSONDecodeError, KeyError, ValueError) as exc:
             logger.warning("Error loading %s: %s. Starting with empty watchlist.", path, exc)
         return wl
+
+
+def format_alert(watch: Watch, signal: Signal) -> str:
+    """Build the buy-signal DM sent to the banker."""
+    pct_below = (1 - signal.price / signal.median) * 100 if signal.median else 0
+    return dedent(
+        f"""
+        🛎️ **Buy signal** — {watch.label} (item {watch.item_id})
+        Current: **{format_gold(signal.price)}** ({pct_below:.0f}% below {format_gold(int(signal.median))} median)
+        Low band (p{watch.percentile:.0f}): {format_gold(int(signal.low_band))}
+        Quantity available: {signal.quantity:,}
+        https://www.wowhead.com/item={watch.item_id}
+        """
+    ).strip()
+
+
+def format_watch_line(watch: Watch, signal: Optional[Signal]) -> str:
+    """Build one line describing a watch for the !watches command."""
+    if signal is None or not signal.enough_history:
+        return f"• **{watch.label}** (item {watch.item_id}) — p{watch.percentile:.0f}, {watch.state} — insufficient data"
+    return (
+        f"• **{watch.label}** (item {watch.item_id}) — "
+        f"now {format_gold(signal.price)}, median {format_gold(int(signal.median))}, "
+        f"low band {format_gold(int(signal.low_band))} (p{watch.percentile:.0f}), {watch.state}"
+    )
