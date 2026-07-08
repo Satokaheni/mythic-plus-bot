@@ -1,0 +1,8 @@
+.env
+.git/
+.github/
+.vscode/
+__pycache__/
+*.pyc
+state.pkl
+version.txt

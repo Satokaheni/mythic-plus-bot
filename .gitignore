@@ -25,6 +25,8 @@ htmlcov/
 state.json
 state.pkl
 state.json.tmp
+watches.json
+watches.json.tmp
 
 # Editors
 .vscode/
@@ -33,3 +35,6 @@ state.json.tmp
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude Code local settings (machine-specific)
+.claude/settings.local.json
