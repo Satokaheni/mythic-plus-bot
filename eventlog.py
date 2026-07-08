@@ -66,7 +66,7 @@ def log_event(
         record.update(fields)
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
-    except (OSError, ValueError) as exc:
+    except Exception as exc:  # best-effort: logging must never break a bot flow
         logger.warning("eventlog: failed to log %s event: %s", event_type, exc)
 
 

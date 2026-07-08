@@ -94,3 +94,12 @@ def test_log_event_never_raises_on_bad_path():
     log_event("avail_reaction", ts_utc=ts, user_id=1,
               path="no_such_dir/deeper/events.jsonl", emoji="🟢", week_of="2026-07-07")
     # Reaching here without an exception is the assertion.
+
+
+def test_log_event_never_raises_on_unserializable_field(tmp_path):
+    path = str(tmp_path / "events.jsonl")
+    ts = datetime(2026, 7, 8, 20, 30, tzinfo=timezone.utc)
+    # A set is not JSON-serializable -> json.dumps raises TypeError inside log_event.
+    log_event("avail_reaction", ts_utc=ts, user_id=1, path=path, weird={1, 2, 3})
+    # Must not raise; nothing should have been written (dumps failed before write).
+    assert read_events(path) == []
