@@ -1,6 +1,6 @@
 """Tests for the price-watch state, detection, and formatting logic."""
 
-from watchlist import Watch, Signal, auto_tune, evaluate, format_gold, median, percentile, process_signal
+from watchlist import Watch, Signal, Watchlist, auto_tune, evaluate, format_gold, median, percentile, process_signal
 
 
 def test_format_gold_full_denominations():
@@ -152,3 +152,44 @@ def test_auto_tune_clamps_to_min():
     w.alert_history = [now - timedelta(days=1), now - timedelta(days=2)]
     auto_tune(w, now)
     assert w.percentile == 10.0  # already at floor
+
+
+def test_add_creates_and_updates():
+    wl = Watchlist()
+    w = wl.add(21877, "Netherweave Cloth")
+    assert w.item_id == 21877
+    # Adding the same id again updates the label, not a duplicate.
+    wl.add(21877, "Netherweave (renamed)")
+    assert len(wl.all()) == 1
+    assert wl.get(21877).label == "Netherweave (renamed)"
+
+
+def test_remove():
+    wl = Watchlist()
+    wl.add(1, "a")
+    assert wl.remove(1) is True
+    assert wl.remove(1) is False
+    assert wl.all() == []
+
+
+def test_save_load_round_trip(tmp_path):
+    path = str(tmp_path / "watches.json")
+    wl = Watchlist()
+    w = wl.add(21877, "Netherweave Cloth")
+    w.percentile = 42.0
+    w.state = "alerted"
+    w.alert_history = [datetime(2026, 7, 1, tzinfo=timezone.utc)]
+    w.last_adjusted_at = datetime(2026, 7, 2, tzinfo=timezone.utc)
+    wl.save(path)
+
+    loaded = Watchlist.load(path)
+    lw = loaded.get(21877)
+    assert lw.label == "Netherweave Cloth"
+    assert lw.percentile == 42.0
+    assert lw.state == "alerted"
+    assert lw.alert_history == [datetime(2026, 7, 1, tzinfo=timezone.utc)]
+    assert lw.last_adjusted_at == datetime(2026, 7, 2, tzinfo=timezone.utc)
+
+
+def test_load_missing_file_is_empty():
+    assert Watchlist.load(str("does_not_exist_watches.json")).all() == []

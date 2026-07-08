@@ -1,7 +1,9 @@
 """Price-watch state, buy-signal detection, and display formatting."""
 
+import json
 import logging
 import math
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
@@ -68,6 +70,29 @@ class Watch:
     last_adjusted_at: Optional[datetime] = None
     added_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
+    def to_dict(self) -> dict:
+        return {
+            "item_id": self.item_id,
+            "label": self.label,
+            "percentile": self.percentile,
+            "state": self.state,
+            "alert_history": [t.isoformat() for t in self.alert_history],
+            "last_adjusted_at": self.last_adjusted_at.isoformat() if self.last_adjusted_at else None,
+            "added_at": self.added_at.isoformat(),
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Watch":
+        return cls(
+            item_id=int(d["item_id"]),
+            label=d["label"],
+            percentile=float(d.get("percentile", START_PERCENTILE)),
+            state=d.get("state", "idle"),
+            alert_history=[datetime.fromisoformat(t) for t in d.get("alert_history", [])],
+            last_adjusted_at=datetime.fromisoformat(d["last_adjusted_at"]) if d.get("last_adjusted_at") else None,
+            added_at=datetime.fromisoformat(d["added_at"]),
+        )
+
 
 @dataclass
 class Signal:
@@ -119,3 +144,50 @@ def auto_tune(watch: Watch, now: datetime) -> None:
     elif len(recent_flood) >= FLOOD_ALERTS:
         watch.percentile = max(PERCENTILE_MIN, watch.percentile - TIGHTEN_STEP)
     watch.last_adjusted_at = now
+
+
+class Watchlist:
+    """In-memory store of watched commodities, persisted to watches.json."""
+
+    def __init__(self) -> None:
+        self._watches: dict = {}
+
+    def add(self, item_id: int, label: str) -> Watch:
+        existing = self._watches.get(item_id)
+        if existing is not None:
+            existing.label = label
+            return existing
+        watch = Watch(item_id=item_id, label=label)
+        self._watches[item_id] = watch
+        return watch
+
+    def remove(self, item_id: int) -> bool:
+        return self._watches.pop(item_id, None) is not None
+
+    def get(self, item_id: int) -> Optional[Watch]:
+        return self._watches.get(item_id)
+
+    def all(self) -> List[Watch]:
+        return list(self._watches.values())
+
+    def save(self, path: str = "watches.json") -> None:
+        data = {"version": 1, "watches": [w.to_dict() for w in self._watches.values()]}
+        tmp_path = f"{path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_path, path)
+
+    @classmethod
+    def load(cls, path: str = "watches.json") -> "Watchlist":
+        wl = cls()
+        if not os.path.exists(path):
+            return wl
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for entry in data.get("watches", []):
+                watch = Watch.from_dict(entry)
+                wl._watches[watch.item_id] = watch
+        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            logger.warning("Error loading %s: %s. Starting with empty watchlist.", path, exc)
+        return wl
