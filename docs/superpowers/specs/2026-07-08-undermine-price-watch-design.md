@@ -130,9 +130,11 @@ For each watched item, each hourly cycle:
    If fewer than `MIN_HISTORY_DAYS` (7) points, skip (report "insufficient
    data" in `!watches`).
 3. `M` ← median(points); `L` ← percentile(points, `watch.percentile`).
-4. **Signal fires when `P_now ≤ L`** — current price sits in the bottom
-   `percentile`% of its *own* recent prices. The sliding window makes the
-   baseline drift down automatically as the expansion ages.
+4. **Signal fires when `P_now < L`** — current price sits *strictly below* the
+   bottom `percentile`% of its *own* recent prices. The sliding window makes
+   the baseline drift down automatically as the expansion ages. (Strict `<`,
+   not `≤`, so a flat/typical price — where the low band equals the median —
+   never fires; only a genuine dip does.)
 
 ### Anti-spam (one ping per dip)
 
