@@ -8,6 +8,7 @@ from textwrap import dedent
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
+import aiohttp
 import discord
 from discord.ext import tasks
 from dotenv import load_dotenv
@@ -793,9 +794,37 @@ class MyClient(discord.Client):
 
     @tasks.loop(hours=1)
     async def price_watch_check(self):
-        """Hourly Undermine price sweep (implemented in Task 9)."""
+        """Hourly sweep of watched commodities; DMs the banker on a buy signal."""
         if not self.is_ready():
+            logger.warning("price_watch_check: Bot not ready yet, skipping this iteration")
             return
+
+        watches = self.watchlist.all()
+        if not watches:
+            return
+
+        now = datetime.now(timezone.utc)
+        banker = None
+        async with aiohttp.ClientSession() as session:
+            for watch in watches:
+                try:
+                    now_result = await undermine.fetch_now(session, watch.item_id)
+                    if now_result is None:
+                        continue
+                    daily = await undermine.fetch_daily(session, watch.item_id)
+                    signal = watchlist.evaluate(now_result.price, now_result.quantity, daily, watch)
+                    if watchlist.process_signal(watch, signal, now):
+                        if banker is None:
+                            banker = await self.fetch_user(BANKER_ID)
+                        try:
+                            await banker.send(watchlist.format_alert(watch, signal))
+                        except discord.HTTPException:
+                            logger.warning("price_watch_check: could not DM banker for item %s", watch.item_id)
+                    watchlist.auto_tune(watch, now)
+                except Exception as exc:  # noqa: BLE001 - one bad item must not kill the sweep
+                    logger.warning("price_watch_check failed for item %s: %s", watch.item_id, exc)
+
+        self.watchlist.save()
 
     # ---------------------------
     # Weekly Availability Reset
