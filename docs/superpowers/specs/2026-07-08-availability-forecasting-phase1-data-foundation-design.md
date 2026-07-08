@@ -47,6 +47,21 @@ backfill appends into the *same* event store with no rework.
 - No `!datastats` or any new user command (Phase 1b+).
 - No changes to registration, the availability post, or the schedule UI.
 
+## Data Volume & Retention (decision)
+
+The log is **append-only and unpruned**. Estimated volume for a small guild is
+~50–100 events/week at ~200 bytes/line ≈ **~1 MB/year** — trivial to append to
+and to read in full, for years. File size is not a concern worth engineering
+around.
+
+The real concern — that stale availability shouldn't count as much as recent
+availability — is **deferred to Phase 2**, handled at *prediction time* via a
+lookback window + recency weighting over the raw log. We deliberately do **not**
+prune: keeping the full history lets the window be retuned later, and avoids any
+destructive delete logic (append-only also sidesteps the "one bad record drops
+everything" class of bug). If operational tidiness ever demands it, the log can
+be *rotated* (old events moved to an archive file), never deleted.
+
 ## The Event Store
 
 New module **`eventlog.py`** owning an append-only log file `events.jsonl`
