@@ -151,6 +151,8 @@ Evaluated at most once per `ADJUST_INTERVAL_HOURS` (24) per item:
 - **Too loose** — `FLOOD_ALERTS` (2)+ alerts in the last `FLOOD_DAYS` (7) days →
   `percentile += TIGHTEN_STEP` (−1). Slow tighten.
 - Clamp to `[PERCENTILE_MIN, PERCENTILE_MAX]` = `[10, 50]`.
+- A watch must be at least `STARVE_DAYS` old before it can loosen, so a
+  brand-new watch doesn't jump to 50% before it has had a real chance to fire.
 
 Fast-up / slow-down converges toward each item's sweet spot without thrashing.
 
