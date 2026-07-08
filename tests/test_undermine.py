@@ -77,3 +77,23 @@ def test_get_json_returns_none_on_bad_json():
     # corrupt/truncated 200 body must also degrade to None, not raise.
     session = _FakeSession(resp=_FakeResp(status=200, json_exc=ValueError("bad json")))
     assert asyncio.run(_get_json(session, "/x")) is None
+
+
+def test_api_key_read_lazily(monkeypatch):
+    # bot.py imports undermine before calling load_dotenv(), so the key must
+    # be read at call time, not captured as a module-level global at import time.
+    import undermine
+    monkeypatch.setenv("UNDERMINE_API_KEY", "LAZY123")
+    assert undermine._api_key() == "LAZY123"
+
+
+def test_region_defaults_to_us(monkeypatch):
+    import undermine
+    monkeypatch.delenv("UNDERMINE_REGION", raising=False)
+    assert undermine._region() == "us"
+
+
+def test_region_read_lazily(monkeypatch):
+    import undermine
+    monkeypatch.setenv("UNDERMINE_REGION", "eu")
+    assert undermine._region() == "eu"
