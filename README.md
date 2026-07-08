@@ -1,6 +1,8 @@
 # Mythic+ Bot
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
+[![Tests](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/tests.yml/badge.svg)](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/tests.yml)
+[![Docker](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/docker.yml/badge.svg)](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/docker.yml)
+![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.9+-green.svg)
 ![Discord.py](https://img.shields.io/badge/discord.py-2.0+-blue.svg)
 
@@ -8,23 +10,31 @@ A Discord bot for managing World of Warcraft Mythic+ raid scheduling and team co
 
 ## Features
 
-- **Availability Tracking**: Players can react with emoji to indicate their weekly availability (green/yellow/red)
-- **Automatic Scheduling**: Creates and manages 7-day raid schedules with automatic signup and team assignment
-- **Smart Team Assembly**: Automatically assigns players to roles (tank, healer, DPS) based on their class and preferences
-- **Direct Messaging**: DMs players to confirm signups and notify them of scheduled runs with timezone conversion
-- **Dynamic Availability**: Fills remaining spots by reaching out to available raiders across different availability tiers
-- **Conflict Detection**: Alerts the coordinator when multiple unfilled schedules exist at the same time
-- **Persistent State**: Saves bot state between restarts using pickle serialization
-- **Interactive Button UI**: Modern Discord button interface for signups and removals with automatic user registration
-- **Smart Registration**: First-time users are automatically prompted to select their class, roles, and timezone via DMs
+- **Automatic Weekly Reset**: Availability message resets every Tuesday at noon CST — no manual intervention needed
+- **Availability Tracking**: Players react with emoji to indicate weekly availability (green/yellow/red)
+- **Key Request Flow**: Players create run requests via DM with level, day, time, and run type selection
+- **Smart Team Assembly**: Automatically assigns players to roles (tank, healer, DPS) based on class and preferences
+- **Off-Role Displacement**: Main-role players can bump secondary fillers out of slots more than 8 hours before a run
+- **Fill Queue**: Players can join a full run as fill; the full-run DM includes the current roster so they know who's in
+- **Direct Messaging**: DMs players to confirm signups, notify of run changes, and ask available players to fill open spots
+- **DM Retry System**: Automatically resends unanswered DM requests after 2 hours
+- **Conflict Detection**: Alerts the coordinator when multiple unfilled schedules overlap and could form a complete team
+- **Schedule Management**: Organizers can delete or modify runs; coordinators/admins can add, remove, and reassign raiders
+- **Pre-Post Raider Addition**: Organizers can add registered raiders before publishing a schedule
+- **Interactive Button UI**: Embed-based schedule posts with Sign Up, Remove, and Manage buttons
+- **Smart Registration**: First-time users are prompted to select class, roles, and timezone when clicking a button
+- **Persistent State**: Bot state saved to `state.json` with automatic migration from legacy pickle format
+- **Docker Support**: Dockerfile included for containerized deployment
+- **Changelog Announcements**: Bot posts and pins a changelog message on startup when the version changes
+- **Price Watch**: Owner-only tracking of Undermine Exchange commodity prices, with a DM alert when a price dips into a self-adjusting low band
 
 ## Installation
 
 ### Requirements
 
-- Python 3.8+
-- `discord.py` library
-- `python-dotenv` for environment configuration
+- Python 3.9+
+- `discord.py >= 2.0`
+- `python-dotenv`
 
 ### Setup
 
@@ -39,7 +49,7 @@ cd mythic-plus-bot
 pip install discord.py python-dotenv
 ```
 
-3. Create a `.env` file in the project root with the following variables:
+3. Create a `.env` file in the project root:
 ```env
 CLIENT_KEY=your_discord_bot_token
 AVAIL_CHANNEL_ID=your_availability_channel_id
@@ -50,6 +60,10 @@ HEALER_ROLE_ID=your_healer_role_id
 DPS_ROLE_ID=your_dps_role_id
 COORDINATOR_ID=your_coordinator_user_id
 MYTHIC_PLUS_ID=your_mythic_plus_role_id
+ADMIN_ID=comma_separated_admin_user_ids
+BANKER_ID=your_banker_user_id
+UNDERMINE_API_KEY=your_undermine_exchange_api_key
+UNDERMINE_REGION=us
 ```
 
 4. Run the bot:
@@ -57,206 +71,172 @@ MYTHIC_PLUS_ID=your_mythic_plus_role_id
 python bot.py
 ```
 
+### Docker
+
+```bash
+docker build -t mythic-plus-bot .
+docker run --env-file .env mythic-plus-bot
+```
+
 ## Usage
 
 ### Availability Signup
 
-1. Post an availability message using the `AVAILABILITY_MESSAGE` format
-2. Players react with:
-   - 🟢 - Available
-   - 🟡 - Maybe Available
-   - 🔴 - Not Available
+The bot automatically posts a fresh availability message every **Tuesday at noon CST**. Players react with:
+- 🟢 — Available
+- 🟡 — Maybe Available
+- 🔴 — Not Available
 
-### Scheduling
+First-time reactions prompt automatic class/role/timezone registration via DM.
 
-The bot automatically creates 7-day raid schedules. Players can:
-- Click the **Sign Up** button to confirm attendance
-- Click the **Remove** button to remove themselves from a run
-- Receive DMs asking if they can fill open spots (respond with ✅ or ❌)
-- First-time users will be prompted to register their class, roles, and timezone when clicking a button
+The `!avail` command (coordinator/admin only) can still be used to manually post an availability message if needed.
+
+### Key Request Flow
+
+Players click the **⚔️ CLICK TO CREATE A REQUEST** button pinned in the key channel, or use `!key`. The bot DMs them to select:
+1. Key level (Climb10, 10, 11, 12+)
+2. Day (next 7 days)
+3. Start time (in their registered timezone)
+4. Run type (one key or multiple keys)
+
+If a run already exists at that time, the bot asks if the player wants to join it instead. After submitting, the organizer can optionally add registered raiders before the schedule is published.
+
+### Schedule Buttons
+
+Each schedule embed has three buttons:
+
+- **✅ Sign Up** — Join the run. Unregistered users are prompted to register via DM first. Multi-role raiders choose which role to fill.
+- **❌ Remove** — Leave the run. If the run was full, the bot searches for a replacement.
+- **⚙️ Manage** — Available to the organizer, coordinator, and admins.
+
+### Manage Menu
+
+**Organizer view:**
+- **Delete Run** — Removes the schedule and DMs all signed-up members
+- **Modify Run** — Edit key level, date, time, and note via a modal; members are notified of changes
+
+**Coordinator/Admin view** (also shown when the coordinator is the run organizer):
+- **Add Raider** — Search by display name (partial match) and assign a role
+- **Remove Raider** — Remove any signed-up raider from the run
+- **Change Role** — Move a raider to a different role slot
+
+### Price Watch
+
+An owner-only feature for tracking Undermine Exchange commodity prices. Only the user configured as `BANKER_ID` can use it. The bot polls the Undermine Exchange API every hour for each watched item (region-wide commodities only, via `UNDERMINE_REGION`) and DMs the banker when the current price dips **below** a rolling low band computed from that item's own last 14 days of price history. Each item has its own adaptive threshold: it starts at the 35th percentile, loosens if the item goes 7 days without an alert, tightens if it alerts twice or more in 7 days, and is clamped to a 10–50 percentile range. To avoid spam, an item won't alert again until its price recovers back above the median.
+
+- `!watch <itemId> [label]` — start watching an item, with an optional friendly label
+- `!unwatch <itemId>` — stop watching an item
+- `!watches` — list everything currently being watched
+
+These commands work via DM or in the key channel, and only respond to the configured `BANKER_ID`.
 
 ### Commands
 
-- `!key` - Request a Mythic+ key run with custom parameters (works in KEY_CHANNEL)
-- `!modify` - Update your class, roles, and timezone (works in KEY_CHANNEL or DMs)
-- `!avail` - Post a new availability message for the week (coordinator only)
-
-## User Interface
-
-### Schedule Interaction
-
-Each posted schedule includes an interactive embed with two buttons:
-
-- **✅ Sign Up**: Click to join the run
-  - If you're not registered, you'll receive a DM to select your class, roles, and timezone
-  - If you're already registered, you'll be added to the appropriate role slot
-  - Confirmation sent via DM
-
-- **❌ Remove**: Click to remove yourself from the run
-  - Removes you from the schedule and notifies via DM
-  - Triggers a search for replacement players if the run was previously full
-
-### Registration Flow
-
-First-time users clicking any schedule button will:
-1. Receive a notification in Discord to check their DMs
-2. Get a DM with interactive dropdowns to select:
-   - WoW Class (Warrior, Paladin, Hunter, etc.)
-   - Primary Role (Tank, Healer, or DPS)
-   - Secondary Role (optional, different from primary)
-   - US Timezone (Eastern, Central, Mountain, Pacific, Alaska, Hawaii)
-3. Submit their selections
-4. Automatically be signed up for the schedule they clicked (if available)
-
-### DM-Based Availability
-
-When a schedule has open spots, the bot will DM available players:
-- React with ✅ to accept and join the run
-- React with ❌ to decline (won't be asked again for this run)
-- No response triggers a retry after 2 hours
+| Command | Channel | Permission | Description |
+|---------|---------|------------|-------------|
+| `!avail` | `AVAIL_CHANNEL` | Coordinator/Admin | Manually post a new availability message |
+| `!key` | `KEY_CHANNEL` | Anyone | Start the key request flow via DM |
+| `!keys` | Any | Anyone | DMs you your currently scheduled runs |
+| `!modify` | `KEY_CHANNEL` or DM | Anyone | Update your class, roles, and timezone |
+| `!setup` | `KEY_CHANNEL` | Coordinator/Admin | Re-post and pin the key request button |
+| `!cleanup` | `AVAIL_CHANNEL` or `KEY_CHANNEL` | Coordinator/Admin | Purge both channels and reset all state (preserves raiders) |
+| `!watch <itemId> [label]` | `KEY_CHANNEL` or DM | Banker only | Start watching an item's price |
+| `!unwatch <itemId>` | `KEY_CHANNEL` or DM | Banker only | Stop watching an item |
+| `!watches` | `KEY_CHANNEL` or DM | Banker only | List currently watched items |
 
 ## Project Structure
 
 ```
 mythic-plus-bot/
 ├── bot.py              # Main Discord bot client and event handlers
-├── raider.py           # Raider dataclass representing a player
+├── raider.py           # Raider class representing a player
 ├── schedule.py         # Schedule class for raid team composition
 ├── utils.py            # Utility functions and constants
-├── views.py            # Discord UI components (buttons, dropdowns, views)
-├── state.pkl           # Persisted bot state (auto-generated)
+├── views.py            # Discord UI components (buttons, dropdowns, modals, views)
+├── undermine.py        # Async Undermine Exchange API client
+├── watchlist.py        # Watch/Watchlist state, buy-signal detection, formatters
+├── state.json          # Persisted bot state (auto-generated)
+├── watches.json        # Persisted price-watch state (auto-generated)
+├── version.txt         # Tracks last deployed version for changelog announcements
+├── CHANGELOG.md        # Version history
+├── Dockerfile          # Container build file
+├── .dockerignore       # Docker build exclusions
 └── README.md           # This file
 ```
 
-### Key Components
-
-- **`Raider`**: Represents a player with class, roles, timezone, and availability tracking
-- **`Schedule`**: Manages a single raid with team slots (tank, healer, DPS, fill)
-- **`MyClient`**: Main Discord bot class handling events, DMs, and scheduling logic
-- **`ScheduleButtonView`**: Interactive button interface for schedule signups and removals
-- **Discord UI Views**: Reusable selection dropdowns for class/role/timezone selection and key requests
-
 ## Configuration
-
-The bot uses several configuration options in `.env`:
 
 | Variable | Description |
 |----------|-------------|
 | `CLIENT_KEY` | Discord bot token from Discord Developer Portal |
-| `AVAIL_CHANNEL_ID` | ID of the Discord channel for availability tracking |
-| `KEY_CHANNEL_ID` | ID of the Discord channel for raid scheduling |
+| `AVAIL_CHANNEL_ID` | Channel ID for weekly availability tracking |
+| `KEY_CHANNEL_ID` | Channel ID for schedule posts and key requests |
 | `GUILD_ID` | Discord server (guild) ID |
 | `TANK_ROLE_ID` | Discord role ID for tank position mentions |
 | `HEALER_ROLE_ID` | Discord role ID for healer position mentions |
 | `DPS_ROLE_ID` | Discord role ID for DPS position mentions |
-| `COORDINATOR_ID` | Discord user ID of the raid coordinator |
-| `MYTHIC_PLUS_ID` | Discord role ID for Mythic+ raiders |
-
-### Raid Schedule Configuration
-
-Modify `create_schedules()` in `utils.py` to change raid times per weekday.
+| `COORDINATOR_ID` | User ID of the raid coordinator |
+| `MYTHIC_PLUS_ID` | Role ID for the Mythic+ raider role (used in availability message ping) |
+| `ADMIN_ID` | Comma-separated user IDs with coordinator-level manage permissions |
+| `BANKER_ID` | User ID allowed to use the price watch commands (`!watch`, `!unwatch`, `!watches`) |
+| `UNDERMINE_API_KEY` | API key for the Undermine Exchange API |
+| `UNDERMINE_REGION` | Region for price lookups (optional, default `us`) |
 
 ## Class and Role Support
 
 **Supported Classes**: Warrior, Paladin, Hunter, Rogue, Priest, Death Knight, Shaman, Mage, Warlock, Monk, Druid, Demon Hunter, Evoker
 
-**Available Roles**: Tank, Healer, DPS (configured per class in `ROLES_DICT`)
-
-## Development
-
-### Running with Debugger
-
-Use VS Code's Python debugger with `bot.py` as the target. Set breakpoints in event handlers like:
-- `on_ready()` - Bot startup
-- `on_message()` - Message handling
-- `on_reaction_add()` - Reaction events (for DM responses)
-- `ScheduleButtonView.signup_button()` / `remove_button()` - Button interaction handling
-
-### Testing
-
-1. Create a throwaway Discord server for testing
-2. Configure `.env` with test channel and role IDs
-3. Run the bot and interact with it directly in Discord
-
-**Testing Checklist:**
-- [ ] Availability reactions (🟢/🟡/🔴)
-- [ ] Key requests via `!keys` command
-- [ ] Button-based signups (registered users)
-- [ ] Button-based registration flow (new users)
-- [ ] Button-based removals
-- [ ] DM confirmations and notifications
-- [ ] Schedule message updates after interactions
-- [ ] State persistence across restarts
-
-### State Persistence
-
-Bot state is automatically saved to `state.pkl` including:
-- Registered raiders and their info
-- Active schedules
-- Player availability tiers
-- DM message tracking
-- Availability message ID
-
-State is restored on bot startup.
+**Available Roles**: Tank, Healer, DPS
 
 ## Architecture Notes
 
-- **Single-threaded**: The bot runs as a single process with async event handlers
-- **Message ID Persistence**: The availability message ID is stored in `state.pkl` to survive restarts
-- **Timezone Support**: All times are stored in player timezones and converted for DM notifications
-- **Pickle Serialization**: Simple file-based persistence; consider migrating to SQLite for larger deployments
-- **Self-Contained Views**: Button interactions are handled within Discord UI views themselves rather than in global event handlers, following Discord.py best practices
-- **Persistent Button Views**: Schedule signup/removal buttons use persistent views (`timeout=None`) that survive bot restarts
+- **Single-threaded async**: The bot runs as a single process with async event handlers and background tasks (hourly cleanup, weekly availability reset)
+- **JSON Persistence**: State is stored in `state.json`; legacy `state.pkl` is automatically migrated on first boot
+- **Timezone-Aware Datetimes**: All schedule times are stored as timezone-aware datetime objects; DMs display times in each raider's registered timezone
+- **Persistent Views**: Button views use `timeout=None` and are re-registered on startup so interactions survive bot restarts
+- **Circular Import Guards**: Cross-module type hints use `TYPE_CHECKING` guards to avoid circular imports at runtime
 
-## Known Limitations
+## Development
 
-- Message IDs must be persisted externally (currently in state.pkl)
-- No database backend - uses in-memory dictionaries with file persistence
-- Timezone selection is limited to US timezones
-- No support for recurring weekly schedules (requires manual re-creation)
+### Running Locally
 
-## Future Enhancements
+```bash
+python bot.py
+```
 
-- Database persistence (SQLite/PostgreSQL)
-- Web dashboard for schedule management
-- Automatic weekly schedule generation
-- International timezone support
-- Player performance/DPS tracking
-- Equipment and stat suggestions
+### Linting
 
-## Changelog
+```bash
+pip install ruff
+ruff check .
+ruff format .
+```
 
-### Version 2.0.0 (Current)
+### Testing
 
-#### New Features
-- **!modify Command**: Raiders can now update their class, roles, and timezone via `!modify` command (works in KEY_CHANNEL or DMs)
-- **Timezone-Aware Scheduling**: Key request times are now displayed in the raider's own timezone
-- **Roster Information in DMs**: All DM notifications now include current roster and open spots
-- **Smart Conflict Detection**: Bot alerts coordinator when multiple unfilled schedules can form a complete team (1 tank, 1 healer, 3 DPS) within 5 hours
-- **DM Retry System**: Automatically retries unanswered DMs after 2 hours for unfilled schedules
-- **Empty Schedule Cleanup**: Schedules are automatically deleted when all players remove themselves (0 signups)
-- **Past Schedule Cleanup**: Old schedules and their DMs are automatically cleaned up after they've started
+```bash
+pip install pytest
+pytest
+```
 
-#### Improvements
-- **Performance**: Converted raider run tracking from O(n) lists to O(1) sets for faster lookups
-- **Interaction Handling**: Fixed "unknown interaction" errors by deferring responses immediately
-- **Message Deletion**: Improved error handling for message deletion with proper NotFound exception catching
-- **Data Migration**: Added automatic migration for converting old list-based data to sets on bot startup
-- **Secondary Role Selection**: Added "none" option for raiders with only one role
-
-#### Bug Fixes
-- Fixed NotFound errors when deleting command messages
-- Fixed interaction timeout errors in button handlers
-- Fixed AttributeError with raider.member attribute
-- Fixed channel cache misses with fetch_channel fallback
-- Fixed timezone comparison issues in past schedule detection
-- Fixed empty schedule edge cases
-
-#### Technical Changes
-- Migrated `current_runs` and `denied_runs` from lists to sets
-- Added timezone parameter to KeyRequestView and WoWTimeRangeSelect
-- All schedule times are now timezone-aware datetime objects
-- Improved state persistence with automatic data migration
+**Manual Testing Checklist:**
+- [ ] Availability auto-reset fires on Tuesday at noon CST
+- [ ] Availability reactions (🟢/🟡/🔴) and first-time registration
+- [ ] Key request flow via button and `!key` command
+- [ ] Pre-post raider addition before schedule publish
+- [ ] Button signup (registered and unregistered users)
+- [ ] Button removal and fill search
+- [ ] Full-run DM includes current roster
+- [ ] Organizer manage: delete and modify run
+- [ ] Coordinator manage: add, remove, and change raider role
+- [ ] Coordinator who created a run gets coordinator manage menu
+- [ ] DM outreach and retry for unfilled schedules
+- [ ] Off-role displacement (8h+ before run)
+- [ ] Fill queue signup and prompt
+- [ ] `!modify` — class/role/timezone update
+- [ ] `!cleanup` — channel purge and state reset
+- [ ] State persistence across restarts
+- [ ] Changelog post on version bump
 
 ## Support
 
