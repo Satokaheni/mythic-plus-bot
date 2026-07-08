@@ -1,6 +1,6 @@
 """Tests for the price-watch state, detection, and formatting logic."""
 
-from watchlist import format_gold, median, percentile
+from watchlist import Watch, Signal, evaluate, format_gold, median, percentile, process_signal
 
 
 def test_format_gold_full_denominations():
@@ -30,8 +30,6 @@ def test_median_matches_p50():
 
 
 from datetime import datetime, timezone
-
-from watchlist import Watch, Signal, evaluate, process_signal
 
 
 def _watch(percentile=35.0):
