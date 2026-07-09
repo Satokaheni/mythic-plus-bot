@@ -93,3 +93,40 @@ def load_character_mappings(path: str = _MAPPINGS_PATH) -> List[dict]:
     except (json.JSONDecodeError, OSError, ValueError) as exc:
         logger.warning("Failed to load %s: %s", path, exc)
         return []
+
+
+async def harvest(raiders: dict, session, mappings: List[dict], events_path: str = eventlog.EVENTS_PATH) -> int:
+    """Append new raiderio_run events for registered mapped raiders. Idempotent (dedup by (user_id, run_id))."""
+    existing = eventlog.read_events(events_path)
+    seen = {(e.get("user_id"), e.get("run_id")) for e in existing if e.get("source") == "raiderio"}
+    added = 0
+    for entry in mappings:
+        try:
+            discord_id = int(entry["discord_id"])
+        except (KeyError, ValueError, TypeError):
+            continue
+        raider = raiders.get(discord_id)
+        if raider is None:
+            continue  # unregistered -> no timezone -> skip
+        realm_slug = entry.get("realm_slug")
+        character = entry.get("character")
+        if not realm_slug or not character:
+            continue
+        runs = await fetch_character_runs(session, realm_slug, character)
+        for run in runs:
+            key = (discord_id, run.run_id)
+            if key in seen:
+                continue
+            eventlog.log_event(
+                "raiderio_run",
+                ts_utc=run.completed_at,
+                user_id=discord_id,
+                tz=raider.timezone,
+                source="raiderio",
+                run_id=run.run_id,
+                level=run.level,
+                path=events_path,
+            )
+            seen.add(key)
+            added += 1
+    return added

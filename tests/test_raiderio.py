@@ -3,9 +3,12 @@
 import asyncio
 import json
 from datetime import datetime, timezone
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
+import eventlog
 import raiderio
-from raiderio import Run, _parse_completed_at, _parse_runs, fetch_character_runs, load_character_mappings
+from raiderio import Run, _parse_completed_at, _parse_runs, fetch_character_runs, harvest, load_character_mappings
 
 
 def test_parse_completed_at_utc():
@@ -109,3 +112,38 @@ def test_load_character_mappings_missing_and_corrupt(tmp_path):
     with open(bad, "w", encoding="utf-8") as f:
         f.write("{ not json")
     assert load_character_mappings(bad) == []
+
+
+def test_harvest_registered_only_and_dedup(tmp_path, monkeypatch):
+    path = str(tmp_path / "events.jsonl")
+    raiders = {111: SimpleNamespace(timezone=ZoneInfo("America/Chicago"))}  # 111 registered; 222 not
+    mappings = [
+        {"discord_id": "111", "realm_slug": "malganis", "character": "Main", "alt_of": None},
+        {"discord_id": "222", "realm_slug": "dalaran", "character": "Ghost", "alt_of": None},
+    ]
+    runs_by_char = {
+        "Main": [Run(1, datetime(2026, 7, 8, 20, 0, tzinfo=timezone.utc), 20)],
+        "Ghost": [Run(2, datetime(2026, 7, 8, 20, 0, tzinfo=timezone.utc), 15)],
+    }
+
+    async def fake_fetch(session, realm_slug, character):
+        return runs_by_char.get(character, [])
+
+    monkeypatch.setattr(raiderio, "fetch_character_runs", fake_fetch)
+
+    added = asyncio.run(harvest(raiders, None, mappings, events_path=path))
+    assert added == 1  # only the registered user's run
+    events = eventlog.read_events(path)
+    assert len(events) == 1
+    e = events[0]
+    assert e["type"] == "raiderio_run"
+    assert e["user_id"] == 111
+    assert e["run_id"] == 1
+    assert e["source"] == "raiderio"
+    assert e["level"] == 20
+    assert e["local_weekday"] is not None  # timezone applied -> real local slot
+
+    # Idempotent: re-running adds nothing (dedup by (user_id, run_id))
+    added2 = asyncio.run(harvest(raiders, None, mappings, events_path=path))
+    assert added2 == 0
+    assert len(eventlog.read_events(path)) == 1
