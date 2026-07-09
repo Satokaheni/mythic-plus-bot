@@ -85,14 +85,20 @@ class Team:
     probs: dict  # user_id -> predicted probability
 
 
+def _is_primary(raider, role: str) -> bool:
+    return bool(raider.roles) and raider.roles[0] == role
+
+
 def select_team(candidates: List[tuple]) -> Optional[Team]:
-    """Pick 1 tank + 1 healer + 3 dps (distinct, multi-role aware) maximizing mean prob."""
+    """Pick 1 tank + 1 healer + 3 dps (distinct, multi-role aware), preferring PRIMARY-role
+    assignments (mains first; off-role only to fill a role no primary can cover), then max mean prob."""
     prob = {id(r): p for r, p in candidates}
     tanks = [r for r, _ in candidates if "tank" in r.roles]
     healers = [r for r, _ in candidates if "healer" in r.roles]
     dps_pool = [r for r, _ in candidates if "dps" in r.roles]
 
     best: Optional[Team] = None
+    best_key = None
     for tank in tanks:
         for healer in healers:
             if healer is tank:
@@ -100,16 +106,20 @@ def select_team(candidates: List[tuple]) -> Optional[Team]:
             remaining = [r for r in dps_pool if r is not tank and r is not healer]
             if len(remaining) < 3:
                 continue
-            top3 = sorted(remaining, key=lambda r: prob[id(r)], reverse=True)[:3]
-            mean = (prob[id(tank)] + prob[id(healer)] + sum(prob[id(r)] for r in top3)) / 5
-            if best is None or mean > best.mean:
-                members = [tank, healer, *top3]
+            # maximize (primary-dps count, then prob) for the trio
+            top3 = sorted(remaining, key=lambda r: (_is_primary(r, "dps"), prob[id(r)]), reverse=True)[:3]
+            assigned = [(tank, "tank"), (healer, "healer")] + [(d, "dps") for d in top3]
+            primary_count = sum(_is_primary(m, role) for m, role in assigned)
+            mean = sum(prob[id(m)] for m, _ in assigned) / 5
+            key = (primary_count, mean)
+            if best_key is None or key > best_key:
+                best_key = key
                 best = Team(
                     tank=tank,
                     healer=healer,
                     dps=top3,
                     mean=mean,
-                    probs={r.user_id: prob[id(r)] for r in members},
+                    probs={m.user_id: prob[id(m)] for m, _ in assigned},
                 )
     return best
 
@@ -152,12 +162,12 @@ def format_preview(ranked: List[tuple]) -> str:
         return "🔮 No role-valid team could be predicted from this week's available pool."
     best_dt, best = ranked[0]
     ts = int(best_dt.timestamp())
-    dps_str = ", ".join(f"{r.name} ({_p(best, r)})" for r in best.dps)
+    dps_str = ", ".join(f"{r.name} ({_p(best, r)}){_role_tag(r, 'dps')}" for r in best.dps)
     lines = [
         "🔮 **Predicted run for this week** (dry-run — not scheduled)",
         f"🕐 <t:{ts}:F> · confidence **{best.mean:.2f}**",
-        f"🛡️ {best.tank.name} ({_p(best, best.tank)})  "
-        f"💚 {best.healer.name} ({_p(best, best.healer)})  ⚔️ {dps_str}",
+        f"🛡️ {best.tank.name} ({_p(best, best.tank)}){_role_tag(best.tank, 'tank')}  "
+        f"💚 {best.healer.name} ({_p(best, best.healer)}){_role_tag(best.healer, 'healer')}  ⚔️ {dps_str}",
     ]
     for dt, team in ranked[1:3]:
         lines.append(f"_Runner-up: <t:{int(dt.timestamp())}:F> ({team.mean:.2f})_")
@@ -167,3 +177,7 @@ def format_preview(ranked: List[tuple]) -> str:
 def _p(team: "Team", raider) -> str:
     """Per-member predicted probability for display."""
     return f"{team.probs.get(raider.user_id, 0.0):.2f}"
+
+
+def _role_tag(raider, role: str) -> str:
+    return "" if (raider.roles and raider.roles[0] == role) else " ⚠️off-role"

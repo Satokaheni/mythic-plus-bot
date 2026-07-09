@@ -177,3 +177,39 @@ def test_format_preview_contains_pick_and_is_empty_safe():
     text = format_preview(ranked)
     assert "R1" in text and "R2" in text     # tank + healer names appear
     assert "dry-run" in text.lower()
+
+
+def test_select_team_prefers_primary_over_more_available_offrole():
+    cands = [
+        (_raider(1, ["tank"]), 0.9),
+        (_raider(2, ["healer"]), 0.4),           # primary healer, LOW availability
+        (_raider(3, ["dps", "healer"]), 0.9),    # off-role healer (primary dps), HIGH availability
+        (_raider(4, ["dps"]), 0.8),
+        (_raider(5, ["dps"]), 0.7),
+        (_raider(6, ["dps"]), 0.6),
+    ]
+    team = select_team(cands)
+    assert team.healer.user_id == 2               # primary healer chosen despite lower availability
+    assert 3 in {r.user_id for r in team.dps}     # raider 3 used at their primary (dps)
+
+
+def test_select_team_uses_offrole_only_when_no_primary_available():
+    cands = [
+        (_raider(1, ["tank"]), 0.9),
+        (_raider(2, ["dps", "healer"]), 0.8),   # only healer-capable is off-role
+        (_raider(3, ["dps"]), 0.7),
+        (_raider(4, ["dps"]), 0.6),
+        (_raider(5, ["dps"]), 0.5),
+    ]
+    team = select_team(cands)
+    assert team is not None
+    assert team.healer.user_id == 2   # off-role healer used because no primary healer exists
+
+
+def test_format_preview_marks_offrole_member():
+    green = [_raider(1, ["tank"]), _raider(2, ["dps", "healer"]),
+             _raider(3, ["dps"]), _raider(4, ["dps"]), _raider(5, ["dps"])]
+    obs_by_user = {r.user_id: [Obs(r.user_id, 3, 10, 0.0, 1)] * 3 + [Obs(r.user_id, 3, 0, 0.0, -1)] for r in green}
+    ranked = rank_slots(green, obs_by_user, datetime(2026, 7, 8, 12, 0, tzinfo=CST))
+    text = format_preview(ranked)
+    assert "off-role" in text.lower()   # raider 2 forced into healer (off-role) is marked
