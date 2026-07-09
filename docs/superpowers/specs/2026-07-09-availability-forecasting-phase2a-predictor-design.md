@@ -99,10 +99,13 @@ person (timezones differ). So:
 - For each candidate slot and each green raider, compute the raider's **local**
   `(weekday, block)` at that absolute time and score it with the predictor.
 - **`select_team(scored_candidates) -> Team | None`:** choose 5 raiders covering
-  1 tank + 1 healer + 3 dps (respecting multi-role raiders), maximizing the
-  team's **mean** predicted probability. Small pool → a bounded search
-  (assign scarce roles tank/healer first, then best-3 dps from the rest);
-  returns `None` if roles can't be covered.
+  1 tank + 1 healer + 3 dps (distinct, multi-role aware). Selection is
+  **lexicographic**: maximize the number of members assigned to their **primary**
+  role (`roles[0]`) first — mains first, an off-role assignment used only to fill
+  a role no primary can cover — then break ties by the team's **mean** predicted
+  probability. Exhaustive over tank×healer with a provably-optimal greedy dps
+  trio; returns `None` if roles can't be covered. `format_preview` tags any
+  off-role member so the banker sees when a flex assignment was forced.
 - **Rank** candidate slots by their best team's mean probability. The top slot is
   the pick; keep the top few for the preview (and, later, 2b's fallback chain).
 

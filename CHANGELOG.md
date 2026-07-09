@@ -2,6 +2,7 @@
 
 ### Improvements
 - The bot now automatically predicts the best weekly Mythic+ run from availability and play-history data and DMs a dry-run preview to the banker (no runs are created yet).
+- Predicted rosters now prefer people's primary role, only using someone's off-role when a role can't be filled by a main (off-role assignments are flagged in the preview).
 
 ### Bug Fixes
 - Raider.io run history is now parsed from the response's top-level fields (there is no `result` wrapper), so the daily harvest actually collects runs.
