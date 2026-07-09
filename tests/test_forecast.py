@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-from forecast import Obs, observations, predict
+from forecast import Obs, observations, predict, Team, can_field_team, select_team
 
 CST = ZoneInfo("America/Chicago")
 NOW = datetime(2026, 7, 9, 12, 0, tzinfo=timezone.utc)
@@ -90,3 +90,48 @@ def test_predict_prior_from_same_weekday_when_block_thin():
     from forecast import BASE_PRIOR
     user_obs = [_obs(2, 9, 0.0, 1), _obs(2, 10, 0.0, 1), _obs(2, 11, 0.0, 1)]
     assert predict(user_obs, 2, 5) > BASE_PRIOR
+
+
+def test_select_team_picks_role_valid_max_mean():
+    cands = [
+        (_raider(1, ["tank"]), 0.9),
+        (_raider(2, ["healer"]), 0.8),
+        (_raider(3, ["dps"]), 0.7),
+        (_raider(4, ["dps"]), 0.6),
+        (_raider(5, ["dps"]), 0.5),
+        (_raider(6, ["dps"]), 0.1),  # weakest dps should be left out
+    ]
+    team = select_team(cands)
+    assert team is not None
+    assert team.tank.user_id == 1 and team.healer.user_id == 2
+    assert {r.user_id for r in team.dps} == {3, 4, 5}
+    assert 0.6 < team.mean < 0.75
+
+
+def test_select_team_multirole_fills_scarce_role():
+    # Only raider 1 can tank; a multi-role raider must cover healer.
+    cands = [
+        (_raider(1, ["tank", "dps"]), 0.9),
+        (_raider(2, ["healer", "dps"]), 0.8),
+        (_raider(3, ["dps"]), 0.7),
+        (_raider(4, ["dps"]), 0.6),
+        (_raider(5, ["dps"]), 0.5),
+    ]
+    team = select_team(cands)
+    assert team is not None
+    assert team.tank.user_id == 1
+    assert team.healer.user_id == 2
+    assert {r.user_id for r in team.dps} == {3, 4, 5}
+
+
+def test_select_team_none_when_roles_uncoverable():
+    cands = [(_raider(i, ["dps"]), 0.5) for i in range(1, 6)]  # no tank/healer
+    assert select_team(cands) is None
+
+
+def test_can_field_team():
+    ok = [_raider(1, ["tank"]), _raider(2, ["healer"]), _raider(3, ["dps"]),
+          _raider(4, ["dps"]), _raider(5, ["dps"])]
+    assert can_field_team(ok) is True
+    assert can_field_team(ok[:4]) is False           # only 4
+    assert can_field_team([_raider(i, ["dps"]) for i in range(5)]) is False  # no tank/healer

@@ -94,3 +94,48 @@ def predict(user_obs: List[Obs], weekday: int, block: int) -> float:
     wneg = sum(_weight(o.age_weeks) for o in block_obs if o.sign < 0)
     prior = _base_rate(user_obs, weekday)
     return (wpos + ALPHA * prior) / (wpos + wneg + ALPHA)
+
+
+@dataclass
+class Team:
+    """A role-valid roster, its mean predicted availability, and per-member probs."""
+
+    tank: object
+    healer: object
+    dps: list
+    mean: float
+    probs: dict  # user_id -> predicted probability
+
+
+def select_team(candidates: List[tuple]) -> Optional[Team]:
+    """Pick 1 tank + 1 healer + 3 dps (distinct, multi-role aware) maximizing mean prob."""
+    prob = {id(r): p for r, p in candidates}
+    tanks = [r for r, _ in candidates if "tank" in r.roles]
+    healers = [r for r, _ in candidates if "healer" in r.roles]
+    dps_pool = [r for r, _ in candidates if "dps" in r.roles]
+
+    best: Optional[Team] = None
+    for tank in tanks:
+        for healer in healers:
+            if healer is tank:
+                continue
+            remaining = [r for r in dps_pool if r is not tank and r is not healer]
+            if len(remaining) < 3:
+                continue
+            top3 = sorted(remaining, key=lambda r: prob[id(r)], reverse=True)[:3]
+            mean = (prob[id(tank)] + prob[id(healer)] + sum(prob[id(r)] for r in top3)) / 5
+            if best is None or mean > best.mean:
+                members = [tank, healer, *top3]
+                best = Team(
+                    tank=tank,
+                    healer=healer,
+                    dps=top3,
+                    mean=mean,
+                    probs={r.user_id: prob[id(r)] for r in members},
+                )
+    return best
+
+
+def can_field_team(raiders: list) -> bool:
+    """Feasibility gate: can a role-valid team of 5 be assembled from these raiders?"""
+    return select_team([(r, 1.0) for r in raiders]) is not None
