@@ -64,32 +64,36 @@ def test_predict_no_data_returns_base_prior():
     assert predict([], 2, 9) == BASE_PRIOR
 
 
-def test_predict_recent_positive_scores_high():
-    p = predict([_obs(2, 9, 0.0, 1), _obs(2, 9, 0.0, 1), _obs(2, 9, 0.0, 1)], 2, 9)
-    assert p > 0.7
+def test_predict_positives_score_above_prior():
+    from forecast import BASE_PRIOR
+    p = predict([_obs(2, 9, 0.0, 1)] * 3, 2, 9)   # 3.3/5 = 0.66
+    assert p > 0.6 and p > BASE_PRIOR
+
+
+def test_predict_more_positives_score_higher():
+    # Denser play in a block -> higher score (rank by activity density).
+    p2 = predict([_obs(2, 9, 0.0, 1)] * 2, 2, 9)   # 0.575
+    p5 = predict([_obs(2, 9, 0.0, 1)] * 5, 2, 9)   # 0.757
+    assert p5 > p2
 
 
 def test_predict_negatives_pull_down():
-    hi = predict([_obs(2, 9, 0.0, 1), _obs(2, 9, 0.0, 1)], 2, 9)
-    lo = predict([_obs(2, 9, 0.0, 1), _obs(2, 9, 0.0, 1),
-                  _obs(2, 9, 0.0, -1), _obs(2, 9, 0.0, -1)], 2, 9)
+    hi = predict([_obs(2, 9, 0.0, 1)] * 2, 2, 9)                              # 0.575
+    lo = predict([_obs(2, 9, 0.0, 1)] * 2 + [_obs(2, 9, 0.0, -1)] * 2, 2, 9)  # 0.383
     assert lo < hi
 
 
 def test_predict_recency_decay_old_positive_weaker():
-    # A recent negative elsewhere on the same weekday holds the base-rate prior
-    # below 1.0, so the block positive's recency actually moves the score
-    # (an all-positive history would give prior=1.0 and mask the decay).
-    recent = predict([_obs(2, 9, 0.0, 1), _obs(2, 10, 0.0, -1)], 2, 9)
-    old = predict([_obs(2, 9, 52.0, 1), _obs(2, 10, 0.0, -1)], 2, 9)  # ~1yr old -> decayed
+    recent = predict([_obs(2, 9, 0.0, 1)], 2, 9)   # 0.433
+    old = predict([_obs(2, 9, 52.0, 1)], 2, 9)     # ~0.150 (heavily decayed)
     assert old < recent
 
 
-def test_predict_prior_from_same_weekday_when_block_thin():
-    # No obs in (2, 5), but strong positives elsewhere on weekday 2 -> prior lifts it above BASE_PRIOR.
+def test_predict_empty_block_stays_at_prior_despite_other_activity():
+    # The anti-saturation property: heavy play in a DIFFERENT block must NOT lift
+    # an empty block above the base prior (the old per-person prior did, causing saturation).
     from forecast import BASE_PRIOR
-    user_obs = [_obs(2, 9, 0.0, 1), _obs(2, 10, 0.0, 1), _obs(2, 11, 0.0, 1)]
-    assert predict(user_obs, 2, 5) > BASE_PRIOR
+    assert predict([_obs(2, 10, 0.0, 1)] * 5, 2, 5) == BASE_PRIOR
 
 
 def test_select_team_picks_role_valid_max_mean():

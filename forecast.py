@@ -65,31 +65,12 @@ def _weight(age_weeks: float) -> float:
     return 0.5 ** (age_weeks / HALF_LIFE)
 
 
-def _weighted_fraction(obs: List[Obs]) -> Optional[float]:
-    """Recency-weighted positive fraction over the given obs, or None if empty."""
-    wpos = sum(_weight(o.age_weeks) for o in obs if o.sign > 0)
-    wneg = sum(_weight(o.age_weeks) for o in obs if o.sign < 0)
-    total = wpos + wneg
-    if total == 0:
-        return None
-    return wpos / total
-
-
-def _base_rate(user_obs: List[Obs], weekday: int) -> float:
-    """Prior: same-weekday positive fraction, else all obs, else BASE_PRIOR."""
-    same_day = _weighted_fraction([o for o in user_obs if o.weekday == weekday])
-    if same_day is not None:
-        return same_day
-    overall = _weighted_fraction(user_obs)
-    return overall if overall is not None else BASE_PRIOR
-
-
 def predict(user_obs: List[Obs], weekday: int, block: int) -> float:
     """P(user available at local weekday/block), recency-weighted + smoothed."""
     block_obs = [o for o in user_obs if o.weekday == weekday and o.block == block]
     wpos = sum(_weight(o.age_weeks) for o in block_obs if o.sign > 0)
     wneg = sum(_weight(o.age_weeks) for o in block_obs if o.sign < 0)
-    prior = _base_rate(user_obs, weekday)
+    prior = BASE_PRIOR
     return (wpos + ALPHA * prior) / (wpos + wneg + ALPHA)
 
 
