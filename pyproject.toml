@@ -25,7 +25,7 @@ dev = [
 # them explicitly — otherwise setuptools' flat-layout auto-discovery refuses to
 # build with "Multiple top-level modules discovered".
 [tool.setuptools]
-py-modules = ["bot", "raider", "schedule", "utils", "views", "undermine", "watchlist", "eventlog", "raiderio"]
+py-modules = ["bot", "raider", "schedule", "utils", "views", "undermine", "watchlist", "eventlog", "raiderio", "forecast"]
 
 [tool.black]
 line-length = 120

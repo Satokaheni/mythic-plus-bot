@@ -18,6 +18,7 @@ from schedule import Schedule
 from utils import GREEN, RED, YELLOW, load_state, save_state
 from views import KeyRequestButtonView, KeyRequestView, PrePostAddRaiderView, RoleSelectView, WoWSelectionView
 import eventlog
+import forecast
 import raiderio
 import undermine
 import watchlist
@@ -903,6 +904,40 @@ class MyClient(discord.Client):
         )
 
     # ---------------------------
+    # Weekly Forecast Dry-Run Preview
+    # ---------------------------
+
+    @tasks.loop(time=time(hour=12, minute=0, tzinfo=_CST))
+    async def forecast_preview(self):
+        """Wednesday-noon-CST dry-run: predict the best run from the green pool, DM BANKER_ID."""
+        if datetime.now(_CST).weekday() != 2:  # 2 = Wednesday (day after the Tuesday availability post)
+            return
+        if not self.is_ready():
+            return
+
+        green = list(self.availability.get(GREEN, []))
+        if not forecast.can_field_team(green):
+            logger.info("forecast_preview: green pool cannot field a role-valid team; skipping")
+            return
+
+        try:
+            now = datetime.now(timezone.utc)
+            events = eventlog.read_events()
+            obs = forecast.observations(events, self.raiders, now)
+            obs_by_user = {}
+            for o in obs:
+                obs_by_user.setdefault(o.user_id, []).append(o)
+            ranked = forecast.rank_slots(green, obs_by_user, datetime.now(_CST))
+            text = forecast.format_preview(ranked)
+            banker = await self.fetch_user(BANKER_ID)
+            await banker.send(text)
+            logger.info("forecast_preview: sent dry-run preview to banker")
+        except discord.HTTPException as exc:
+            logger.warning("forecast_preview: could not DM banker: %s", exc)
+        except Exception as exc:  # noqa: BLE001 - preview must never kill the loop
+            logger.warning("forecast_preview failed: %s", exc)
+
+    # ---------------------------
     # Key Request Flow
     # ---------------------------
     async def _ask_organizer_role(self, user: discord.User, raider) -> Optional[str]:
@@ -1165,6 +1200,10 @@ class MyClient(discord.Client):
         # Start daily Raider.io harvest (initial backfill runs on first iteration)
         if not self.raiderio_harvest.is_running():
             self.raiderio_harvest.start()
+
+        # Start weekly forecast dry-run preview (Wednesdays at noon CST)
+        if not self.forecast_preview.is_running():
+            self.forecast_preview.start()
 
     async def on_ready(self):
         """Called when the bot is ready. Loads state from file."""
