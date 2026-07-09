@@ -232,8 +232,11 @@ def test_predict_negatives_pull_down():
 
 
 def test_predict_recency_decay_old_positive_weaker():
-    recent = predict([_obs(2, 9, 0.0, 1)], 2, 9)
-    old = predict([_obs(2, 9, 52.0, 1)], 2, 9)  # ~1 year old -> heavily decayed
+    # A recent negative elsewhere on the same weekday holds the base-rate prior
+    # below 1.0, so the block positive's recency actually moves the score
+    # (an all-positive history would give prior=1.0 and mask the decay).
+    recent = predict([_obs(2, 9, 0.0, 1), _obs(2, 10, 0.0, -1)], 2, 9)
+    old = predict([_obs(2, 9, 52.0, 1), _obs(2, 10, 0.0, -1)], 2, 9)  # ~1yr old -> decayed
     assert old < recent
 
 
@@ -458,12 +461,16 @@ def test_rank_slots_prefers_slot_where_team_is_available():
     # Everyone (Central) has strong positives at Thursday(3) block 10; nothing elsewhere.
     green = [_raider(1, ["tank"]), _raider(2, ["healer"]),
              _raider(3, ["dps"]), _raider(4, ["dps"]), _raider(5, ["dps"])]
-    obs_by_user = {r.user_id: [Obs(r.user_id, 3, 10, 0.0, 1)] * 3 for r in green}
+    # Positives at Thu(3) block 10, plus a same-weekday negative at block 0 so the
+    # weekday prior stays < 1 and block 10 is the uniquely best slot (an all-positive
+    # history would tie every slot at 1.0 and make the "best" arbitrary).
+    obs_by_user = {r.user_id: [Obs(r.user_id, 3, 10, 0.0, 1)] * 3 + [Obs(r.user_id, 3, 0, 0.0, -1)]
+                   for r in green}
     now_cst = datetime(2026, 7, 8, 12, 0, tzinfo=CST)  # a Wednesday
     ranked = rank_slots(green, obs_by_user, now_cst)
     assert ranked, "expected at least one role-valid slot"
     best_dt, best_team = ranked[0]
-    # best slot maps to Central Thursday block 10 (20:00) for all members
+    # best slot maps to Central Thursday block 10 for all members
     local = best_dt.astimezone(CST)
     assert local.weekday() == 3 and local.hour // 2 == 10
     assert best_team.mean > 0.6
@@ -480,7 +487,8 @@ def test_format_preview_contains_pick_and_is_empty_safe():
     assert "no" in format_preview([]).lower()
     green = [_raider(1, ["tank"]), _raider(2, ["healer"]),
              _raider(3, ["dps"]), _raider(4, ["dps"]), _raider(5, ["dps"])]
-    obs_by_user = {r.user_id: [Obs(r.user_id, 3, 10, 0.0, 1)] * 3 for r in green}
+    obs_by_user = {r.user_id: [Obs(r.user_id, 3, 10, 0.0, 1)] * 3 + [Obs(r.user_id, 3, 0, 0.0, -1)]
+                   for r in green}
     ranked = rank_slots(green, obs_by_user, datetime(2026, 7, 8, 12, 0, tzinfo=CST))
     text = format_preview(ranked)
     assert "R1" in text and "R2" in text     # tank + healer names appear
