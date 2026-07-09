@@ -2,10 +2,13 @@
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger("discord")
+
+_CST = ZoneInfo("America/Chicago")
 
 HALF_LIFE = 4.0      # weeks; recency decay half-life
 ALPHA = 2.0          # smoothing pseudo-count
@@ -139,3 +142,53 @@ def select_team(candidates: List[tuple]) -> Optional[Team]:
 def can_field_team(raiders: list) -> bool:
     """Feasibility gate: can a role-valid team of 5 be assembled from these raiders?"""
     return select_team([(r, 1.0) for r in raiders]) is not None
+
+
+def _next_slot_datetime(now_cst: datetime, weekday: int, block: int) -> datetime:
+    """Next CST-anchored datetime with the given weekday/2h-block, strictly after now (within 7 days)."""
+    days_ahead = (weekday - now_cst.weekday()) % 7
+    candidate = now_cst.replace(hour=block * 2, minute=0, second=0, microsecond=0) + timedelta(days=days_ahead)
+    if candidate <= now_cst:
+        candidate += timedelta(days=7)
+    return candidate
+
+
+def rank_slots(green: list, obs_by_user: Dict[int, List["Obs"]], now_cst: datetime) -> List[tuple]:
+    """Rank the coming week's candidate slots by the best role-valid team's mean availability."""
+    ranked = []
+    for weekday in range(7):
+        for block in range(12):
+            slot_cst = _next_slot_datetime(now_cst, weekday, block)
+            candidates = []
+            for raider in green:
+                local = slot_cst.astimezone(raider.timezone)
+                p = predict(obs_by_user.get(raider.user_id, []), local.weekday(), local.hour // 2)
+                candidates.append((raider, p))
+            team = select_team(candidates)
+            if team is not None:
+                ranked.append((slot_cst.astimezone(timezone.utc), team))
+    ranked.sort(key=lambda t: t[1].mean, reverse=True)
+    return ranked
+
+
+def format_preview(ranked: List[tuple]) -> str:
+    """Dry-run preview DM text for the top pick + up to two runners-up."""
+    if not ranked:
+        return "🔮 No role-valid team could be predicted from this week's available pool."
+    best_dt, best = ranked[0]
+    ts = int(best_dt.timestamp())
+    dps_str = ", ".join(f"{r.name} ({_p(best, r)})" for r in best.dps)
+    lines = [
+        "🔮 **Predicted run for this week** (dry-run — not scheduled)",
+        f"🕐 <t:{ts}:F> · confidence **{best.mean:.2f}**",
+        f"🛡️ {best.tank.name} ({_p(best, best.tank)})  "
+        f"💚 {best.healer.name} ({_p(best, best.healer)})  ⚔️ {dps_str}",
+    ]
+    for dt, team in ranked[1:3]:
+        lines.append(f"_Runner-up: <t:{int(dt.timestamp())}:F> ({team.mean:.2f})_")
+    return "\n".join(lines)
+
+
+def _p(team: "Team", raider) -> str:
+    """Per-member predicted probability for display."""
+    return f"{team.probs.get(raider.user_id, 0.0):.2f}"

@@ -1,10 +1,10 @@
 """Tests for the availability forecaster."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-from forecast import Obs, observations, predict, Team, can_field_team, select_team
+from forecast import Obs, can_field_team, format_preview, observations, predict, rank_slots, select_team
 
 CST = ZoneInfo("America/Chicago")
 NOW = datetime(2026, 7, 9, 12, 0, tzinfo=timezone.utc)
@@ -135,3 +135,41 @@ def test_can_field_team():
     assert can_field_team(ok) is True
     assert can_field_team(ok[:4]) is False           # only 4
     assert can_field_team([_raider(i, ["dps"]) for i in range(5)]) is False  # no tank/healer
+
+
+def test_rank_slots_prefers_slot_where_team_is_available():
+    # Everyone (Central) has strong positives at Thursday(3) block 10; nothing elsewhere.
+    green = [_raider(1, ["tank"]), _raider(2, ["healer"]),
+             _raider(3, ["dps"]), _raider(4, ["dps"]), _raider(5, ["dps"])]
+    # Positives at Thu(3) block 10, plus a same-weekday negative at block 0 so the
+    # weekday prior stays < 1 and block 10 is the uniquely best slot (an all-positive
+    # history would tie every slot at 1.0 and make the "best" arbitrary).
+    obs_by_user = {r.user_id: [Obs(r.user_id, 3, 10, 0.0, 1)] * 3 + [Obs(r.user_id, 3, 0, 0.0, -1)]
+                   for r in green}
+    now_cst = datetime(2026, 7, 8, 12, 0, tzinfo=CST)  # a Wednesday
+    ranked = rank_slots(green, obs_by_user, now_cst)
+    assert ranked, "expected at least one role-valid slot"
+    best_dt, best_team = ranked[0]
+    # best slot maps to Central Thursday block 10 for all members
+    local = best_dt.astimezone(CST)
+    assert local.weekday() == 3 and local.hour // 2 == 10
+    assert best_team.mean > 0.6
+
+
+def test_rank_slots_empty_when_no_role_valid_team():
+    green = [_raider(i, ["dps"]) for i in range(1, 6)]  # no tank/healer
+    obs_by_user = {r.user_id: [] for r in green}
+    now_cst = datetime(2026, 7, 8, 12, 0, tzinfo=CST)
+    assert rank_slots(green, obs_by_user, now_cst) == []
+
+
+def test_format_preview_contains_pick_and_is_empty_safe():
+    assert "no" in format_preview([]).lower()
+    green = [_raider(1, ["tank"]), _raider(2, ["healer"]),
+             _raider(3, ["dps"]), _raider(4, ["dps"]), _raider(5, ["dps"])]
+    obs_by_user = {r.user_id: [Obs(r.user_id, 3, 10, 0.0, 1)] * 3 + [Obs(r.user_id, 3, 0, 0.0, -1)]
+                   for r in green}
+    ranked = rank_slots(green, obs_by_user, datetime(2026, 7, 8, 12, 0, tzinfo=CST))
+    text = format_preview(ranked)
+    assert "R1" in text and "R2" in text     # tank + healer names appear
+    assert "dry-run" in text.lower()
