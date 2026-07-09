@@ -28,6 +28,7 @@ state.json.tmp
 watches.json
 watches.json.tmp
 events.jsonl
+character_mappings.json
 
 # Editors
 .vscode/

@@ -18,6 +18,7 @@ from schedule import Schedule
 from utils import GREEN, RED, YELLOW, load_state, save_state
 from views import KeyRequestButtonView, KeyRequestView, PrePostAddRaiderView, RoleSelectView, WoWSelectionView
 import eventlog
+import raiderio
 import undermine
 import watchlist
 from watchlist import Watchlist
@@ -847,6 +848,21 @@ class MyClient(discord.Client):
 
         self.watchlist.save()
 
+    @tasks.loop(hours=24)
+    async def raiderio_harvest(self):
+        """Daily Raider.io backfill/harvest: append new raiderio_run events (idempotent)."""
+        if not self.is_ready():
+            logger.warning("raiderio_harvest: Bot not ready yet, skipping this iteration")
+            return
+        if not self._char_mappings:
+            return
+        try:
+            async with aiohttp.ClientSession() as session:
+                added = await raiderio.harvest(self.raiders, session, self._char_mappings)
+            logger.info("raiderio_harvest: appended %d new run events", added)
+        except Exception as exc:  # noqa: BLE001 - harvest must never kill the loop
+            logger.warning("raiderio_harvest failed: %s", exc)
+
     # ---------------------------
     # Weekly Availability Reset
     # ---------------------------
@@ -1118,6 +1134,7 @@ class MyClient(discord.Client):
         self.coordinator_id = COORDINATOR_ID
         self.elevated_ids = ELEVATED_IDS
         self.watchlist = Watchlist.load()
+        self._char_mappings = raiderio.load_character_mappings()
         logger.info("Loaded state from file.")
 
         # Register persistent views so buttons work after bot restarts
@@ -1140,6 +1157,10 @@ class MyClient(discord.Client):
         # Start hourly Undermine price-watch sweep
         if not self.price_watch_check.is_running():
             self.price_watch_check.start()
+
+        # Start daily Raider.io harvest (initial backfill runs on first iteration)
+        if not self.raiderio_harvest.is_running():
+            self.raiderio_harvest.start()
 
     async def on_ready(self):
         """Called when the bot is ready. Loads state from file."""
