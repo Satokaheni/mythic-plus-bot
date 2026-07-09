@@ -1,20 +1,14 @@
 """Availability forecaster: events -> per-person, per-(weekday, block) probabilities."""
 
-import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
-from zoneinfo import ZoneInfo
-
-logger = logging.getLogger("discord")
-
-_CST = ZoneInfo("America/Chicago")
 
 HALF_LIFE = 4.0      # weeks; recency decay half-life
 ALPHA = 2.0          # smoothing pseudo-count
 BASE_PRIOR = 0.15    # availability prior when a person has no data
 
-_POSITIVE_TYPES = {"run_completed", "offer_accepted", "raiderio_run"}
+_POSITIVE_TYPES = {"offer_accepted", "raiderio_run"}
 _NEGATIVE_TYPES = {"offer_declined"}
 
 
