@@ -1,3 +1,8 @@
+## [1.3.0]
+
+### Improvements
+- The bot now backfills and daily-harvests Mythic+ run history from Raider.io for mapped, registered raiders, seeding the availability dataset with real play-time data.
+
 ## [1.2.0]
 
 ### Improvements

@@ -57,7 +57,7 @@ _CST = ZoneInfo("America/Chicago")
 # ---------------------------
 # Version & Changelog
 # ---------------------------
-BOT_VERSION = "1.2.0"
+BOT_VERSION = "1.3.0"
 
 _VERSION_FILE = "version.txt"
 

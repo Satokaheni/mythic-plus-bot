@@ -8,7 +8,7 @@ This file reflects the **current state** of the codebase. Rewrite relevant secti
 
 A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Mythic+ runs. Manages team assembly, availability tracking, DM outreach, and schedule lifecycle.
 
-**Version:** 1.2.0
+**Version:** 1.3.0
 **Entry point:** `bot.py` (`MyClient` class)
 
 ---
@@ -25,8 +25,10 @@ A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Myt
 | `eventlog.py` | Append-only availability/attendance event log for forecasting data |
 | `undermine.py` | Async Undermine Exchange API client |
 | `watchlist.py` | `Watch`/`Watchlist` classes — price-watch state, buy-signal detection, formatters |
+| `raiderio.py` | Raider.io client + daily harvester seeding raiderio_run events |
 | `version.txt` | Current version string (triggers changelog DM on startup if changed) |
 | `CHANGELOG.md` | Version history |
+| `character_mappings.json` | Gitignored config (`discord_id → characters`), maintained manually, provided at runtime (like `.env`) |
 | `pyproject.toml` | Dependencies, linting (ruff), pytest config |
 | `tests/` | pytest suite — `test_raider.py`, `test_schedule.py`, `test_utils.py`, `conftest.py` |
 
@@ -108,6 +110,8 @@ If a main-role player signs up and an off-role filler holds the slot (>8 hrs bef
 
 `hourly_check` now writes the `run_completed` event **before** deleting a passed run's Discord message, so completed-run history is preserved instead of discarded. Logging never raises and never blocks a bot flow — failures are caught and logged, not surfaced to users.
 
+A daily `raiderio_harvest` task (`@tasks.loop(hours=24)`, started in `setup_hook`) backfills real play-time data from Raider.io to seed the same dataset: for each mapped character in `character_mappings.json`, fetches recent + best Mythic+ runs and appends single-user `raiderio_run` events (`source="raiderio"`) to `events.jsonl`, deduped by `(user_id, run_id)`. Ignores `alt_of` — all of a person's characters count. Skips unregistered `discord_id`s, since Raider.io has no timezone data and forecasting needs one. The initial backfill runs on the first loop iteration at startup, then daily thereafter.
+
 ### Price Watch (Undermine)
 Owner-only feature gated to `BANKER_ID` — tracks region-wide commodity prices on the Undermine Exchange API (region from `UNDERMINE_REGION`, default `us`; auth via `UNDERMINE_API_KEY`).
 - `price_watch_check` — an hourly background task that sweeps every watched item ID, fetches the current price and the item's last 14 days of daily price history, and evaluates a buy signal: fires when the current price is **strictly below** a rolling low band (a percentile of that item's own daily history).
@@ -183,6 +187,8 @@ ADMIN_ID              Comma-separated admin user IDs
 BANKER_ID             User ID allowed to use price-watch commands
 UNDERMINE_API_KEY     Undermine Exchange API key
 UNDERMINE_REGION      Undermine Exchange region (default: us)
+RAIDERIO_API_KEY      Raider.io API key
+RAIDERIO_REGION       Raider.io region (default: us)
 ```
 
 ---

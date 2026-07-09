@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/tests.yml/badge.svg)](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/tests.yml)
 [![Docker](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/docker.yml/badge.svg)](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/docker.yml)
-![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.9+-green.svg)
 ![Discord.py](https://img.shields.io/badge/discord.py-2.0+-blue.svg)
 
@@ -28,6 +28,7 @@ A Discord bot for managing World of Warcraft Mythic+ raid scheduling and team co
 - **Changelog Announcements**: Bot posts and pins a changelog message on startup when the version changes
 - **Price Watch**: Owner-only tracking of Undermine Exchange commodity prices, with a DM alert when a price dips into a self-adjusting low band
 - **Event Logging**: The bot records anonymized availability and run events locally (`events.jsonl`) to power a future automatic-scheduling feature — no user-facing change
+- **Raider.io Harvest**: The bot backfills and daily-harvests Mythic+ run history from Raider.io for mapped, registered raiders to seed the forecasting dataset — requires `RAIDERIO_API_KEY` and a runtime-provided `character_mappings.json`
 
 ## Installation
 
@@ -65,7 +66,11 @@ ADMIN_ID=comma_separated_admin_user_ids
 BANKER_ID=your_banker_user_id
 UNDERMINE_API_KEY=your_undermine_exchange_api_key
 UNDERMINE_REGION=us
+RAIDERIO_API_KEY=your_raiderio_api_key
+RAIDERIO_REGION=us
 ```
+
+5. (Optional) Provide `character_mappings.json` in the project root at runtime — a gitignored, manually maintained JSON array mapping `discord_id` to character names, used to seed the forecasting dataset from Raider.io. Not required to run the bot.
 
 4. Run the bot:
 ```bash
@@ -157,9 +162,11 @@ mythic-plus-bot/
 ├── undermine.py        # Async Undermine Exchange API client
 ├── watchlist.py        # Watch/Watchlist state, buy-signal detection, formatters
 ├── eventlog.py         # Append-only availability/attendance event log (forecasting data)
+├── raiderio.py         # Raider.io client + daily harvester seeding raiderio_run events
 ├── state.json          # Persisted bot state (auto-generated)
 ├── watches.json        # Persisted price-watch state (auto-generated)
 ├── events.jsonl        # Append-only event log (auto-generated, gitignored)
+├── character_mappings.json  # Raider.io discord_id -> characters map (gitignored, runtime-provided)
 ├── version.txt         # Tracks last deployed version for changelog announcements
 ├── CHANGELOG.md        # Version history
 ├── Dockerfile          # Container build file
@@ -184,6 +191,8 @@ mythic-plus-bot/
 | `BANKER_ID` | User ID allowed to use the price watch commands (`!watch`, `!unwatch`, `!watches`) |
 | `UNDERMINE_API_KEY` | API key for the Undermine Exchange API |
 | `UNDERMINE_REGION` | Region for price lookups (optional, default `us`) |
+| `RAIDERIO_API_KEY` | API key for the Raider.io API |
+| `RAIDERIO_REGION` | Region for Raider.io lookups (optional, default `us`) |
 
 ## Class and Role Support
 
