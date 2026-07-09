@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/tests.yml/badge.svg)](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/tests.yml)
 [![Docker](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/docker.yml/badge.svg)](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/docker.yml)
-![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.9+-green.svg)
 ![Discord.py](https://img.shields.io/badge/discord.py-2.0+-blue.svg)
 
@@ -29,6 +29,7 @@ A Discord bot for managing World of Warcraft Mythic+ raid scheduling and team co
 - **Price Watch**: Owner-only tracking of Undermine Exchange commodity prices, with a DM alert when a price dips into a self-adjusting low band
 - **Event Logging**: The bot records anonymized availability and run events locally (`events.jsonl`) to power a future automatic-scheduling feature — no user-facing change
 - **Raider.io Harvest**: The bot backfills and daily-harvests Mythic+ run history from Raider.io for mapped, registered raiders to seed the forecasting dataset — requires `RAIDERIO_API_KEY` and a runtime-provided `character_mappings.json`
+- **Forecast Preview**: Every Wednesday at noon CST, the bot automatically predicts the best weekly Mythic+ run from availability and play-history data and DMs a dry-run preview to the banker — no runs are auto-created yet
 
 ## Installation
 

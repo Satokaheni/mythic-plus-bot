@@ -8,7 +8,7 @@ This file reflects the **current state** of the codebase. Rewrite relevant secti
 
 A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Mythic+ runs. Manages team assembly, availability tracking, DM outreach, and schedule lifecycle.
 
-**Version:** 1.3.0
+**Version:** 1.4.0
 **Entry point:** `bot.py` (`MyClient` class)
 
 ---
@@ -26,6 +26,7 @@ A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Myt
 | `undermine.py` | Async Undermine Exchange API client |
 | `watchlist.py` | `Watch`/`Watchlist` classes — price-watch state, buy-signal detection, formatters |
 | `raiderio.py` | Raider.io client + daily harvester seeding raiderio_run events |
+| `forecast.py` | Availability predictor + roster/slot optimizer + dry-run preview formatter |
 | `version.txt` | Current version string (triggers changelog DM on startup if changed) |
 | `CHANGELOG.md` | Version history |
 | `character_mappings.json` | Gitignored config (`discord_id → characters`), maintained manually, provided at runtime (like `.env`) |
@@ -111,6 +112,15 @@ If a main-role player signs up and an off-role filler holds the slot (>8 hrs bef
 `hourly_check` now writes the `run_completed` event **before** deleting a passed run's Discord message, so completed-run history is preserved instead of discarded. Logging never raises and never blocks a bot flow — failures are caught and logged, not surfaced to users.
 
 A daily `raiderio_harvest` task (`@tasks.loop(hours=24)`, started in `setup_hook`) backfills real play-time data from Raider.io to seed the same dataset: for each mapped character in `character_mappings.json`, fetches recent + best Mythic+ runs and appends single-user `raiderio_run` events (`source="raiderio"`) to `events.jsonl`, deduped by `(user_id, run_id)`. Ignores `alt_of` — all of a person's characters count. Skips unregistered `discord_id`s, since Raider.io has no timezone data and forecasting needs one. The initial backfill runs on the first loop iteration at startup, then daily thereafter.
+
+### Forecast Preview (Phase 2a)
+A weekly `forecast_preview` task (`@tasks.loop(time=...)`, started in `setup_hook`) fires **Wednesday at noon CST** — a day after the Tuesday availability post — and produces a dry-run preview of the best-predicted weekly run:
+1. **Feasibility gate** — checks whether the current green (🟢) availability pool can field a role-valid team (1 tank, 1 healer, 3 dps) via `forecast.can_field_team()`. No-ops (logs and returns) if not.
+2. **Predictor** — `forecast.observations()` normalizes `events.jsonl` (`run_completed`, `offer_accepted`/`offer_declined`, `raiderio_run`) into per-user, per-(local weekday, 2-hour block) signed observations. `forecast.predict()` scores each (user, slot) pair as a recency-weighted (half-life 4 weeks), Laplace-smoothed positive fraction, backed off to a same-weekday prior, then an overall prior, then a flat base rate for users with no data.
+3. **Roster/slot optimization** — `forecast.rank_slots()` walks every weekday/2h-block slot in the coming week, converts each green raider's availability probability into that slot (in their own timezone), and calls `forecast.select_team()` to pick the mean-maximizing role-valid roster (1 tank, 1 healer, 3 dps, multi-role aware). Slots are ranked by the winning team's mean probability.
+4. **Dry-run DM** — `forecast.format_preview()` renders the top slot (as a Discord `<t:...:F>` timestamp) plus per-member probabilities and up to two runner-up slots, and the task DMs it to `BANKER_ID`.
+
+This is **dry-run only**: no team DMs are sent to roster members and no `Schedule` is created — going live is Phase 2b. Best-effort: broad `except Exception` around the predict/DM logic ensures a failure never kills the loop.
 
 ### Price Watch (Undermine)
 Owner-only feature gated to `BANKER_ID` — tracks region-wide commodity prices on the Undermine Exchange API (region from `UNDERMINE_REGION`, default `us`; auth via `UNDERMINE_API_KEY`).

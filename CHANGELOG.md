@@ -1,3 +1,8 @@
+## [1.4.0]
+
+### Improvements
+- The bot now automatically predicts the best weekly Mythic+ run from availability and play-history data and DMs a dry-run preview to the banker (no runs are created yet).
+
 ## [1.3.0]
 
 ### Improvements
