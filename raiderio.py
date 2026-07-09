@@ -43,8 +43,8 @@ def _parse_completed_at(s: str) -> datetime:
 
 def _parse_runs(data: dict) -> List[Run]:
     """Combine recent + best runs into a list of Run, deduped by run_id; skip malformed entries."""
-    result = data.get("result", {})
-    raw = list(result.get("mythic_plus_recent_runs", [])) + list(result.get("mythic_plus_best_runs", []))
+    result = data.get("result") or {}
+    raw = list(result.get("mythic_plus_recent_runs") or []) + list(result.get("mythic_plus_best_runs") or [])
     runs = {}
     for entry in raw:
         try:
@@ -55,3 +55,41 @@ def _parse_runs(data: dict) -> List[Run]:
             continue
         runs[run_id] = Run(run_id=run_id, completed_at=completed, level=level)
     return list(runs.values())
+
+
+async def fetch_character_runs(session: aiohttp.ClientSession, realm_slug: str, character: str) -> List[Run]:
+    """Fetch a character's recent + best M+ runs. Best-effort: returns [] on any error."""
+    params = {
+        "region": _region(),
+        "realm": realm_slug,
+        "name": character,
+        "fields": "mythic_plus_recent_runs,mythic_plus_best_runs",
+        "access_key": _api_key(),
+    }
+    url = f"{BASE_URL}?{urlencode(params)}"
+    try:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                logger.warning("Raider.io %s/%s returned status %s", realm_slug, character, resp.status)
+                return []
+            data = await resp.json()
+        return _parse_runs(data)
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+        logger.warning("Raider.io request failed for %s/%s: %s", realm_slug, character, exc)
+        return []
+
+
+def load_character_mappings(path: str = _MAPPINGS_PATH) -> List[dict]:
+    """Load the character->discord mapping array. Missing/corrupt -> []. `alt_of` is ignored by callers."""
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            logger.warning("%s is not a JSON array; ignoring", path)
+            return []
+        return data
+    except (json.JSONDecodeError, OSError, ValueError) as exc:
+        logger.warning("Failed to load %s: %s", path, exc)
+        return []
