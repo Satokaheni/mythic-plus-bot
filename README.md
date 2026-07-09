@@ -29,7 +29,7 @@ A Discord bot for managing World of Warcraft Mythic+ raid scheduling and team co
 - **Price Watch**: Owner-only tracking of Undermine Exchange commodity prices, with a DM alert when a price dips into a self-adjusting low band
 - **Event Logging**: The bot records anonymized availability and run events locally (`events.jsonl`) to power a future automatic-scheduling feature — no user-facing change
 - **Raider.io Harvest**: The bot backfills and daily-harvests Mythic+ run history from Raider.io for mapped, registered raiders to seed the forecasting dataset — requires `RAIDERIO_API_KEY` and a runtime-provided `character_mappings.json`
-- **Forecast Preview**: Every Wednesday at noon CST, the bot automatically predicts the best weekly Mythic+ run from availability and play-history data and DMs a dry-run preview to the banker — no runs are auto-created yet
+- **Forecast Preview**: Every Wednesday at noon CST, the bot automatically predicts the best weekly Mythic+ run from availability and play-history data — assembling a role-valid team that prefers people's primary roles — and DMs a dry-run preview to the banker (no runs are auto-created yet)
 
 ## Installation
 
@@ -137,6 +137,15 @@ An owner-only feature for tracking Undermine Exchange commodity prices. Only the
 
 These commands work via DM or in the key channel, and only respond to the configured `BANKER_ID`.
 
+### Availability Forecasting
+
+The bot learns **when your raiders actually play** and predicts the best time for a run — entirely automatically, no commands.
+
+- **Data it learns from:** every availability reaction and DM accept/decline, the roster of each completed run, and each raider's real Mythic+ history harvested daily from Raider.io. These are stored locally in `events.jsonl`, each stamped with the player's local day-of-week and 2-hour block.
+- **Weekly prediction:** every **Wednesday at noon CST** (a day after the availability post), if this week's 🟢 pool can field a full team, the bot scores each candidate time by how likely each available raider is to be free then, assembles the best **role-valid** roster (1 tank, 1 healer, 3 DPS) — **preferring each person's primary role**, only using an off-role to fill a spot no main can cover — and DMs a **dry-run preview** to the `BANKER_ID`. The preview shows the top time, per-member availability, and a couple of runner-up times.
+- **Dry-run only (for now):** the bot *suggests*; it does not create runs yet. Automatic multi-time polling and run creation is a planned next step.
+- **Setup:** requires `RAIDERIO_API_KEY` in `.env` and a runtime-provided `character_mappings.json` (mapping Discord IDs to their WoW characters). Raiders with no linked character, or who aren't registered with a timezone, are simply skipped until they are.
+
 ### Commands
 
 | Command | Channel | Permission | Description |
@@ -164,6 +173,7 @@ mythic-plus-bot/
 ├── watchlist.py        # Watch/Watchlist state, buy-signal detection, formatters
 ├── eventlog.py         # Append-only availability/attendance event log (forecasting data)
 ├── raiderio.py         # Raider.io client + daily harvester seeding raiderio_run events
+├── forecast.py         # Availability predictor + roster/slot optimizer + dry-run preview
 ├── state.json          # Persisted bot state (auto-generated)
 ├── watches.json        # Persisted price-watch state (auto-generated)
 ├── events.jsonl        # Append-only event log (auto-generated, gitignored)
