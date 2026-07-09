@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-from forecast import Obs, observations
+from forecast import Obs, observations, predict
 
 CST = ZoneInfo("America/Chicago")
 NOW = datetime(2026, 7, 9, 12, 0, tzinfo=timezone.utc)
@@ -53,3 +53,40 @@ def test_observations_skips_null_slots_and_missing_tz():
          "emoji": "🟢", "week_of": "2026-06-30", "local_weekday": 2, "local_block": 9},
     ]
     assert observations(events, {1: _raider(1, ["dps"])}, NOW) == []
+
+
+def _obs(weekday, block, age_weeks, sign):
+    return Obs(1, weekday, block, age_weeks, sign)
+
+
+def test_predict_no_data_returns_base_prior():
+    from forecast import BASE_PRIOR
+    assert predict([], 2, 9) == BASE_PRIOR
+
+
+def test_predict_recent_positive_scores_high():
+    p = predict([_obs(2, 9, 0.0, 1), _obs(2, 9, 0.0, 1), _obs(2, 9, 0.0, 1)], 2, 9)
+    assert p > 0.7
+
+
+def test_predict_negatives_pull_down():
+    hi = predict([_obs(2, 9, 0.0, 1), _obs(2, 9, 0.0, 1)], 2, 9)
+    lo = predict([_obs(2, 9, 0.0, 1), _obs(2, 9, 0.0, 1),
+                  _obs(2, 9, 0.0, -1), _obs(2, 9, 0.0, -1)], 2, 9)
+    assert lo < hi
+
+
+def test_predict_recency_decay_old_positive_weaker():
+    # A recent negative elsewhere on the same weekday holds the base-rate prior
+    # below 1.0, so the block positive's recency actually moves the score
+    # (an all-positive history would give prior=1.0 and mask the decay).
+    recent = predict([_obs(2, 9, 0.0, 1), _obs(2, 10, 0.0, -1)], 2, 9)
+    old = predict([_obs(2, 9, 52.0, 1), _obs(2, 10, 0.0, -1)], 2, 9)  # ~1yr old -> decayed
+    assert old < recent
+
+
+def test_predict_prior_from_same_weekday_when_block_thin():
+    # No obs in (2, 5), but strong positives elsewhere on weekday 2 -> prior lifts it above BASE_PRIOR.
+    from forecast import BASE_PRIOR
+    user_obs = [_obs(2, 9, 0.0, 1), _obs(2, 10, 0.0, 1), _obs(2, 11, 0.0, 1)]
+    assert predict(user_obs, 2, 5) > BASE_PRIOR
