@@ -52,7 +52,7 @@ def observations(events: List[dict], raiders: dict, now: datetime) -> List[Obs]:
                 if raider is None or getattr(raider, "timezone", None) is None:
                     continue
                 local = ts.astimezone(raider.timezone)
-                out.append(Obs(uid, local.weekday(), (local.hour + 1) // 2, age, 1))
+                out.append(Obs(uid, local.weekday(), local.hour // 2, age, 1))
         elif etype in _POSITIVE_TYPES or etype in _NEGATIVE_TYPES:
             uid = e.get("user_id")
             wd = e.get("local_weekday")

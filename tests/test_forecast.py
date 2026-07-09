@@ -31,15 +31,16 @@ def test_observations_single_user_events_use_stored_slot():
 
 
 def test_observations_expands_run_completed_roster_via_timezone():
-    # Run at 2026-07-03 01:00 UTC. Central (UTC-5) -> 2026-07-02 20:00 (Thu=3, block 10).
-    events = [{"type": "run_completed", "ts_utc": "2026-07-03T01:00:00+00:00",
+    # Run at 2026-07-03 02:00 UTC. Central (UTC-5) -> 2026-07-02 21:00 (Thu=3, block 10);
+    # Eastern (UTC-4) -> 2026-07-02 22:00 (Thu=3, block 11). Same instant, different local block.
+    events = [{"type": "run_completed", "ts_utc": "2026-07-03T02:00:00+00:00",
                "user_id": None, "roster": [1, 2], "run_id": 9, "source": "discord",
                "local_weekday": None, "local_block": None}]
     raiders = {1: _raider(1, ["tank"]), 2: _raider(2, ["healer"], tz="America/New_York")}
     obs = observations(events, raiders, NOW)
     by_user = {o.user_id: (o.weekday, o.block, o.sign) for o in obs}
-    assert by_user[1] == (3, 10, 1)   # Central: Thu 20:00 -> block 10
-    assert by_user[2] == (3, 11, 1)   # Eastern: Thu 21:00 -> block 11
+    assert by_user[1] == (3, 10, 1)   # Central: Thu 21:00 -> block 10
+    assert by_user[2] == (3, 11, 1)   # Eastern: Thu 22:00 -> block 11
 
 
 def test_observations_skips_null_slots_and_missing_tz():
