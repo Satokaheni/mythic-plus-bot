@@ -42,9 +42,10 @@ def _parse_completed_at(s: str) -> datetime:
 
 
 def _parse_runs(data: dict) -> List[Run]:
-    """Combine recent + best runs into a list of Run, deduped by run_id; skip malformed entries."""
-    result = data.get("result") or {}
-    raw = list(result.get("mythic_plus_recent_runs") or []) + list(result.get("mythic_plus_best_runs") or [])
+    """Combine recent + best runs (top-level fields) into a list of Run, deduped by run_id; skip malformed."""
+    if not isinstance(data, dict):
+        return []
+    raw = list(data.get("mythic_plus_recent_runs") or []) + list(data.get("mythic_plus_best_runs") or [])
     runs = {}
     for entry in raw:
         try:
