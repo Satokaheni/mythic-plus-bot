@@ -20,4 +20,6 @@ USER botuser
 
 # state.pkl and version.txt are written here at runtime.
 # Mount an EFS volume at /app to persist state across container restarts.
+# character_mappings.json (like .env) must be provided on the mounted runtime volume,
+# not baked into the image.
 CMD ["python", "bot.py"]

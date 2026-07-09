@@ -863,6 +863,10 @@ class MyClient(discord.Client):
         except Exception as exc:  # noqa: BLE001 - harvest must never kill the loop
             logger.warning("raiderio_harvest failed: %s", exc)
 
+    @raiderio_harvest.before_loop
+    async def before_raiderio_harvest(self):
+        await self.wait_until_ready()
+
     # ---------------------------
     # Weekly Availability Reset
     # ---------------------------
