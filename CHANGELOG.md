@@ -3,6 +3,10 @@
 ### Improvements
 - The bot now automatically predicts the best weekly Mythic+ run from availability and play-history data and DMs a dry-run preview to the banker (no runs are created yet).
 
+### Bug Fixes
+- Raider.io run history is now parsed from the response's top-level fields (there is no `result` wrapper), so the daily harvest actually collects runs.
+- The availability predictor now uses a fixed low baseline so slots rank by how often people actually play, instead of every slot saturating to 100% confidence.
+
 ## [1.3.0]
 
 ### Improvements

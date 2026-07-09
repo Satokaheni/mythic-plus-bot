@@ -74,12 +74,18 @@ prior_p = person's base rate  (see below)
 P       = (W⁺ + ALPHA * prior_p) / (W⁺ + W⁻ + ALPHA)   # ALPHA = smoothing pseudo-count
 ```
 
-- **`prior_p` (daypart/base-rate fallback):** the person's recency-weighted
-  positive fraction across a broader region — first their **same-weekday**
-  observations, falling back to **all** their observations, then to a low global
-  default `BASE_PRIOR` (e.g. `0.15`) when they have no data. This makes thin
-  blocks shrink toward the person's general pattern instead of over-fitting one
-  data point.
+- **`prior_p` (fixed low global prior = `BASE_PRIOR`, e.g. `0.15`).**
+  *(Revised after real-data validation — see below.)* A per-person base rate was
+  the original design, but attendance data is **positive-only** (a `raiderio_run`
+  or `run_completed` says "played then"; there is no "was free but didn't play"
+  signal), so a per-person positive *fraction* collapses to `1.0` and every block
+  saturates at `1.0` — all slots tie and the pick is arbitrary. A **fixed** low
+  prior makes each block's score a function of its own recency-weighted play
+  **density**, so blocks (and slots) discriminate correctly. An empty block stays
+  at `BASE_PRIOR` regardless of activity in *other* blocks (the anti-saturation
+  property), and `offer_declined` still pulls a block down via `W⁻`. Validated on
+  423 real Raider.io runs: the fixed prior picks Mon 10 PM (~0.59, matching the
+  observed play peak) where the per-person prior gave Mon 12 AM at 1.00.
 - Tunable constants: `HALF_LIFE`, `ALPHA`, `BASE_PRIOR` (all in `forecast.py`).
 
 ### 3. Roster/slot optimizer (pure)
