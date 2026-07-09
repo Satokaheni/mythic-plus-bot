@@ -59,6 +59,15 @@ def test_parse_runs_handles_null_fields():
     assert _parse_runs({"result": {"mythic_plus_recent_runs": None, "mythic_plus_best_runs": None}}) == []
 
 
+def test_parse_runs_skips_entry_level_null_completed_at():
+    data = {"result": {"mythic_plus_recent_runs": [
+        {"keystone_run_id": 1, "completed_at": "2026-07-08T20:00:00.000Z", "mythic_level": 12},
+        {"keystone_run_id": 5, "completed_at": None, "mythic_level": 12},  # entry-level null -> AttributeError pre-fix
+    ]}}
+    runs = _parse_runs(data)
+    assert [r.run_id for r in runs] == [1]  # bad entry skipped, good one kept, no raise
+
+
 class _FakeResp:
     def __init__(self, status=200, payload=None):
         self.status = status

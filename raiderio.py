@@ -51,7 +51,7 @@ def _parse_runs(data: dict) -> List[Run]:
             run_id = int(entry["keystone_run_id"])
             completed = _parse_completed_at(entry["completed_at"])
             level = int(entry["mythic_level"])
-        except (KeyError, ValueError, TypeError):
+        except (KeyError, ValueError, TypeError, AttributeError):
             continue
         runs[run_id] = Run(run_id=run_id, completed_at=completed, level=level)
     return list(runs.values())
@@ -74,7 +74,7 @@ async def fetch_character_runs(session: aiohttp.ClientSession, realm_slug: str, 
                 return []
             data = await resp.json()
         return _parse_runs(data)
-    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, AttributeError) as exc:
         logger.warning("Raider.io request failed for %s/%s: %s", realm_slug, character, exc)
         return []
 
