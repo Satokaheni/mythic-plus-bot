@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/tests.yml/badge.svg)](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/tests.yml)
 [![Docker](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/docker.yml/badge.svg)](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/docker.yml)
-![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.9+-green.svg)
 ![Discord.py](https://img.shields.io/badge/discord.py-2.0+-blue.svg)
 
@@ -131,11 +131,12 @@ Each schedule embed has three buttons:
 
 An owner-only feature for tracking Undermine Exchange commodity prices. Only the user configured as `BANKER_ID` can use it. The bot polls the Undermine Exchange API every hour for each watched item (region-wide commodities only, via `UNDERMINE_REGION`) and DMs the banker when the current price dips **below** a rolling low band computed from that item's own last 14 days of price history. Each item has its own adaptive threshold: it starts at the 35th percentile, loosens if the item goes 7 days without an alert, tightens if it alerts twice or more in 7 days, and is clamped to a 10–50 percentile range. To avoid spam, an item won't alert again until its price recovers back above the median.
 
-- `!watch <itemId> [label]` — start watching an item, with an optional friendly label
-- `!unwatch <itemId>` — stop watching an item
+- `!watch <itemId> [label]` — watch one item, with an optional friendly label
+- `!watch <id1> <id2> <id3> …` — watch several items at once (each auto-labelled `Item <id>`)
+- `!unwatch <itemId> [itemId …]` — stop watching one or more items
 - `!watches` — list everything currently being watched
 
-These commands work via DM or in the key channel, and only respond to the configured `BANKER_ID`.
+These commands work via DM or in the key channel, and only respond to the configured `BANKER_ID`. The watchlist is saved to `watches.json` and reloaded on startup, so it survives bot restarts.
 
 ### Availability Forecasting
 
@@ -156,8 +157,8 @@ The bot learns **when your raiders actually play** and predicts the best time fo
 | `!modify` | `KEY_CHANNEL` or DM | Anyone | Update your class, roles, and timezone |
 | `!setup` | `KEY_CHANNEL` | Coordinator/Admin | Re-post and pin the key request button |
 | `!cleanup` | `AVAIL_CHANNEL` or `KEY_CHANNEL` | Coordinator/Admin | Purge both channels and reset all state (preserves raiders) |
-| `!watch <itemId> [label]` | `KEY_CHANNEL` or DM | Banker only | Start watching an item's price |
-| `!unwatch <itemId>` | `KEY_CHANNEL` or DM | Banker only | Stop watching an item |
+| `!watch <itemId> [label]`<br>`!watch <id1> <id2> ...` | `KEY_CHANNEL` or DM | Banker only | Watch one item (with optional label), or several at once |
+| `!unwatch <itemId> [itemId ...]` | `KEY_CHANNEL` or DM | Banker only | Stop watching one or more items |
 | `!watches` | `KEY_CHANNEL` or DM | Banker only | List currently watched items |
 
 ## Project Structure

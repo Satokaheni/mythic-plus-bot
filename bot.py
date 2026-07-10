@@ -13,15 +13,15 @@ import discord
 from discord.ext import tasks
 from dotenv import load_dotenv
 
-from raider import Raider
-from schedule import Schedule
-from utils import GREEN, RED, YELLOW, load_state, save_state
-from views import KeyRequestButtonView, KeyRequestView, PrePostAddRaiderView, RoleSelectView, WoWSelectionView
 import eventlog
 import forecast
 import raiderio
 import undermine
 import watchlist
+from raider import Raider
+from schedule import Schedule
+from utils import GREEN, RED, YELLOW, load_state, save_state
+from views import KeyRequestButtonView, KeyRequestView, PrePostAddRaiderView, RoleSelectView, WoWSelectionView
 from watchlist import Watchlist
 
 # ---------------------------
@@ -58,7 +58,7 @@ _CST = ZoneInfo("America/Chicago")
 # ---------------------------
 # Version & Changelog
 # ---------------------------
-BOT_VERSION = "1.4.0"
+BOT_VERSION = "1.5.0"
 
 _VERSION_FILE = "version.txt"
 
@@ -1255,38 +1255,65 @@ class MyClient(discord.Client):
             return
 
         if message.content.startswith("!watch ") and message.author.id == BANKER_ID:
-            parts = message.content.split(maxsplit=2)
+            args = message.content.split()[1:]
             if message.guild is not None:
                 try:
                     await message.delete()
                 except (discord.Forbidden, discord.NotFound):
                     pass
-            if len(parts) < 2 or not parts[1].isdigit():
-                await message.author.send("Usage: `!watch <itemId> [label]`")
+            # Two or more all-numeric args -> watch several items at once (auto-labelled).
+            if len(args) >= 2 and all(a.isdigit() for a in args):
+                added, already = [], []
+                for a in args:
+                    iid = int(a)
+                    if self.watchlist.get(iid) is None:
+                        self.watchlist.add(iid, f"Item {iid}")
+                        added.append(iid)
+                    else:
+                        already.append(iid)
+                self.watchlist.save()
+                reply = []
+                if added:
+                    reply.append(f"👁️ Now watching {len(added)} item(s): {', '.join(str(i) for i in added)}.")
+                if already:
+                    reply.append(f"Already watching: {', '.join(str(i) for i in already)}.")
+                await message.author.send("\n".join(reply))
                 return
-            item_id = int(parts[1])
-            label = parts[2] if len(parts) > 2 else f"Item {item_id}"
+            # Single item, with an optional multi-word label.
+            if not args or not args[0].isdigit():
+                await message.author.send(
+                    "Usage: `!watch <itemId> [label]`  •  watch several at once: `!watch <id1> <id2> <id3>`"
+                )
+                return
+            item_id = int(args[0])
+            label = " ".join(args[1:]) if len(args) > 1 else f"Item {item_id}"
             self.watchlist.add(item_id, label)
             self.watchlist.save()
             await message.author.send(f"👁️ Now watching **{label}** (item {item_id}).")
             return
 
         if message.content.startswith("!unwatch ") and message.author.id == BANKER_ID:
-            parts = message.content.split()
+            args = message.content.split()[1:]
             if message.guild is not None:
                 try:
                     await message.delete()
                 except (discord.Forbidden, discord.NotFound):
                     pass
-            if len(parts) < 2 or not parts[1].isdigit():
-                await message.author.send("Usage: `!unwatch <itemId>`")
+            if not args or not all(a.isdigit() for a in args):
+                await message.author.send("Usage: `!unwatch <itemId> [itemId ...]`")
                 return
-            item_id = int(parts[1])
-            if self.watchlist.remove(item_id):
+            removed, missing = [], []
+            for a in args:
+                iid = int(a)
+                (removed if self.watchlist.remove(iid) else missing).append(iid)
+            if removed:
                 self.watchlist.save()
-                await message.author.send(f"🚫 Stopped watching item {item_id}.")
-            else:
-                await message.author.send(f"Item {item_id} was not being watched.")
+            reply = []
+            if removed:
+                reply.append(f"🚫 Stopped watching {len(removed)} item(s): {', '.join(str(i) for i in removed)}.")
+            if missing:
+                reply.append(f"Not being watched: {', '.join(str(i) for i in missing)}.")
+            await message.author.send("\n".join(reply))
             return
 
         if message.content == "!watches" and message.author.id == BANKER_ID:

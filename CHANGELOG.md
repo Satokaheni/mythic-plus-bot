@@ -1,3 +1,8 @@
+## [1.5.0]
+
+### Improvements
+- `!watch` and `!unwatch` now accept multiple item IDs at once (e.g. `!watch 212283 212391 212284`), so the banker can add or remove several items in a single command.
+
 ## [1.4.0]
 
 ### Improvements
