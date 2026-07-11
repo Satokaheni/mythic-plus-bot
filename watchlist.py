@@ -6,7 +6,6 @@ import math
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from textwrap import dedent
 from typing import List, Optional
 
 logger = logging.getLogger("discord")
@@ -23,6 +22,36 @@ FLOOD_ALERTS = 2
 FLOOD_DAYS = 7
 TIGHTEN_STEP = 1.0
 ADJUST_INTERVAL_HOURS = 24
+
+# Only send buy alerts during waking hours (local CST hour, inclusive): 10:00 AM–11:59 PM.
+ALERT_START_HOUR = 10
+ALERT_END_HOUR = 23
+
+
+def in_alert_window(now_cst: datetime) -> bool:
+    """True if `now_cst` (a Central-time datetime) is within the alert window (10 AM–11:59 PM)."""
+    return ALERT_START_HOUR <= now_cst.hour <= ALERT_END_HOUR
+
+
+def suggest_buy(auctions, ceiling_price: float, budget_copper: int) -> tuple:
+    """Walk the auction ladder cheapest-first, buying lots priced at or below `ceiling_price`
+    until the budget runs out or the price crosses the ceiling. Returns (units, cost_copper)."""
+    units = 0
+    cost = 0
+    remaining = budget_copper
+    for price, qty in sorted(auctions):
+        if price > ceiling_price or remaining < price:
+            break
+        take = min(qty, remaining // price)
+        if take <= 0:
+            break
+        units += take
+        spent = take * price
+        cost += spent
+        remaining -= spent
+        if take < qty:  # budget exhausted within this price tier
+            break
+    return units, cost
 
 
 def format_gold(copper: int) -> str:
@@ -105,16 +134,17 @@ class Signal:
     median: float
     low_band: float
     quantity: int
+    auctions: tuple = ()  # cheapest-first (price, quantity) lots, for the budget buy estimate
 
 
-def evaluate(now_price: int, quantity: int, daily_prices: List[int], watch: Watch) -> Signal:
+def evaluate(now_price: int, quantity: int, daily_prices: List[int], watch: Watch, auctions: tuple = ()) -> Signal:
     """Decide whether the current price sits in the item's recent low band."""
     window = daily_prices[-BASELINE_WINDOW_DAYS:]
     if len(window) < MIN_HISTORY_DAYS:
-        return Signal(False, False, now_price, 0.0, 0.0, quantity)
+        return Signal(False, False, now_price, 0.0, 0.0, quantity, auctions)
     m = median(window)
     low = percentile(window, watch.percentile)
-    return Signal(now_price < low, True, now_price, m, low, quantity)
+    return Signal(now_price < low, True, now_price, m, low, quantity, auctions)
 
 
 def process_signal(watch: Watch, signal: Signal, now: datetime) -> bool:
@@ -198,18 +228,27 @@ class Watchlist:
         return wl
 
 
-def format_alert(watch: Watch, signal: Signal) -> str:
-    """Build the buy-signal DM sent to the banker."""
+def format_alert(watch: Watch, signal: Signal, budget_copper: int = 0) -> str:
+    """Build the buy-signal DM sent to the banker.
+
+    When `budget_copper` > 0, add a line suggesting how much to buy within budget by walking the
+    auction ladder up to the low band (the pounce threshold that fired the alert).
+    """
     pct_below = (1 - signal.price / signal.median) * 100 if signal.median else 0
-    return dedent(
-        f"""
-        🛎️ **Buy signal** — {watch.label} (item {watch.item_id})
-        Current: **{format_gold(signal.price)}** ({pct_below:.0f}% below {format_gold(int(signal.median))} median)
-        Low band (p{watch.percentile:.0f}): {format_gold(int(signal.low_band))}
-        Quantity available: {signal.quantity:,}
-        https://www.wowhead.com/item={watch.item_id}
-        """
-    ).strip()
+    lines = [
+        f"🛎️ **Buy signal** — {watch.label} (item {watch.item_id})",
+        f"Current: **{format_gold(signal.price)}** ({pct_below:.0f}% below {format_gold(int(signal.median))} median)",
+        f"Low band (p{watch.percentile:.0f}): {format_gold(int(signal.low_band))}",
+    ]
+    if budget_copper > 0:
+        units, cost = suggest_buy(signal.auctions, signal.low_band, budget_copper)
+        if units > 0:
+            lines.append(
+                f"💰 **Buy up to {units:,} for {format_gold(cost)}** (budget: {format_gold(budget_copper)})"
+            )
+    lines.append(f"Quantity available: {signal.quantity:,}")
+    lines.append(f"https://www.wowhead.com/item={watch.item_id}")
+    return "\n".join(lines)
 
 
 def format_watch_line(watch: Watch, signal: Optional[Signal]) -> str:

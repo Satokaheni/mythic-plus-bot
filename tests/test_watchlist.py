@@ -1,6 +1,6 @@
 """Tests for the price-watch state, detection, and formatting logic."""
 
-from watchlist import Watch, Signal, Watchlist, auto_tune, evaluate, format_alert, format_gold, format_watch_line, median, percentile, process_signal
+from watchlist import Watch, Signal, Watchlist, auto_tune, evaluate, format_alert, format_gold, format_watch_line, in_alert_window, median, percentile, process_signal, suggest_buy
 
 
 def test_format_gold_full_denominations():
@@ -250,3 +250,57 @@ def test_format_watch_line_with_signal():
     line = format_watch_line(w, sig)
     assert "Netherweave Cloth" in line
     assert "p35" in line
+
+
+def test_suggest_buy_walks_ladder_up_to_ceiling():
+    # Buy the two cheap tiers (<= ceiling 150); the 200-priced tier is above the ceiling.
+    units, cost = suggest_buy([(100, 50), (120, 30), (200, 100)], 150, 10000)
+    assert (units, cost) == (80, 8600)
+
+
+def test_suggest_buy_stops_at_budget():
+    # Budget 8000: buys all 50 at 100 (5000), then 25 of the 120 tier (3000) -> budget exhausted.
+    units, cost = suggest_buy([(100, 50), (120, 100)], 200, 8000)
+    assert (units, cost) == (75, 8000)
+
+
+def test_suggest_buy_stops_at_ceiling():
+    units, cost = suggest_buy([(100, 50), (300, 50)], 200, 100000)
+    assert (units, cost) == (50, 5000)
+
+
+def test_suggest_buy_empty_or_unaffordable():
+    assert suggest_buy([], 200, 10000) == (0, 0)
+    assert suggest_buy([(100, 50)], 200, 50) == (0, 0)  # budget below one unit
+
+
+def test_in_alert_window():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    cst = ZoneInfo("America/Chicago")
+    assert in_alert_window(datetime(2026, 7, 11, 10, 0, tzinfo=cst)) is True
+    assert in_alert_window(datetime(2026, 7, 11, 23, 30, tzinfo=cst)) is True
+    assert in_alert_window(datetime(2026, 7, 11, 15, 0, tzinfo=cst)) is True
+    assert in_alert_window(datetime(2026, 7, 11, 4, 0, tzinfo=cst)) is False
+    assert in_alert_window(datetime(2026, 7, 11, 9, 59, tzinfo=cst)) is False
+    assert in_alert_window(datetime(2026, 7, 11, 0, 0, tzinfo=cst)) is False
+
+
+def test_format_alert_includes_budget_buy_line():
+    w = _watch()
+    sig = Signal(
+        fired=True, enough_history=True, price=700, median=1000.0, low_band=800.0, quantity=1234,
+        auctions=((700, 10), (750, 20), (900, 50)),
+    )
+    text = format_alert(w, sig, budget_copper=100000)
+    # ladder <=800: 10 @700 + 20 @750 = 30 units for 22000 copper; the 900 tier is above low band.
+    assert "Buy up to" in text
+    assert "30" in text
+
+
+def test_format_alert_no_budget_line_when_zero():
+    w = _watch()
+    sig = Signal(fired=True, enough_history=True, price=700, median=1000.0, low_band=800.0, quantity=5,
+                 auctions=((700, 10),))
+    assert "Buy up to" not in format_alert(w, sig)  # default budget_copper=0 -> no buy line

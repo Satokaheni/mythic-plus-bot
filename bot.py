@@ -51,6 +51,8 @@ HEALER_ID = int(_require_env("HEALER_ROLE_ID"))
 DPS_ID = int(_require_env("DPS_ROLE_ID"))
 COORDINATOR_ID = int(_require_env("COORDINATOR_ID"))
 BANKER_ID = int(_require_env("BANKER_ID"))
+# Gold budget used to size price-watch buy suggestions (default 100,000 gold).
+BANKER_BUDGET_COPPER = int(os.getenv("BANKER_BUDGET_GOLD", "100000")) * 10000
 MYTHIC_PLUS_ID = int(_require_env("MYTHIC_PLUS_ID"))
 ADMINS = [int(id_str) for id_str in _require_env("ADMIN_ID").split(",") if id_str.strip().isdigit()]
 ELEVATED_IDS = {COORDINATOR_ID} | set(ADMINS)
@@ -58,7 +60,7 @@ _CST = ZoneInfo("America/Chicago")
 # ---------------------------
 # Version & Changelog
 # ---------------------------
-BOT_VERSION = "1.5.0"
+BOT_VERSION = "1.6.0"
 
 _VERSION_FILE = "version.txt"
 
@@ -827,6 +829,9 @@ class MyClient(discord.Client):
             return
 
         now = datetime.now(timezone.utc)
+        # Only alert during waking hours (10 AM–11:59 PM CST). Outside the window we skip the
+        # alert/state transition so a still-good dip re-fires on the next in-window check.
+        alert_ok = watchlist.in_alert_window(datetime.now(_CST))
         banker = None
         async with aiohttp.ClientSession() as session:
             for watch in watches:
@@ -835,12 +840,14 @@ class MyClient(discord.Client):
                     if now_result is None:
                         continue
                     daily = await undermine.fetch_daily(session, watch.item_id)
-                    signal = watchlist.evaluate(now_result.price, now_result.quantity, daily, watch)
-                    if watchlist.process_signal(watch, signal, now):
+                    signal = watchlist.evaluate(
+                        now_result.price, now_result.quantity, daily, watch, now_result.auctions
+                    )
+                    if alert_ok and watchlist.process_signal(watch, signal, now):
                         if banker is None:
                             banker = await self.fetch_user(BANKER_ID)
                         try:
-                            await banker.send(watchlist.format_alert(watch, signal))
+                            await banker.send(watchlist.format_alert(watch, signal, BANKER_BUDGET_COPPER))
                         except discord.HTTPException:
                             logger.warning("price_watch_check: could not DM banker for item %s", watch.item_id)
                     watchlist.auto_tune(watch, now)

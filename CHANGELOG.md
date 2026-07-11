@@ -1,3 +1,9 @@
+## [1.6.0]
+
+### Improvements
+- Price-watch buy alerts now suggest **how much to buy** on your gold budget (default 100,000, configurable via `BANKER_BUDGET_GOLD`), walking the auction listings up to the item's low band so you stockpile without overpaying.
+- Price-watch alerts are only sent during waking hours (**10 AM–11:59 PM Central**); a dip that happens overnight alerts the next morning if it's still a good deal, instead of pinging you at 4 AM.
+
 ## [1.5.0]
 
 ### Improvements

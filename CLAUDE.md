@@ -127,8 +127,10 @@ Owner-only feature gated to `BANKER_ID` — tracks region-wide commodity prices 
 - `price_watch_check` — an hourly background task that sweeps every watched item ID, fetches the current price and the item's last 14 days of daily price history, and evaluates a buy signal: fires when the current price is **strictly below** a rolling low band (a percentile of that item's own daily history).
 - **Per-item adaptive threshold** — each `Watch` tracks its own percentile, starting at 35. Re-evaluated at most once per day: loosens by +5 if the item has gone 7 days without an alert, tightens by −1 if it has fired 2+ alerts in 7 days. Clamped to the range [10, 50]. A watch must be at least 7 days old before it's allowed to loosen (`STARVE_DAYS` age guard), so new watches don't loosen before they've had a real chance to fire.
 - **Anti-spam** — only one DM is sent per genuine dip; the watch re-arms only after the price recovers back above the item's median.
+- **Quiet hours** — alerts only sent when `watchlist.in_alert_window(now_cst)` is true (10 AM–11:59 PM CST, `ALERT_START_HOUR`/`ALERT_END_HOUR`). Outside the window `process_signal` is skipped entirely, so a still-good dip re-fires on the next in-window hourly check (deferred, not dropped).
+- **Budget buy suggestion** — `NowResult`/`Signal` now carry the auction `auctions` ladder; `format_alert(watch, signal, budget_copper)` adds a "buy up to N for M" line via `watchlist.suggest_buy(auctions, low_band, budget_copper)`, which walks the ladder cheapest-first up to the low band. Budget from `BANKER_BUDGET_GOLD` env (default 100,000 gold → `BANKER_BUDGET_COPPER`).
 - State persisted to `watches.json`.
-- Commands: `!watch <itemId> [label]`, `!unwatch <itemId>`, `!watches` — DM or key-channel, banker-only.
+- Commands: `!watch <itemId> [label]` or `!watch <id1> <id2> ...` (multi), `!unwatch <itemId> [itemId ...]` (multi), `!watches` — DM or key-channel, banker-only.
 
 ### Schedule Management
 - **Organizer** → `ManageScheduleView`: delete or modify (level, date, time, note)
@@ -195,6 +197,7 @@ COORDINATOR_ID        Coordinator user ID
 MYTHIC_PLUS_ID        Mythic+ raider ping role ID
 ADMIN_ID              Comma-separated admin user IDs
 BANKER_ID             User ID allowed to use price-watch commands
+BANKER_BUDGET_GOLD    Gold budget for price-watch buy suggestions (default: 100000)
 UNDERMINE_API_KEY     Undermine Exchange API key
 UNDERMINE_REGION      Undermine Exchange region (default: us)
 RAIDERIO_API_KEY      Raider.io API key

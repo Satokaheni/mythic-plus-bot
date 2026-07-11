@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/tests.yml/badge.svg)](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/tests.yml)
 [![Docker](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/docker.yml/badge.svg)](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/docker.yml)
-![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.6.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.9+-green.svg)
 ![Discord.py](https://img.shields.io/badge/discord.py-2.0+-blue.svg)
 
@@ -65,6 +65,7 @@ COORDINATOR_ID=your_coordinator_user_id
 MYTHIC_PLUS_ID=your_mythic_plus_role_id
 ADMIN_ID=comma_separated_admin_user_ids
 BANKER_ID=your_banker_user_id
+BANKER_BUDGET_GOLD=100000
 UNDERMINE_API_KEY=your_undermine_exchange_api_key
 UNDERMINE_REGION=us
 RAIDERIO_API_KEY=your_raiderio_api_key
@@ -130,6 +131,8 @@ Each schedule embed has three buttons:
 ### Price Watch
 
 An owner-only feature for tracking Undermine Exchange commodity prices. Only the user configured as `BANKER_ID` can use it. The bot polls the Undermine Exchange API every hour for each watched item (region-wide commodities only, via `UNDERMINE_REGION`) and DMs the banker when the current price dips **below** a rolling low band computed from that item's own last 14 days of price history. Each item has its own adaptive threshold: it starts at the 35th percentile, loosens if the item goes 7 days without an alert, tightens if it alerts twice or more in 7 days, and is clamped to a 10–50 percentile range. To avoid spam, an item won't alert again until its price recovers back above the median.
+
+Each alert also suggests **how much to buy** on your gold budget (`BANKER_BUDGET_GOLD`, default 100,000): it walks the current auction listings from cheapest up to the item's low band and reports the units and total cost you can grab within budget — so you stockpile at a discount without overpaying. Alerts are only sent during **waking hours (10 AM–11:59 PM Central)**; a dip that happens overnight is held and alerts the next morning if it's still a good deal.
 
 - `!watch <itemId> [label]` — watch one item, with an optional friendly label
 - `!watch <id1> <id2> <id3> …` — watch several items at once (each auto-labelled `Item <id>`)
@@ -201,6 +204,7 @@ mythic-plus-bot/
 | `MYTHIC_PLUS_ID` | Role ID for the Mythic+ raider role (used in availability message ping) |
 | `ADMIN_ID` | Comma-separated user IDs with coordinator-level manage permissions |
 | `BANKER_ID` | User ID allowed to use the price watch commands (`!watch`, `!unwatch`, `!watches`) |
+| `BANKER_BUDGET_GOLD` | Gold budget used to size price-watch buy suggestions (optional, default `100000`) |
 | `UNDERMINE_API_KEY` | API key for the Undermine Exchange API |
 | `UNDERMINE_REGION` | Region for price lookups (optional, default `us`) |
 | `RAIDERIO_API_KEY` | API key for the Raider.io API |

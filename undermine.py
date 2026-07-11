@@ -23,10 +23,12 @@ def _region() -> str:
 
 @dataclass(frozen=True)
 class NowResult:
-    """Current market snapshot for a commodity: min price (copper) and total quantity."""
+    """Current market snapshot for a commodity: min price (copper), total quantity, and the
+    auction price ladder as a cheapest-first tuple of (price, quantity) lots."""
 
     price: int
     quantity: int
+    auctions: tuple = ()
 
 
 def _parse_now(data: dict) -> Optional[NowResult]:
@@ -34,7 +36,14 @@ def _parse_now(data: dict) -> Optional[NowResult]:
     result = data.get("result", {})
     if "price" not in result:
         return None
-    return NowResult(price=int(result["price"]), quantity=int(result.get("quantity", 0)))
+    auctions = tuple(
+        sorted(
+            (int(a["price"]), int(a["quantity"]))
+            for a in result.get("auctions", [])
+            if "price" in a and "quantity" in a
+        )
+    )
+    return NowResult(price=int(result["price"]), quantity=int(result.get("quantity", 0)), auctions=auctions)
 
 
 def _parse_daily(data: dict) -> List[int]:

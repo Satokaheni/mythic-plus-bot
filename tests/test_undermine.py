@@ -16,6 +16,23 @@ def test_parse_now_returns_none_when_not_listed():
     assert _parse_now(data) is None
 
 
+def test_parse_now_captures_auction_ladder_sorted():
+    data = {
+        "result": {
+            "price": 1100,
+            "quantity": 500,
+            "auctions": [
+                {"price": 1300, "quantity": 5},
+                {"price": 1100, "quantity": 43},
+                {"price": 1200, "quantity": 2},
+            ],
+        }
+    }
+    nr = _parse_now(data)
+    assert nr.price == 1100
+    assert nr.auctions == ((1100, 43), (1200, 2), (1300, 5))  # (price, quantity), cheapest first
+
+
 def test_parse_daily_returns_prices_in_order():
     data = {
         "result": {
