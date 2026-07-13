@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/tests.yml/badge.svg)](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/tests.yml)
 [![Docker](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/docker.yml/badge.svg)](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/docker.yml)
-![Version](https://img.shields.io/badge/version-1.7.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.7.1-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.9+-green.svg)
 ![Discord.py](https://img.shields.io/badge/discord.py-2.0+-blue.svg)
 
@@ -38,6 +38,7 @@ A Discord bot for managing World of Warcraft Mythic+ raid scheduling and team co
 - Python 3.9+
 - `discord.py >= 2.0`
 - `python-dotenv`
+- `tzdata` (timezone database; needed on minimal systems like Raspberry Pi where the OS lacks the `US/*` timezone aliases)
 
 ### Setup
 
@@ -49,7 +50,7 @@ cd mythic-plus-bot
 
 2. Install dependencies:
 ```bash
-pip install discord.py python-dotenv
+pip install discord.py python-dotenv tzdata
 ```
 
 3. Create a `.env` file in the project root:

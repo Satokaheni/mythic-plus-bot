@@ -1,3 +1,8 @@
+## [1.7.1]
+
+### Bug Fixes
+- Declare `tzdata` as a dependency so the IANA timezone database is always available. On minimal systems (e.g. Raspberry Pi) the OS may lack the `US/*` timezone aliases, which made `state.json` fail to load ("No time zone found with key US/Central") and fall back to empty state.
+
 ## [1.7.0]
 
 ### Improvements
