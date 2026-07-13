@@ -1,3 +1,8 @@
+## [1.7.0]
+
+### Improvements
+- The bot now writes logs to a rotating file (`bot.log`, ~5 MB × 3 backups) in addition to the console, so logs are available on headless deployments like a Raspberry Pi. Configurable via `LOG_FILE` and `LOG_LEVEL`.
+
 ## [1.6.0]
 
 ### Improvements

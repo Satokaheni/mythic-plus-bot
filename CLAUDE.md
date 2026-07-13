@@ -225,6 +225,7 @@ RAIDERIO_REGION       Raider.io region (default: us)
 ## Notable Conventions
 
 - **Circular imports** avoided via `TYPE_CHECKING` guards in raider.py/schedule.py
+- **Logging** — `_configure_logging()` (called after `load_dotenv`) attaches a `RotatingFileHandler` (`LOG_FILE`, default `bot.log`, ~5 MB × 3 backups) plus a console handler to the root logger; `client.run(..., log_handler=None)` so discord.py doesn't add a duplicate. `LOG_LEVEL` env sets the level (default INFO). `bot.log*` is gitignored.
 - **Schedules keyed by message ID** — not UUIDs
 - **Timezones:** US only (Eastern/Central/Mountain/Pacific/Alaska/Hawaii), stored as string, loaded as ZoneInfo
 - **Persistent views** (`ScheduleButtonView`, `KeyRequestButtonView`) re-registered on `on_ready` so buttons survive restarts

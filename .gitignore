@@ -30,6 +30,10 @@ watches.json.tmp
 events.jsonl
 character_mappings.json
 
+# Logs (rotating file handler)
+bot.log
+bot.log.*
+
 # Editors
 .vscode/
 .idea/

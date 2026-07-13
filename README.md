@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/tests.yml/badge.svg)](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/tests.yml)
 [![Docker](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/docker.yml/badge.svg)](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/docker.yml)
-![Version](https://img.shields.io/badge/version-1.6.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.7.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.9+-green.svg)
 ![Discord.py](https://img.shields.io/badge/discord.py-2.0+-blue.svg)
 
@@ -70,6 +70,8 @@ UNDERMINE_API_KEY=your_undermine_exchange_api_key
 UNDERMINE_REGION=us
 RAIDERIO_API_KEY=your_raiderio_api_key
 RAIDERIO_REGION=us
+LOG_FILE=bot.log
+LOG_LEVEL=INFO
 ```
 
 5. (Optional) Provide `character_mappings.json` in the project root at runtime — a gitignored, manually maintained JSON array mapping `discord_id` to character names, used to seed the forecasting dataset from Raider.io. Not required to run the bot.
@@ -209,6 +211,8 @@ mythic-plus-bot/
 | `UNDERMINE_REGION` | Region for price lookups (optional, default `us`) |
 | `RAIDERIO_API_KEY` | API key for the Raider.io API |
 | `RAIDERIO_REGION` | Region for Raider.io lookups (optional, default `us`) |
+| `LOG_FILE` | Path to the rotating log file (optional, default `bot.log`) |
+| `LOG_LEVEL` | Log verbosity: `DEBUG`/`INFO`/`WARNING`/… (optional, default `INFO`) |
 
 ## Class and Role Support
 
@@ -223,6 +227,7 @@ mythic-plus-bot/
 - **Timezone-Aware Datetimes**: All schedule times are stored as timezone-aware datetime objects; DMs display times in each raider's registered timezone
 - **Persistent Views**: Button views use `timeout=None` and are re-registered on startup so interactions survive bot restarts
 - **Circular Import Guards**: Cross-module type hints use `TYPE_CHECKING` guards to avoid circular imports at runtime
+- **Logging**: Logs go to both a rotating file (`bot.log`, ~5 MB × 3 backups, gitignored) and the console, so headless deployments (Raspberry Pi, Docker, systemd) keep a readable on-disk log. Tune with `LOG_FILE` / `LOG_LEVEL`
 
 ## Development
 

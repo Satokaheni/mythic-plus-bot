@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime, time, timedelta, timezone
+from logging.handlers import RotatingFileHandler
 from textwrap import dedent
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -29,10 +30,31 @@ from watchlist import Watchlist
 # ---------------------------
 logger = logging.getLogger("discord")
 
+
+def _configure_logging() -> None:
+    """Log to a rotating file (for headless deploys) and the console.
+
+    The file is capped so it can't fill a Raspberry Pi's SD card. Tunable via env:
+    LOG_FILE (default bot.log), LOG_LEVEL (default INFO).
+    """
+    level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+    log_file = os.getenv("LOG_FILE", "bot.log")
+    fmt = logging.Formatter("%(asctime)s %(levelname)-8s %(name)s %(message)s", "%Y-%m-%d %H:%M:%S")
+    root = logging.getLogger()
+    root.setLevel(level)
+    # ~5 MB per file, 3 rotated backups -> at most ~20 MB on disk.
+    file_handler = RotatingFileHandler(log_file, maxBytes=5_000_000, backupCount=3, encoding="utf-8")
+    console_handler = logging.StreamHandler()
+    for handler in (file_handler, console_handler):
+        handler.setFormatter(fmt)
+        root.addHandler(handler)
+
+
 # ---------------------------
 # Global Variables
 # ---------------------------
 load_dotenv(".env")
+_configure_logging()
 
 
 def _require_env(name: str) -> str:
@@ -60,7 +82,7 @@ _CST = ZoneInfo("America/Chicago")
 # ---------------------------
 # Version & Changelog
 # ---------------------------
-BOT_VERSION = "1.6.0"
+BOT_VERSION = "1.7.0"
 
 _VERSION_FILE = "version.txt"
 
@@ -1802,4 +1824,5 @@ intents.members = True
 intents.dm_messages = True
 
 client = MyClient(intents=intents)
-client.run(CLIENT_ID)
+# log_handler=None: we configured logging ourselves (file + console) in _configure_logging.
+client.run(CLIENT_ID, log_handler=None)
