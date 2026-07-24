@@ -75,6 +75,8 @@ COORDINATOR_ID = int(_require_env("COORDINATOR_ID"))
 BANKER_ID = int(_require_env("BANKER_ID"))
 # Gold budget used to size price-watch buy suggestions (default 100,000 gold).
 BANKER_BUDGET_COPPER = int(os.getenv("BANKER_BUDGET_GOLD", "100000")) * 10000
+# Default bulk order size the price-watch buy signal targets (per-item overridable via `!watch -x`).
+BANKER_BULK_QTY = int(os.getenv("BANKER_BULK_QTY", "100"))
 MYTHIC_PLUS_ID = int(_require_env("MYTHIC_PLUS_ID"))
 ADMINS = [int(id_str) for id_str in _require_env("ADMIN_ID").split(",") if id_str.strip().isdigit()]
 ELEVATED_IDS = {COORDINATOR_ID} | set(ADMINS)
@@ -82,7 +84,7 @@ _CST = ZoneInfo("America/Chicago")
 # ---------------------------
 # Version & Changelog
 # ---------------------------
-BOT_VERSION = "1.7.1"
+BOT_VERSION = "1.8.0"
 
 _VERSION_FILE = "version.txt"
 
@@ -237,15 +239,27 @@ class MyClient(discord.Client):
         return new_message.id, schedule
 
     async def get_message_history(self):
-        """Retrieve message history from the designated channel."""
+        """Warm the message cache so reactions on old messages fire after a restart.
+
+        Each fetch is best-effort: a message may have been deleted since last run
+        (e.g. the availability message), which fetch_message reports as NotFound.
+        Skip missing/inaccessible messages so one gone message can't abort on_ready
+        or skip caching the rest.
+        """
         avail_channel = self.get_channel(AVAIL_CHANNEL_ID)
         if avail_channel and self.availability_message_id:
-            await avail_channel.fetch_message(self.availability_message_id)
+            try:
+                await avail_channel.fetch_message(self.availability_message_id)
+            except (discord.NotFound, discord.Forbidden):
+                pass
 
         for cid, mid in self.dm_map.items():
             channel = self.get_channel(cid)
             if channel:
-                await channel.fetch_message(mid[1])
+                try:
+                    await channel.fetch_message(mid[1])
+                except (discord.NotFound, discord.Forbidden):
+                    pass
 
     # Add new method to handle DM retries
     async def retry_unanswered_dms(self):
@@ -862,8 +876,9 @@ class MyClient(discord.Client):
                     if now_result is None:
                         continue
                     daily = await undermine.fetch_daily(session, watch.item_id)
+                    target = watch.target_qty or BANKER_BULK_QTY
                     signal = watchlist.evaluate(
-                        now_result.price, now_result.quantity, daily, watch, now_result.auctions
+                        now_result.price, now_result.quantity, daily, watch, now_result.auctions, target
                     )
                     if alert_ok and watchlist.process_signal(watch, signal, now):
                         if banker is None:
@@ -1290,35 +1305,54 @@ class MyClient(discord.Client):
                     await message.delete()
                 except (discord.Forbidden, discord.NotFound):
                     pass
-            # Two or more all-numeric args -> watch several items at once (auto-labelled).
-            if len(args) >= 2 and all(a.isdigit() for a in args):
+            parsed = watchlist.parse_watch_command(args)
+            if parsed["kind"] == "error":
+                reason = parsed.get("reason")
+                if reason == "bad_flag":
+                    hint = (
+                        "❌ A `-x` quantity must be **attached with no space** (e.g. `-x100`, not `-x 100`). "
+                        "A spaced `-x` in a multi-item command swallows the next item id."
+                    )
+                elif reason == "multi_label":
+                    hint = (
+                        "❌ Labels aren't supported when watching several items at once — "
+                        "drop the text, or add that item on its own to give it a label."
+                    )
+                else:
+                    hint = "❌ Give at least one numeric item id."
+                await message.author.send(
+                    f"{hint}\n"
+                    "Usage: `!watch <itemId> [-x<qty>] [label]`  •  several at once: "
+                    "`!watch <id1> -x<qty> <id2> -x<qty> ...`\n"
+                    "Example: `!watch 241326 -x100 241322 -x100 241324 -x100`"
+                )
+                return
+            # Two or more ids -> watch several at once (auto-labelled), each with an optional -x target.
+            if parsed["kind"] == "multi":
                 added, already = [], []
-                for a in args:
-                    iid = int(a)
+                for iid, iqty in parsed["items"]:
+                    target = iqty or BANKER_BULK_QTY
                     if self.watchlist.get(iid) is None:
-                        self.watchlist.add(iid, f"Item {iid}")
-                        added.append(iid)
+                        self.watchlist.add(iid, f"Item {iid}", iqty)
+                        added.append(f"{iid} (bulk {target:,})")
                     else:
-                        already.append(iid)
+                        already.append(str(iid))
                 self.watchlist.save()
                 reply = []
                 if added:
-                    reply.append(f"👁️ Now watching {len(added)} item(s): {', '.join(str(i) for i in added)}.")
+                    reply.append(f"👁️ Now watching {len(added)} item(s): {', '.join(added)}.")
                 if already:
-                    reply.append(f"Already watching: {', '.join(str(i) for i in already)}.")
+                    reply.append(f"Already watching: {', '.join(already)}.")
                 await message.author.send("\n".join(reply))
                 return
-            # Single item, with an optional multi-word label.
-            if not args or not args[0].isdigit():
-                await message.author.send(
-                    "Usage: `!watch <itemId> [label]`  •  watch several at once: `!watch <id1> <id2> <id3>`"
-                )
-                return
-            item_id = int(args[0])
-            label = " ".join(args[1:]) if len(args) > 1 else f"Item {item_id}"
-            self.watchlist.add(item_id, label)
+            # Single item, with an optional multi-word label and optional -x bulk target.
+            item_id = parsed["item_id"]
+            label = parsed["label"] or f"Item {item_id}"
+            target_qty = parsed["target_qty"]
+            self.watchlist.add(item_id, label, target_qty)
             self.watchlist.save()
-            await message.author.send(f"👁️ Now watching **{label}** (item {item_id}).")
+            qty_note = f" — bulk target **{target_qty:,}**" if target_qty else ""
+            await message.author.send(f"👁️ Now watching **{label}** (item {item_id}){qty_note}.")
             return
 
         if message.content.startswith("!unwatch ") and message.author.id == BANKER_ID:
@@ -1361,8 +1395,12 @@ class MyClient(discord.Client):
                     try:
                         now_result = await undermine.fetch_now(session, watch.item_id)
                         daily = await undermine.fetch_daily(session, watch.item_id)
+                        target = watch.target_qty or BANKER_BULK_QTY
                         sig = (
-                            watchlist.evaluate(now_result.price, now_result.quantity, daily, watch)
+                            watchlist.evaluate(
+                                now_result.price, now_result.quantity, daily, watch,
+                                now_result.auctions, target,
+                            )
                             if now_result
                             else None
                         )

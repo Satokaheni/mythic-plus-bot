@@ -8,7 +8,7 @@ This file reflects the **current state** of the codebase. Rewrite relevant secti
 
 A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Mythic+ runs. Manages team assembly, availability tracking, DM outreach, and schedule lifecycle.
 
-**Version:** 1.4.0
+**Version:** 1.8.0
 **Entry point:** `bot.py` (`MyClient` class)
 
 ---
@@ -124,13 +124,15 @@ This is **dry-run only**: no team DMs are sent to roster members and no `Schedul
 
 ### Price Watch (Undermine)
 Owner-only feature gated to `BANKER_ID` — tracks region-wide commodity prices on the Undermine Exchange API (region from `UNDERMINE_REGION`, default `us`; auth via `UNDERMINE_API_KEY`).
-- `price_watch_check` — an hourly background task that sweeps every watched item ID, fetches the current price and the item's last 14 days of daily price history, and evaluates a buy signal: fires when the current price is **strictly below** a rolling low band (a percentile of that item's own daily history).
+- `price_watch_check` — an hourly background task that sweeps every watched item ID, fetches the current price + auction ladder and the item's last 14 days of daily price history, and evaluates a buy signal: fires when the **bulk fill price** is **strictly below** a rolling low band (a percentile of that item's own daily history).
+- **Bulk-aware signal** — the watched price is the VWAP to fill a target quantity, not the single cheapest lot. `watchlist.bulk_price(auctions, target_qty)` walks the ladder cheapest-first and blends prices over exactly `target_qty` units, so a thin cheap lot can't trigger a buy you can't actually fill at that price. If fewer than `target_qty` units are listed the signal is **not fillable** (a depth gate) and never fires. Target quantity resolves per call site as `watch.target_qty or BANKER_BULK_QTY`. When `evaluate` is called with no auction ladder it degrades to the legacy cheapest-lot behavior. `Signal` carries `price` (bulk VWAP), `fillable`, `units_available`, and `target_qty`.
 - **Per-item adaptive threshold** — each `Watch` tracks its own percentile, starting at 35. Re-evaluated at most once per day: loosens by +5 if the item has gone 7 days without an alert, tightens by −1 if it has fired 2+ alerts in 7 days. Clamped to the range [10, 50]. A watch must be at least 7 days old before it's allowed to loosen (`STARVE_DAYS` age guard), so new watches don't loosen before they've had a real chance to fire.
 - **Anti-spam** — only one DM is sent per genuine dip; the watch re-arms only after the price recovers back above the item's median.
 - **Quiet hours** — alerts only sent when `watchlist.in_alert_window(now_cst)` is true (10 AM–11:59 PM CST, `ALERT_START_HOUR`/`ALERT_END_HOUR`). Outside the window `process_signal` is skipped entirely, so a still-good dip re-fires on the next in-window hourly check (deferred, not dropped).
-- **Budget buy suggestion** — `NowResult`/`Signal` now carry the auction `auctions` ladder; `format_alert(watch, signal, budget_copper)` adds a "buy up to N for M" line via `watchlist.suggest_buy(auctions, low_band, budget_copper)`, which walks the ladder cheapest-first up to the low band. Budget from `BANKER_BUDGET_GOLD` env (default 100,000 gold → `BANKER_BUDGET_COPPER`).
-- State persisted to `watches.json`.
-- Commands: `!watch <itemId> [label]` or `!watch <id1> <id2> ...` (multi), `!unwatch <itemId> [itemId ...]` (multi), `!watches` — DM or key-channel, banker-only.
+- **Budget buy suggestion** — `NowResult`/`Signal` carry the auction `auctions` ladder; `format_alert(watch, signal, budget_copper)` adds a "buy up to N for M" line via `watchlist.suggest_buy(auctions, low_band, budget_copper)`, which walks the ladder cheapest-first up to the low band. Budget from `BANKER_BUDGET_GOLD` env (default 100,000 gold → `BANKER_BUDGET_COPPER`). Independent of the bulk target — this line is budget-bound, not target-bound.
+- **Command grammar** — `watchlist.parse_watch_command(args)` (pure/tested) parses `!watch` into `{"kind": "single"|"multi"|"error", ...}`. The `-x<qty>` flag (quantity **glued**, never spaced) binds to the item id immediately before it. One id → `single` (`item_id`, `label`, `target_qty`), may carry a trailing label. Two or more ids → `multi` (`items`: list of `(item_id, target_qty|None)`), each with its own optional `-x` target, no custom labels. Ids without a `-x` resolve to `BANKER_BULK_QTY` at the call site. Error dicts carry a `reason` (`bad_flag` / `multi_label` / `no_item`) that `bot.py` maps to an actionable message. Glued-only is deliberate: a spaced `-x 100` in the multi run would silently swallow the next item id as the quantity (a real reported bug). Single-item re-watch with `-x` updates the target in place; multi skips already-watched ids.
+- State persisted to `watches.json` (`Watch.target_qty` round-trips; legacy entries load as `None` → global default).
+- Commands: `!watch <itemId> [-x<qty>] [label]` or `!watch <id1> -x<qty> <id2> -x<qty> ...` (multi, per-item targets), `!unwatch <itemId> [itemId ...]` (multi), `!watches` — DM or key-channel, banker-only.
 
 ### Schedule Management
 - **Organizer** → `ManageScheduleView`: delete or modify (level, date, time, note)
@@ -198,6 +200,7 @@ MYTHIC_PLUS_ID        Mythic+ raider ping role ID
 ADMIN_ID              Comma-separated admin user IDs
 BANKER_ID             User ID allowed to use price-watch commands
 BANKER_BUDGET_GOLD    Gold budget for price-watch buy suggestions (default: 100000)
+BANKER_BULK_QTY       Default bulk order size the buy signal targets (default: 100; per-item via !watch -x)
 UNDERMINE_API_KEY     Undermine Exchange API key
 UNDERMINE_REGION      Undermine Exchange region (default: us)
 RAIDERIO_API_KEY      Raider.io API key
@@ -216,7 +219,7 @@ RAIDERIO_REGION       Raider.io region (default: us)
 | `!modify` | KEY/DM | Anyone | Update class/roles/timezone |
 | `!setup` | KEY | Coord/Admin | Re-post key request button |
 | `!cleanup` | AVAIL or KEY | Coord/Admin | Purge channel, reset state (keeps raiders) |
-| `!watch <itemId> [label]` | KEY/DM | Banker | Start watching an item's price |
+| `!watch <itemId> [-x<qty>] [label]`<br>`!watch <id1> -x<qty> <id2> -x<qty> ...` | KEY/DM | Banker | Watch an item (optional bulk target via `-x`), or several at once with per-item targets |
 | `!unwatch <itemId>` | KEY/DM | Banker | Stop watching an item |
 | `!watches` | KEY/DM | Banker | List currently watched items |
 

@@ -1,3 +1,14 @@
+## [1.8.0]
+
+### Improvements
+- Price-watch buy signals are now **bulk-aware**: the watched price is the effective price to fill a bulk order (the volume-weighted average across auction lots), not the single cheapest listing. A thin 20-unit lot at the floor no longer triggers a buy alert when you actually want 100+ — the signal reflects what you'd really pay to fill the order. If fewer than the target quantity are even listed, nothing fires (a depth gate).
+- The bulk target quantity defaults to `BANKER_BULK_QTY` (default 100) and can be set per item with the `-x` flag (quantity glued: `-x200`): `!watch <itemId> -x<qty> [label]` (e.g. `!watch 212283 -x200 Rousing Fire`). The multi-item form takes per-item targets too — `!watch 212283 -x100 212284 -x200` — and ids without a `-x` use the default. Bare all-numeric `!watch` args still mean "watch several items at once", so nothing changes for existing usage. `!watches` shows the bulk fill price, or "insufficient depth" when the target can't be filled. A malformed `!watch` now gets a specific, actionable error instead of silently watching a garbage label.
+
+## [1.7.2]
+
+### Bug Fixes
+- On startup, a deleted availability message (or any DM message that had gone missing) made `on_ready` crash with a 404 `NotFound`, which aborted the rest of startup — the changelog post, key-request button, and background tasks never ran. Message-cache warming is now best-effort: missing or inaccessible messages are skipped, matching every other `fetch_message` call in the bot.
+
 ## [1.7.1]
 
 ### Bug Fixes

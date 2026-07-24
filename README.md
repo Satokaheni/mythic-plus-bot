@@ -67,6 +67,7 @@ MYTHIC_PLUS_ID=your_mythic_plus_role_id
 ADMIN_ID=comma_separated_admin_user_ids
 BANKER_ID=your_banker_user_id
 BANKER_BUDGET_GOLD=100000
+BANKER_BULK_QTY=100
 UNDERMINE_API_KEY=your_undermine_exchange_api_key
 UNDERMINE_REGION=us
 RAIDERIO_API_KEY=your_raiderio_api_key
@@ -133,12 +134,16 @@ Each schedule embed has three buttons:
 
 ### Price Watch
 
-An owner-only feature for tracking Undermine Exchange commodity prices. Only the user configured as `BANKER_ID` can use it. The bot polls the Undermine Exchange API every hour for each watched item (region-wide commodities only, via `UNDERMINE_REGION`) and DMs the banker when the current price dips **below** a rolling low band computed from that item's own last 14 days of price history. Each item has its own adaptive threshold: it starts at the 35th percentile, loosens if the item goes 7 days without an alert, tightens if it alerts twice or more in 7 days, and is clamped to a 10–50 percentile range. To avoid spam, an item won't alert again until its price recovers back above the median.
+An owner-only feature for tracking Undermine Exchange commodity prices. Only the user configured as `BANKER_ID` can use it. The bot polls the Undermine Exchange API every hour for each watched item (region-wide commodities only, via `UNDERMINE_REGION`) and DMs the banker when the price dips **below** a rolling low band computed from that item's own last 14 days of price history. Each item has its own adaptive threshold: it starts at the 35th percentile, loosens if the item goes 7 days without an alert, tightens if it alerts twice or more in 7 days, and is clamped to a 10–50 percentile range. To avoid spam, an item won't alert again until its price recovers back above the median.
+
+**Bulk-aware signal:** the watched price is the **effective price to fill a bulk order**, not the single cheapest lot. The bot walks the auction ladder and blends prices (VWAP) over your target quantity, so a thin 20-unit lot at the floor no longer triggers a buy when you actually want 100+ — the alert reflects what you'd really pay to fill the order. If fewer than the target quantity are even listed, there's no bulk opportunity and nothing fires (a depth gate). The target quantity defaults to `BANKER_BULK_QTY` (default 100) and can be set per item with the `-x` flag.
 
 Each alert also suggests **how much to buy** on your gold budget (`BANKER_BUDGET_GOLD`, default 100,000): it walks the current auction listings from cheapest up to the item's low band and reports the units and total cost you can grab within budget — so you stockpile at a discount without overpaying. Alerts are only sent during **waking hours (10 AM–11:59 PM Central)**; a dip that happens overnight is held and alerts the next morning if it's still a good deal.
 
-- `!watch <itemId> [label]` — watch one item, with an optional friendly label
-- `!watch <id1> <id2> <id3> …` — watch several items at once (each auto-labelled `Item <id>`)
+- `!watch <itemId> [-x<qty>] [label]` — watch one item, with an optional bulk target and friendly label, e.g. `!watch 212283 -x200 Rousing Fire`
+- `!watch <id1> [-x<qty>] <id2> [-x<qty>] …` — watch several items at once (each auto-labelled `Item <id>`), each with its own optional bulk target, e.g. `!watch 212283 -x100 212284 -x200`; ids without a `-x` use the `BANKER_BULK_QTY` default
+
+> The bulk quantity must be **glued** to the flag (`-x200`, not `-x 200`) — a spaced flag in the multi-item form would swallow the next item id.
 - `!unwatch <itemId> [itemId …]` — stop watching one or more items
 - `!watches` — list everything currently being watched
 
@@ -163,7 +168,7 @@ The bot learns **when your raiders actually play** and predicts the best time fo
 | `!modify` | `KEY_CHANNEL` or DM | Anyone | Update your class, roles, and timezone |
 | `!setup` | `KEY_CHANNEL` | Coordinator/Admin | Re-post and pin the key request button |
 | `!cleanup` | `AVAIL_CHANNEL` or `KEY_CHANNEL` | Coordinator/Admin | Purge both channels and reset all state (preserves raiders) |
-| `!watch <itemId> [label]`<br>`!watch <id1> <id2> ...` | `KEY_CHANNEL` or DM | Banker only | Watch one item (with optional label), or several at once |
+| `!watch <itemId> [-x<qty>] [label]`<br>`!watch <id1> -x<qty> <id2> -x<qty> ...` | `KEY_CHANNEL` or DM | Banker only | Watch one item (optional bulk target via `-x`, optional label), or several at once with per-item targets |
 | `!unwatch <itemId> [itemId ...]` | `KEY_CHANNEL` or DM | Banker only | Stop watching one or more items |
 | `!watches` | `KEY_CHANNEL` or DM | Banker only | List currently watched items |
 
@@ -208,6 +213,7 @@ mythic-plus-bot/
 | `ADMIN_ID` | Comma-separated user IDs with coordinator-level manage permissions |
 | `BANKER_ID` | User ID allowed to use the price watch commands (`!watch`, `!unwatch`, `!watches`) |
 | `BANKER_BUDGET_GOLD` | Gold budget used to size price-watch buy suggestions (optional, default `100000`) |
+| `BANKER_BULK_QTY` | Default bulk order size the price-watch buy signal targets; overridable per item via `!watch -x` (optional, default `100`) |
 | `UNDERMINE_API_KEY` | API key for the Undermine Exchange API |
 | `UNDERMINE_REGION` | Region for price lookups (optional, default `us`) |
 | `RAIDERIO_API_KEY` | API key for the Raider.io API |
