@@ -1573,6 +1573,58 @@ class MyClient(discord.Client):
             await message.author.send("**Your snipes:**\n" + "\n".join(lines))
             return
 
+        if message.content in ("!help", "!tools"):
+            embed = discord.Embed(
+                title="🤖 Mythic+ Bot — Commands",
+                description="Here's everything I can do. Most commands work in a DM or the relevant channel.",
+                color=discord.Color.blurple(),
+            )
+            embed.add_field(
+                name="📅 Mythic+ Scheduling (anyone)",
+                value=(
+                    "`!key` — start a key request (in the key channel)\n"
+                    "`!keys` — show your scheduled runs\n"
+                    "`!modify` — update your class, roles, or timezone"
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name="🗓️ Availability & Setup (coordinator/admin)",
+                value=(
+                    "`!avail` — post the weekly availability message\n"
+                    "`!setup` — re-post the key-request button\n"
+                    "`!cleanup` — purge the channel and reset state"
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name="💰 Price Watch — region commodities (banker)",
+                value=(
+                    "`!watch <itemId> [-x<qty>] [label]` — watch a commodity; `-x` sets a bulk target\n"
+                    "`!watch <id1> <id2> …` — watch several at once\n"
+                    "`!unwatch <itemId …>` — stop watching\n"
+                    "`!watches` — list your watches"
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name="🎯 Auction Sniper — per-realm items (anyone)",
+                value=(
+                    "`!snipe <itemId> <maxGold> [label]` — alert when an item is under your price on any realm\n"
+                    "`!snipepet <speciesId> <maxGold> [label]` — same, for a battle pet\n"
+                    "`!unsnipe <id …>` — stop sniping\n"
+                    "`!snipes` — list your snipes"
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name="ℹ️ Help",
+                value="`!help` or `!tools` — show this message",
+                inline=False,
+            )
+            await message.channel.send(embed=embed)
+            return
+
         if message.content == "!keys":
             if message.author.id in self.raiders:
                 try:
