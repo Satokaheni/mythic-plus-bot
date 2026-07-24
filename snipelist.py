@@ -2,6 +2,7 @@
 
 import json
 import logging
+import math
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -20,7 +21,7 @@ def parse_gold(text: str) -> Optional[int]:
         gold = float(text)
     except (TypeError, ValueError):
         return None
-    if gold <= 0:
+    if not math.isfinite(gold) or gold <= 0:
         return None
     return int(round(gold * 10000))
 

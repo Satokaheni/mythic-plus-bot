@@ -14,6 +14,13 @@ def test_parse_gold_rejects_bad_input():
     assert parse_gold("-5") is None
 
 
+def test_parse_gold_rejects_non_finite():
+    assert parse_gold("nan") is None
+    assert parse_gold("inf") is None
+    assert parse_gold("-inf") is None
+    assert parse_gold("1e400") is None  # overflows float() to inf
+
+
 def test_best_price_for_item_picks_cheapest_buyout():
     auctions = [
         {"item": {"id": 111}, "buyout": 5000, "quantity": 1},
