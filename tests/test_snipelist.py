@@ -1,6 +1,19 @@
 """Tests for the auction-snipe state, detection, and formatting logic."""
 
-from snipelist import PET_ITEM_ID, apply_anti_spam, best_price_for, cheapest, parse_gold
+import json
+
+from snipelist import (
+    PET_ITEM_ID,
+    AlertPlan,
+    Snipe,
+    Snipelist,
+    Subscriber,
+    apply_anti_spam,
+    best_price_for,
+    cheapest,
+    parse_gold,
+    plan_alerts,
+)
 
 
 def test_parse_gold_whole_and_decimal():
@@ -57,11 +70,6 @@ def test_apply_anti_spam_state_machine():
     assert apply_anti_spam(True, "alerted") == (False, "alerted")  # stay silent
     assert apply_anti_spam(False, "alerted") == (False, "armed")   # re-arm
     assert apply_anti_spam(False, "armed") == (False, "armed")
-
-
-from datetime import datetime, timezone
-
-from snipelist import Snipe, Snipelist, Subscriber
 
 
 def test_subscribe_creates_one_record_many_subscribers():
@@ -133,10 +141,67 @@ def test_load_missing_file_is_empty():
 
 
 def test_load_skips_malformed_entry(tmp_path):
-    import json
     path = str(tmp_path / "snipes.json")
     valid = Snipe("item", 111, "Widget", subscribers={1: Subscriber(5000)}).to_dict()
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"version": 1, "snipes": [{"junk": True}, valid]}, f)
     sl = Snipelist.load(path)
     assert len(sl.all()) == 1 and sl.get("item", 111) is not None
+
+
+BANKER = 999
+
+
+def _snipe(is_recipe=False, subs=None):
+    s = Snipe("item", 111, "Widget", is_recipe=is_recipe)
+    for uid, tgt in (subs or {}).items():
+        s.subscribers[uid] = Subscriber(tgt)
+    return s
+
+
+def test_plan_alerts_fires_only_subscribers_below_target():
+    s = _snipe(subs={1: 5000, 2: 8000})     # best 6000 -> #2 fires, #1 doesn't
+    plans = plan_alerts(s, (6000, 3, 121), BANKER)
+    assert plans == [AlertPlan(2, False, 8000)]
+    assert s.subscribers[2].state == "alerted"
+    assert s.subscribers[1].state == "armed"
+    assert s.last_realm == 121 and s.last_price == 6000
+
+
+def test_plan_alerts_silent_while_alerted_then_rearms():
+    s = _snipe(subs={2: 8000})
+    plan_alerts(s, (6000, 1, 121), BANKER)                 # first fire
+    assert plan_alerts(s, (5000, 1, 121), BANKER) == []    # still below -> silent
+    plan_alerts(s, (9000, 1, 121), BANKER)                 # above target -> re-arm
+    assert s.subscribers[2].state == "armed"
+    assert plan_alerts(s, (6000, 1, 121), BANKER) == [AlertPlan(2, False, 8000)]  # fires again
+
+
+def test_plan_alerts_recipe_ccs_banker():
+    s = _snipe(is_recipe=True, subs={1: 5000})
+    plans = plan_alerts(s, (4000, 2, 121), BANKER)
+    assert AlertPlan(1, False, 5000) in plans
+    assert AlertPlan(BANKER, True, None) in plans
+    assert s.banker_state == "alerted"
+
+
+def test_plan_alerts_non_recipe_never_ccs_banker():
+    s = _snipe(is_recipe=False, subs={1: 5000})
+    plans = plan_alerts(s, (4000, 2, 121), BANKER)
+    assert plans == [AlertPlan(1, False, 5000)]
+
+
+def test_plan_alerts_banker_cc_dedup_when_banker_is_subscriber():
+    # Banker subscribes and fires as a subscriber -> no separate CC.
+    s = _snipe(is_recipe=True, subs={BANKER: 5000})
+    plans = plan_alerts(s, (4000, 1, 121), BANKER)
+    assert plans == [AlertPlan(BANKER, False, 5000)]  # only the subscriber DM
+    assert s.banker_state == "alerted"                # state still advances
+
+
+def test_plan_alerts_no_listing_rearms_all():
+    s = _snipe(is_recipe=True, subs={1: 5000})
+    plan_alerts(s, (4000, 1, 121), BANKER)  # fire
+    plan_alerts(s, None, BANKER)            # nothing listed anywhere
+    assert s.subscribers[1].state == "armed"
+    assert s.banker_state == "armed"

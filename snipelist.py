@@ -124,6 +124,43 @@ class Snipe:
         )
 
 
+@dataclass(frozen=True)
+class AlertPlan:
+    """One DM the sweep should send this cycle."""
+
+    recipient_id: int
+    is_banker: bool
+    target_copper: Optional[int]  # the subscriber's target; None for a banker CC
+
+
+def plan_alerts(snipe: Snipe, best: Optional[Tuple[int, int, int]], banker_id: int) -> List[AlertPlan]:
+    """Given a record's cheapest-anywhere `best` (price, qty, realm_id) or None, decide the DMs.
+
+    Mutates each subscriber's state, the record's banker_state, and last_realm/last_price.
+    Returns the list of AlertPlans to send. One DM per genuine dip per recipient.
+    """
+    plans: List[AlertPlan] = []
+    if best is not None:
+        snipe.last_price, _, snipe.last_realm = best[0], best[1], best[2]
+
+    alerted_ids = set()
+    for uid, sub in snipe.subscribers.items():
+        fired = best is not None and best[0] < sub.target_copper
+        should_dm, sub.state = apply_anti_spam(fired, sub.state)
+        if should_dm:
+            plans.append(AlertPlan(uid, False, sub.target_copper))
+            alerted_ids.add(uid)
+
+    # Recipes also CC the banker, once per dip, when the price beats at least one target.
+    if snipe.is_recipe and snipe.subscribers:
+        max_target = max(s.target_copper for s in snipe.subscribers.values())
+        banker_fired = best is not None and best[0] < max_target
+        should_cc, snipe.banker_state = apply_anti_spam(banker_fired, snipe.banker_state)
+        if should_cc and banker_id not in alerted_ids:
+            plans.append(AlertPlan(banker_id, True, None))
+    return plans
+
+
 class Snipelist:
     """In-memory store of snipes (one per item), persisted to snipes.json."""
 
