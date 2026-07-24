@@ -964,8 +964,8 @@ class MyClient(discord.Client):
                 await user.send(snipelist_mod.format_banker_alert(snipe, best, realm, wanters))
             else:
                 await user.send(snipelist_mod.format_alert(snipe, best, realm, plan.target_copper))
-        except discord.HTTPException:
-            logger.warning("auction_snipe_check: could not DM %s", plan.recipient_id)
+        except Exception as exc:  # noqa: BLE001 - one bad DM must not abort the fan-out
+            logger.warning("auction_snipe_check: could not DM %s: %s", plan.recipient_id, exc)
 
     @tasks.loop(hours=24)
     async def raiderio_harvest(self):
