@@ -1422,6 +1422,86 @@ class MyClient(discord.Client):
             await message.author.send("**Watched items:**\n" + "\n".join(lines))
             return
 
+        if message.content.startswith("!snipe ") and not message.content.startswith("!snipepet "):
+            args = message.content.split()[1:]
+            if len(args) < 2 or not args[0].isdigit():
+                await message.channel.send("Usage: `!snipe <itemId> <maxGold> [label]`")
+                return
+            item_id = int(args[0])
+            target = snipelist_mod.parse_gold(args[1])
+            if target is None:
+                await message.channel.send("Max price must be a positive number of gold, e.g. `!snipe 194123 5000`.")
+                return
+            async with aiohttp.ClientSession() as session:
+                try:
+                    info = await self.blizzard.item_info(session, item_id)
+                    label = " ".join(args[2:]) if len(args) > 2 else info.name or f"Item {item_id}"
+                    is_recipe = info.is_recipe
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("snipe item_info failed for %s: %s", item_id, exc)
+                    label = " ".join(args[2:]) if len(args) > 2 else f"Item {item_id}"
+                    is_recipe = False
+            self.snipelist.subscribe(message.author.id, "item", item_id, target, label, is_recipe)
+            self.snipelist.save()
+            note = " (recipe — the banker is also alerted)" if is_recipe else ""
+            await message.channel.send(
+                f"🎯 Sniping **{label}** (item {item_id}) under {snipelist_mod.format_gold(target)}{note}."
+            )
+            return
+
+        if message.content.startswith("!snipepet "):
+            args = message.content.split()[1:]
+            if len(args) < 2 or not args[0].isdigit():
+                await message.channel.send("Usage: `!snipepet <speciesId> <maxGold> [label]`")
+                return
+            species_id = int(args[0])
+            target = snipelist_mod.parse_gold(args[1])
+            if target is None:
+                await message.channel.send("Max price must be a positive number of gold.")
+                return
+            async with aiohttp.ClientSession() as session:
+                try:
+                    name = await self.blizzard.pet_name(session, species_id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("snipe pet_name failed for %s: %s", species_id, exc)
+                    name = f"Pet {species_id}"
+            label = " ".join(args[2:]) if len(args) > 2 else name
+            self.snipelist.subscribe(message.author.id, "pet", species_id, target, label, False)
+            self.snipelist.save()
+            await message.channel.send(
+                f"🎯 Sniping pet **{label}** (species {species_id}) under {snipelist_mod.format_gold(target)}."
+            )
+            return
+
+        if message.content.startswith("!unsnipe "):
+            args = message.content.split()[1:]
+            if not args or not all(a.isdigit() for a in args):
+                await message.channel.send("Usage: `!unsnipe <id ...>`")
+                return
+            removed = []
+            for a in args:
+                iid = int(a)
+                # a bare id may be an item or a pet the caller subscribes to; try both
+                if self.snipelist.unsubscribe(message.author.id, "item", iid):
+                    removed.append(iid)
+                elif self.snipelist.unsubscribe(message.author.id, "pet", iid):
+                    removed.append(iid)
+            if removed:
+                self.snipelist.save()
+                await message.channel.send(f"🚫 Stopped sniping: {', '.join(str(i) for i in removed)}.")
+            else:
+                await message.channel.send("You weren't sniping any of those.")
+            return
+
+        if message.content == "!snipes":
+            snipes = self.snipelist.for_owner(message.author.id)
+            if not snipes:
+                await message.channel.send("You aren't sniping anything. Add one with `!snipe <itemId> <maxGold>`.")
+                return
+            lines = [snipelist_mod.format_snipe_line(s, s.subscribers[message.author.id]) for s in snipes]
+            await message.author.send("**Your snipes:**\n" + "\n".join(lines))
+            return
+
         if message.content == "!keys":
             if message.author.id in self.raiders:
                 try:
