@@ -900,6 +900,73 @@ class MyClient(discord.Client):
 
         self.watchlist.save()
 
+    @tasks.loop(minutes=SNIPE_SWEEP_MINUTES)
+    async def auction_snipe_check(self):
+        """Sweep every region realm; DM subscribers when a snipe's cheapest price beats target."""
+        if not self.is_ready():
+            logger.warning("auction_snipe_check: not ready, skipping")
+            return
+        keys = self.snipelist.watched_keys()
+        if not keys:
+            return
+
+        async with aiohttp.ClientSession() as session:
+            try:
+                if not self._snipe_realm_ids:
+                    self._snipe_realm_ids = await self.blizzard.list_connected_realms(session)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("auction_snipe_check: realm list failed: %s", exc)
+                return
+
+            # Refresh each realm's watched-item prices (conditional; 304 -> reuse cache).
+            for realm_id in self._snipe_realm_ids:
+                try:
+                    result = await self.blizzard.get_realm_auctions(
+                        session, realm_id, self._snipe_realm_modified.get(realm_id)
+                    )
+                    if result is blizzard.NOT_MODIFIED:
+                        continue
+                    auctions, last_modified = result
+                    prices = {}
+                    for kind, key_id in keys:
+                        bp = snipelist_mod.best_price_for(auctions, kind, key_id)
+                        if bp is not None:
+                            prices[(kind, key_id)] = bp
+                    self._snipe_price_cache[realm_id] = prices
+                    self._snipe_realm_modified[realm_id] = last_modified
+                except Exception as exc:  # noqa: BLE001 - one bad realm must not kill the sweep
+                    logger.warning("auction_snipe_check: realm %s failed: %s", realm_id, exc)
+
+            # Aggregate cheapest-anywhere per key and decide alerts.
+            for snipe in self.snipelist.all():
+                try:
+                    key = (snipe.kind, snipe.key_id)
+                    realm_prices = {
+                        rid: prices[key] for rid, prices in self._snipe_price_cache.items() if key in prices
+                    }
+                    best = snipelist_mod.cheapest(realm_prices)
+                    plans = snipelist_mod.plan_alerts(snipe, best, BANKER_ID)
+                    if not plans or best is None:
+                        continue
+                    realm = await self.blizzard.realm_name(session, best[2])
+                    for plan in plans:
+                        await self._send_snipe_dm(session, snipe, best, realm, plan)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("auction_snipe_check: snipe %s failed: %s", snipe.key_id, exc)
+
+        self.snipelist.save()
+
+    async def _send_snipe_dm(self, session, snipe, best, realm, plan):
+        try:
+            user = await self.fetch_user(plan.recipient_id)
+            if plan.is_banker:
+                wanters = [(f"<@{uid}>", s.target_copper) for uid, s in snipe.subscribers.items()]
+                await user.send(snipelist_mod.format_banker_alert(snipe, best, realm, wanters))
+            else:
+                await user.send(snipelist_mod.format_alert(snipe, best, realm, plan.target_copper))
+        except discord.HTTPException:
+            logger.warning("auction_snipe_check: could not DM %s", plan.recipient_id)
+
     @tasks.loop(hours=24)
     async def raiderio_harvest(self):
         """Daily Raider.io backfill/harvest: append new raiderio_run events (idempotent)."""
@@ -1260,6 +1327,10 @@ class MyClient(discord.Client):
         # Start weekly forecast dry-run preview (Wednesdays at noon CST)
         if not self.forecast_preview.is_running():
             self.forecast_preview.start()
+
+        # Start 30-minute auction snipe sweep
+        if not self.auction_snipe_check.is_running():
+            self.auction_snipe_check.start()
 
     async def on_ready(self):
         """Called when the bot is ready. Loads state from file."""
