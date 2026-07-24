@@ -90,12 +90,23 @@ class BlizzardClient:
         return token
 
     async def _get(self, session: aiohttp.ClientSession, path: str, namespace: str, headers: Optional[Dict[str, str]] = None) -> aiohttp.ClientResponse:
-        token = await self.ensure_token(session)
-        h = {"Authorization": f"Bearer {token}", "Accept-Encoding": "gzip"}
-        if headers:
-            h.update(headers)
-        url = f"{_api_host()}{path}?namespace={namespace}-{_region()}&locale=en_US"
-        return await session.get(url, headers=h)
+        # Retry once on 401: the cached token may have been revoked before its
+        # assumed expiry, so clear it and re-mint before giving up.
+        resp = None
+        for attempt in range(2):
+            token = await self.ensure_token(session)
+            h = {"Authorization": f"Bearer {token}", "Accept-Encoding": "gzip"}
+            if headers:
+                h.update(headers)
+            url = f"{_api_host()}{path}?namespace={namespace}-{_region()}&locale=en_US"
+            resp = await session.get(url, headers=h)
+            if resp.status == 401 and attempt == 0:
+                resp.close()
+                self._token = None
+                self._token_expiry = 0.0
+                continue
+            return resp
+        return resp
 
     async def list_connected_realms(self, session: aiohttp.ClientSession) -> List[int]:
         async with await self._get(session, "/data/wow/connected-realm/index", "dynamic") as resp:
