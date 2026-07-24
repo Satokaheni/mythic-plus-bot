@@ -14,9 +14,11 @@ import discord
 from discord.ext import tasks
 from dotenv import load_dotenv
 
+import blizzard
 import eventlog
 import forecast
 import raiderio
+import snipelist as snipelist_mod
 import undermine
 import watchlist
 from raider import Raider
@@ -77,6 +79,11 @@ BANKER_ID = int(_require_env("BANKER_ID"))
 BANKER_BUDGET_COPPER = int(os.getenv("BANKER_BUDGET_GOLD", "100000")) * 10000
 # Default bulk order size the price-watch buy signal targets (per-item overridable via `!watch -x`).
 BANKER_BULK_QTY = int(os.getenv("BANKER_BULK_QTY", "100"))
+# Blizzard Game Data API — server-specific auction sniper (see snipes.json).
+BLIZZ_CLIENT_ID = _require_env("BLIZZ_CLIENT_ID")
+BLIZZ_CLIENT_SECRET = _require_env("BLIZZ_CLIENT_SECRET")
+os.environ.setdefault("BLIZZ_REGION", os.getenv("BLIZZ_REGION", "us"))
+SNIPE_SWEEP_MINUTES = 30
 MYTHIC_PLUS_ID = int(_require_env("MYTHIC_PLUS_ID"))
 ADMINS = [int(id_str) for id_str in _require_env("ADMIN_ID").split(",") if id_str.strip().isdigit()]
 ELEVATED_IDS = {COORDINATOR_ID} | set(ADMINS)
@@ -1217,6 +1224,11 @@ class MyClient(discord.Client):
         self.coordinator_id = COORDINATOR_ID
         self.elevated_ids = ELEVATED_IDS
         self.watchlist = Watchlist.load()
+        self.blizzard = blizzard.BlizzardClient()
+        self.snipelist = snipelist_mod.Snipelist.load()
+        self._snipe_realm_ids: list = []  # cached connected-realm ids
+        self._snipe_price_cache: dict = {}  # realm_id -> {(kind,key_id): (price, qty)}
+        self._snipe_realm_modified: dict = {}  # realm_id -> Last-Modified str
         self._char_mappings = raiderio.load_character_mappings()
         logger.info("Loaded state from file.")
 
