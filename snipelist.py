@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
+from watchlist import format_gold
+
 logger = logging.getLogger("discord")
 
 PET_ITEM_ID = 82800  # AH "caged battle pet" item id; pets are keyed by species id
@@ -230,3 +232,50 @@ class Snipelist:
             except (KeyError, ValueError, TypeError) as exc:
                 logger.warning("Skipping malformed snipe entry in %s: %s", path, exc)
         return sl
+
+
+def _kind_tag(snipe: Snipe) -> str:
+    return f"pet:{snipe.key_id}" if snipe.kind == "pet" else f"item:{snipe.key_id}"
+
+
+def _wowhead_link(snipe: Snipe) -> str:
+    if snipe.kind == "pet":
+        return f"https://www.wowhead.com/battle-pet={snipe.key_id}"
+    return f"https://www.wowhead.com/item={snipe.key_id}"
+
+
+def format_alert(snipe: Snipe, best: Tuple[int, int, int], realm_name: str, target_copper: int) -> str:
+    """DM sent to a subscriber whose target was beaten."""
+    price, qty, _realm = best
+    pct_below = (1 - price / target_copper) * 100 if target_copper else 0
+    return "\n".join([
+        f"🎯 **Snipe hit** — {snipe.label} ({_kind_tag(snipe)})",
+        f"Your target: {format_gold(target_copper)}",
+        f"**Cheapest: {format_gold(price)}** on **{realm_name}** — "
+        f"{qty:,} available ({pct_below:.0f}% below your target)",
+        _wowhead_link(snipe),
+    ])
+
+
+def format_banker_alert(
+    snipe: Snipe, best: Tuple[int, int, int], realm_name: str, wanters: List[Tuple[str, int]]
+) -> str:
+    """DM sent to the banker on a recipe alert; `wanters` is (mention, target_copper) pairs."""
+    price, qty, _realm = best
+    lines = [
+        f"🏦 **Recipe snipe** — {snipe.label} ({_kind_tag(snipe)})",
+        f"**Cheapest: {format_gold(price)}** on **{realm_name}** — {qty:,} available",
+        "Wanted by:",
+    ]
+    lines += [f"• {who} (target {format_gold(tgt)})" for who, tgt in wanters]
+    lines.append(_wowhead_link(snipe))
+    return "\n".join(lines)
+
+
+def format_snipe_line(snipe: Snipe, subscriber: Subscriber) -> str:
+    """One row for the !snipes list (the caller's own view of a record)."""
+    seen = f"last seen {format_gold(snipe.last_price)}" if snipe.last_price is not None else "not seen yet"
+    return (
+        f"• **{snipe.label}** ({_kind_tag(snipe)}) — "
+        f"target {format_gold(subscriber.target_copper)}, {subscriber.state}, {seen}"
+    )

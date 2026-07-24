@@ -11,6 +11,9 @@ from snipelist import (
     apply_anti_spam,
     best_price_for,
     cheapest,
+    format_alert,
+    format_banker_alert,
+    format_snipe_line,
     parse_gold,
     plan_alerts,
 )
@@ -205,3 +208,29 @@ def test_plan_alerts_no_listing_rearms_all():
     plan_alerts(s, None, BANKER)            # nothing listed anywhere
     assert s.subscribers[1].state == "armed"
     assert s.banker_state == "armed"
+
+
+def test_format_alert_has_key_facts():
+    s = Snipe("item", 111, "Widget")
+    text = format_alert(s, (4000, 3, 121), "Illidan", target_copper=5000)
+    assert "Widget" in text
+    assert "item:111" in text
+    assert "Illidan" in text
+    assert "20% below" in text            # (1 - 4000/5000) * 100
+    assert "wowhead.com/item=111" in text
+
+
+def test_format_banker_alert_lists_wanters():
+    s = Snipe("item", 111, "Recipe: Widget", is_recipe=True)
+    text = format_banker_alert(s, (4000, 2, 121), "Illidan", wanters=[("<@1>", 5000), ("<@2>", 8000)])
+    assert "Illidan" in text
+    assert "<@1>" in text and "<@2>" in text
+    assert "wowhead.com/item=111" in text
+
+
+def test_format_snipe_line_seen_and_unseen():
+    s = Snipe("pet", 3022, "Critter", last_price=9000)
+    line = format_snipe_line(s, Subscriber(10000, state="armed"))
+    assert "Critter" in line and "pet:3022" in line and "armed" in line
+    s2 = Snipe("item", 111, "Widget")  # never seen
+    assert "not seen" in format_snipe_line(s2, Subscriber(5000))
