@@ -27,6 +27,8 @@ state.pkl
 state.json.tmp
 watches.json
 watches.json.tmp
+snipes.json
+snipes.json.tmp
 events.jsonl
 character_mappings.json
 

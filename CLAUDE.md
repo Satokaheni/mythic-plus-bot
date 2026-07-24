@@ -8,7 +8,7 @@ This file reflects the **current state** of the codebase. Rewrite relevant secti
 
 A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Mythic+ runs. Manages team assembly, availability tracking, DM outreach, and schedule lifecycle.
 
-**Version:** 1.8.0
+**Version:** 1.9.0
 **Entry point:** `bot.py` (`MyClient` class)
 
 ---

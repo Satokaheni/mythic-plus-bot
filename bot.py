@@ -912,8 +912,14 @@ class MyClient(discord.Client):
 
         async with aiohttp.ClientSession() as session:
             try:
-                if not self._snipe_realm_ids:
+                now = datetime.now(timezone.utc)
+                stale = (
+                    self._snipe_realm_ids_fetched is None
+                    or (now - self._snipe_realm_ids_fetched) >= timedelta(hours=24)
+                )
+                if not self._snipe_realm_ids or stale:
                     self._snipe_realm_ids = await self.blizzard.list_connected_realms(session)
+                    self._snipe_realm_ids_fetched = now
             except Exception as exc:  # noqa: BLE001
                 logger.warning("auction_snipe_check: realm list failed: %s", exc)
                 return
@@ -1296,6 +1302,7 @@ class MyClient(discord.Client):
         self._snipe_realm_ids: list = []  # cached connected-realm ids
         self._snipe_price_cache: dict = {}  # realm_id -> {(kind,key_id): (price, qty)}
         self._snipe_realm_modified: dict = {}  # realm_id -> Last-Modified str
+        self._snipe_realm_ids_fetched = None
         self._char_mappings = raiderio.load_character_mappings()
         logger.info("Loaded state from file.")
 
@@ -1510,8 +1517,9 @@ class MyClient(discord.Client):
                     is_recipe = info.is_recipe
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("snipe item_info failed for %s: %s", item_id, exc)
-                    label = " ".join(args[2:]) if len(args) > 2 else f"Item {item_id}"
-                    is_recipe = False
+                    existing = self.snipelist.get("item", item_id)
+                    label = " ".join(args[2:]) if len(args) > 2 else (existing.label if existing else f"Item {item_id}")
+                    is_recipe = existing.is_recipe if existing else False
             self.snipelist.subscribe(message.author.id, "item", item_id, target, label, is_recipe)
             self.snipelist.save()
             note = " (recipe — the banker is also alerted)" if is_recipe else ""
