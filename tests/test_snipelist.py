@@ -57,3 +57,86 @@ def test_apply_anti_spam_state_machine():
     assert apply_anti_spam(True, "alerted") == (False, "alerted")  # stay silent
     assert apply_anti_spam(False, "alerted") == (False, "armed")   # re-arm
     assert apply_anti_spam(False, "armed") == (False, "armed")
+
+
+from datetime import datetime, timezone
+
+from snipelist import Snipe, Snipelist, Subscriber
+
+
+def test_subscribe_creates_one_record_many_subscribers():
+    sl = Snipelist()
+    sl.subscribe(1, "item", 111, 5000, "Widget", is_recipe=False)
+    sl.subscribe(2, "item", 111, 8000, "Widget", is_recipe=False)
+    assert len(sl.all()) == 1                       # one record
+    snipe = sl.get("item", 111)
+    assert set(snipe.subscribers) == {1, 2}         # two subscribers
+    assert snipe.subscribers[1].target_copper == 5000
+    assert snipe.subscribers[2].target_copper == 8000
+    assert sl.watched_keys() == [("item", 111)]     # deduped to one fetch key
+
+
+def test_resubscribe_updates_own_target_in_place():
+    sl = Snipelist()
+    sl.subscribe(1, "item", 111, 5000, "Widget", is_recipe=False)
+    sl.subscribe(1, "item", 111, 4000, "Widget", is_recipe=False)
+    assert sl.get("item", 111).subscribers[1].target_copper == 4000
+    assert len(sl.get("item", 111).subscribers) == 1
+
+
+def test_unsubscribe_removes_only_caller_keeps_others():
+    sl = Snipelist()
+    sl.subscribe(1, "item", 111, 5000, "Widget", is_recipe=False)
+    sl.subscribe(2, "item", 111, 8000, "Widget", is_recipe=False)
+    assert sl.unsubscribe(1, "item", 111) is True
+    snipe = sl.get("item", 111)
+    assert set(snipe.subscribers) == {2}            # record survives for #2
+    assert sl.unsubscribe(1, "item", 111) is False  # already gone
+
+
+def test_unsubscribe_last_deletes_record():
+    sl = Snipelist()
+    sl.subscribe(2, "item", 111, 8000, "Widget", is_recipe=False)
+    assert sl.unsubscribe(2, "item", 111) is True
+    assert sl.get("item", 111) is None
+    assert sl.all() == []
+
+
+def test_for_owner_only_returns_subscribed():
+    sl = Snipelist()
+    sl.subscribe(1, "item", 111, 5000, "A", is_recipe=False)
+    sl.subscribe(2, "item", 222, 5000, "B", is_recipe=False)
+    assert [s.key_id for s in sl.for_owner(1)] == [111]
+
+
+def test_save_load_round_trip(tmp_path):
+    path = str(tmp_path / "snipes.json")
+    sl = Snipelist()
+    sl.subscribe(1, "item", 111, 5000, "Widget", is_recipe=True)
+    sl.subscribe(2, "pet", 3022, 9000, "Critter", is_recipe=False)
+    snipe = sl.get("item", 111)
+    snipe.banker_state = "alerted"
+    snipe.last_realm, snipe.last_price = 121, 4200
+    sl.save(path)
+
+    loaded = Snipelist.load(path)
+    a = loaded.get("item", 111)
+    assert a.is_recipe is True
+    assert a.banker_state == "alerted"
+    assert a.last_realm == 121 and a.last_price == 4200
+    assert a.subscribers[1].target_copper == 5000
+    assert loaded.get("pet", 3022).subscribers[2].target_copper == 9000
+
+
+def test_load_missing_file_is_empty():
+    assert Snipelist.load("does_not_exist_snipes.json").all() == []
+
+
+def test_load_skips_malformed_entry(tmp_path):
+    import json
+    path = str(tmp_path / "snipes.json")
+    valid = Snipe("item", 111, "Widget", subscribers={1: Subscriber(5000)}).to_dict()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"version": 1, "snipes": [{"junk": True}, valid]}, f)
+    sl = Snipelist.load(path)
+    assert len(sl.all()) == 1 and sl.get("item", 111) is not None
