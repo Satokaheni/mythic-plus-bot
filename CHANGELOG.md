@@ -1,3 +1,9 @@
+## [1.9.0]
+
+### Improvements
+- **Auction Sniper** — track per-realm items (recipes, battle pets, mounts, gear) across every realm in your region via Blizzard's official Game Data API. Every 30 minutes, the bot sweeps all realms and DMs you when your watched item's cheapest listing drops below your target price. Each guild member tracks their own target prices independently. Recipes also alert the banker for coordinated bulk buying. Open to everyone: `!snipe <itemId> <maxGold> [label]`, `!snipepet <speciesId> <maxGold> [label]`, `!unsnipe <id ...>`, `!snipes`. Requires `BLIZZ_CLIENT_ID`/`BLIZZ_CLIENT_SECRET` (register at develop.battle.net) and optional `BLIZZ_REGION` (default `us`).
+- **`!help` / `!tools`** — new command listing all bot commands by category (scheduling, price watch, auction sniper, account) with usage and permissions.
+
 ## [1.8.0]
 
 ### Improvements

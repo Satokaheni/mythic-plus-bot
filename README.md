@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/tests.yml/badge.svg)](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/tests.yml)
 [![Docker](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/docker.yml/badge.svg)](https://github.com/Satokaheni/mythic-plus-bot/actions/workflows/docker.yml)
-![Version](https://img.shields.io/badge/version-1.7.1-blue.svg)
+![Version](https://img.shields.io/badge/version-1.9.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.9+-green.svg)
 ![Discord.py](https://img.shields.io/badge/discord.py-2.0+-blue.svg)
 
@@ -30,6 +30,7 @@ A Discord bot for managing World of Warcraft Mythic+ raid scheduling and team co
 - **Event Logging**: The bot records anonymized availability and run events locally (`events.jsonl`) to power a future automatic-scheduling feature — no user-facing change
 - **Raider.io Harvest**: The bot backfills and daily-harvests Mythic+ run history from Raider.io for mapped, registered raiders to seed the forecasting dataset — requires `RAIDERIO_API_KEY` and a runtime-provided `character_mappings.json`
 - **Forecast Preview**: Every Wednesday at noon CST, the bot automatically predicts the best weekly Mythic+ run from availability and play-history data — assembling a role-valid team that prefers people's primary roles — and DMs a dry-run preview to the banker (no runs are auto-created yet)
+- **Auction Sniper**: Track items (recipes, battle pets, mounts, gear) across every realm in your region via Blizzard's official Game Data API. Every 30 minutes, the bot checks the cheapest listing on any realm and DMs you when your watched item drops below your target price (recipes also alert the banker for bulk buying). Open to all guild members; each tracks their own target prices independently. Requires `BLIZZ_CLIENT_ID`/`BLIZZ_CLIENT_SECRET` (register at develop.battle.net) and optional `BLIZZ_REGION` (default `us`)
 
 ## Installation
 
@@ -70,6 +71,9 @@ BANKER_BUDGET_GOLD=100000
 BANKER_BULK_QTY=100
 UNDERMINE_API_KEY=your_undermine_exchange_api_key
 UNDERMINE_REGION=us
+BLIZZ_CLIENT_ID=your_blizzard_client_id
+BLIZZ_CLIENT_SECRET=your_blizzard_client_secret
+BLIZZ_REGION=us
 RAIDERIO_API_KEY=your_raiderio_api_key
 RAIDERIO_REGION=us
 LOG_FILE=bot.log
@@ -149,6 +153,17 @@ Each alert also suggests **how much to buy** on your gold budget (`BANKER_BUDGET
 
 These commands work via DM or in the key channel, and only respond to the configured `BANKER_ID`. The watchlist is saved to `watches.json` and reloaded on startup, so it survives bot restarts.
 
+### Auction Sniper
+
+An all-member feature for tracking items across every realm in your region (via Blizzard's official Game Data API). Set your own target price for any item, and the bot will check the cheapest listing on all realms every 30 minutes. When your item drops below your target, you get a DM with the realm name, current price, and item link — recipes also alert the banker (`BANKER_ID`) so they can coordinate bulk purchases.
+
+- `!snipe <itemId> <maxGold> [label]` — watch a single item (e.g. `!snipe 215147 5000 Vibrant Shard`); the bot learns the name from Blizzard's API and caches it
+- `!snipepet <speciesId> <maxGold> [label]` — watch a battle pet by species ID
+- `!unsnipe <id ...>` — remove one or more watched items (stops alerting for that item only on your account)
+- `!snipes` — list everything you're watching, sorted by current cheapest price across all realms
+
+These commands work via DM or in the key channel, and respond to anyone. Your watchlist is saved to `snipes.json` and reloaded on startup. Alerts are sent any time the price dips below your target (no quiet-hours limit like price watch), and re-arm when the price recovers.
+
 ### Availability Forecasting
 
 The bot learns **when your raiders actually play** and predicts the best time for a run — entirely automatically, no commands.
@@ -171,6 +186,11 @@ The bot learns **when your raiders actually play** and predicts the best time fo
 | `!watch <itemId> [-x<qty>] [label]`<br>`!watch <id1> -x<qty> <id2> -x<qty> ...` | `KEY_CHANNEL` or DM | Banker only | Watch one item (optional bulk target via `-x`, optional label), or several at once with per-item targets |
 | `!unwatch <itemId> [itemId ...]` | `KEY_CHANNEL` or DM | Banker only | Stop watching one or more items |
 | `!watches` | `KEY_CHANNEL` or DM | Banker only | List currently watched items |
+| `!snipe <itemId> <maxGold> [label]` | `KEY_CHANNEL` or DM | Anyone | Track an item on all realms, alert when price drops below target |
+| `!snipepet <speciesId> <maxGold> [label]` | `KEY_CHANNEL` or DM | Anyone | Track a battle pet species on all realms |
+| `!unsnipe <id ...>` | `KEY_CHANNEL` or DM | Anyone | Stop watching one or more items |
+| `!snipes` | `KEY_CHANNEL` or DM | Anyone | List your watched items with current cheapest prices |
+| `!help`, `!tools` | Any | Anyone | List all bot commands by category |
 
 ## Project Structure
 
@@ -183,11 +203,14 @@ mythic-plus-bot/
 ├── views.py            # Discord UI components (buttons, dropdowns, modals, views)
 ├── undermine.py        # Async Undermine Exchange API client
 ├── watchlist.py        # Watch/Watchlist state, buy-signal detection, formatters
+├── blizzard.py         # Blizzard Game Data Auction House API client
+├── snipelist.py        # Snipe/Snipelist state, per-realm detection, alert planning
 ├── eventlog.py         # Append-only availability/attendance event log (forecasting data)
 ├── raiderio.py         # Raider.io client + daily harvester seeding raiderio_run events
 ├── forecast.py         # Availability predictor + roster/slot optimizer + dry-run preview
 ├── state.json          # Persisted bot state (auto-generated)
 ├── watches.json        # Persisted price-watch state (auto-generated)
+├── snipes.json         # Persisted auction-snipe state (auto-generated)
 ├── events.jsonl        # Append-only event log (auto-generated, gitignored)
 ├── character_mappings.json  # Raider.io discord_id -> characters map (gitignored, runtime-provided)
 ├── version.txt         # Tracks last deployed version for changelog announcements
@@ -216,6 +239,9 @@ mythic-plus-bot/
 | `BANKER_BULK_QTY` | Default bulk order size the price-watch buy signal targets; overridable per item via `!watch -x` (optional, default `100`) |
 | `UNDERMINE_API_KEY` | API key for the Undermine Exchange API |
 | `UNDERMINE_REGION` | Region for price lookups (optional, default `us`) |
+| `BLIZZ_CLIENT_ID` | Blizzard Game Data API client ID (register at develop.battle.net) |
+| `BLIZZ_CLIENT_SECRET` | Blizzard Game Data API client secret |
+| `BLIZZ_REGION` | Blizzard region for auction sniping (optional, default `us`) |
 | `RAIDERIO_API_KEY` | API key for the Raider.io API |
 | `RAIDERIO_REGION` | Region for Raider.io lookups (optional, default `us`) |
 | `LOG_FILE` | Path to the rotating log file (optional, default `bot.log`) |

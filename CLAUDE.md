@@ -25,6 +25,8 @@ A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Myt
 | `eventlog.py` | Append-only availability/attendance event log for forecasting data |
 | `undermine.py` | Async Undermine Exchange API client |
 | `watchlist.py` | `Watch`/`Watchlist` classes — price-watch state, buy-signal detection, formatters |
+| `blizzard.py` | Blizzard Game Data Auction House API client |
+| `snipelist.py` | `Snipe`/`Snipelist` classes — auction-snipe state, per-realm detection, alert planning |
 | `raiderio.py` | Raider.io client + daily harvester seeding raiderio_run events |
 | `forecast.py` | Availability predictor + roster/slot optimizer + dry-run preview formatter |
 | `version.txt` | Current version string (triggers changelog DM on startup if changed) |
@@ -134,6 +136,14 @@ Owner-only feature gated to `BANKER_ID` — tracks region-wide commodity prices 
 - State persisted to `watches.json` (`Watch.target_qty` round-trips; legacy entries load as `None` → global default).
 - Commands: `!watch <itemId> [-x<qty>] [label]` or `!watch <id1> -x<qty> <id2> -x<qty> ...` (multi, per-item targets), `!unwatch <itemId> [itemId ...]` (multi), `!watches` — DM or key-channel, banker-only.
 
+### Auction Sniper (Blizzard)
+Open-to-all feature for tracking per-realm items (recipes, battle pets, mounts, gear) across every realm in a region via Blizzard's official Game Data API. An `auction_snipe_check` background task (30-min interval) sweeps all realms, finds the cheapest listing per item across all realms, and DMs each subscriber when a watched item's minimum price drops below their independent per-item target. Recipes also DM `BANKER_ID` (so the banker can make bulk buys if they want). One record per tracked item; each record maintains a list of subscribers with their own target prices. State persisted to `snipes.json`.
+- Commands (open to all): `!snipe <itemId> <maxGold> [label]` (track a single item, e.g. `!snipe 215147 5000 Vibrant Shard`), `!snipepet <speciesId> <maxGold> [label]` (track a battle pet by species ID), `!unsnipe <id ...>` (unwatch one or more items), `!snipes` (list your tracked items with current cheapest prices).
+- Requires `BLIZZ_CLIENT_ID` and `BLIZZ_CLIENT_SECRET` from developing a client at develop.battle.net, plus optional `BLIZZ_REGION` (default `us`).
+
+### Help Command
+`!help` / `!tools` — list all bot commands by category (scheduling, price watch, auction sniper, account) with usage and permissions.
+
 ### Schedule Management
 - **Organizer** → `ManageScheduleView`: delete or modify (level, date, time, note)
 - **Coordinator/Admin** → `CoordinatorManageView`: delete run, modify run, add/remove/reassign any raider
@@ -181,6 +191,7 @@ In `manage_button` (views.py):
 - Deserialization is a 4-pass process: raiders → schedules → wiring (cross-references) → reconciliation
 - Legacy `state.pkl` migration supported
 - Price-watch state is persisted separately to `watches.json` (see `watchlist.py`)
+- Auction-snipe state is persisted separately to `snipes.json` (see `snipelist.py`)
 - Event log is persisted separately to `events.jsonl` (gitignored, append-only JSONL, see `eventlog.py`) — not part of `state.json` and not migrated
 
 ---
@@ -203,6 +214,9 @@ BANKER_BUDGET_GOLD    Gold budget for price-watch buy suggestions (default: 1000
 BANKER_BULK_QTY       Default bulk order size the buy signal targets (default: 100; per-item via !watch -x)
 UNDERMINE_API_KEY     Undermine Exchange API key
 UNDERMINE_REGION      Undermine Exchange region (default: us)
+BLIZZ_CLIENT_ID       Blizzard Game Data API client ID (register at develop.battle.net)
+BLIZZ_CLIENT_SECRET   Blizzard Game Data API client secret
+BLIZZ_REGION          Blizzard region for auction sniping (default: us)
 RAIDERIO_API_KEY      Raider.io API key
 RAIDERIO_REGION       Raider.io region (default: us)
 ```
@@ -222,6 +236,11 @@ RAIDERIO_REGION       Raider.io region (default: us)
 | `!watch <itemId> [-x<qty>] [label]`<br>`!watch <id1> -x<qty> <id2> -x<qty> ...` | KEY/DM | Banker | Watch an item (optional bulk target via `-x`), or several at once with per-item targets |
 | `!unwatch <itemId>` | KEY/DM | Banker | Stop watching an item |
 | `!watches` | KEY/DM | Banker | List currently watched items |
+| `!snipe <itemId> <maxGold> [label]` | KEY/DM | Anyone | Track an item on all realms, alert when price drops below target |
+| `!snipepet <speciesId> <maxGold> [label]` | KEY/DM | Anyone | Track a battle pet species on all realms |
+| `!unsnipe <id ...>` | KEY/DM | Anyone | Stop watching one or more items |
+| `!snipes` | KEY/DM | Anyone | List your watched items with current cheapest prices |
+| `!help`, `!tools` | Any | Anyone | List all bot commands by category |
 
 ---
 
