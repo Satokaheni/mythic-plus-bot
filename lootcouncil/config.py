@@ -2,7 +2,7 @@
 
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Dict
 
 from lootcouncil.models import DPS, HEALER, TANK
@@ -72,10 +72,11 @@ class Config:
             return cfg
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
+        field_names = {f.name for f in fields(cls)}
         for key, value in data.items():
             if key == "role_weights":
                 for role, weights in (value or {}).items():
                     cfg.role_weights.setdefault(role, {}).update(weights)
-            elif hasattr(cfg, key):
+            elif key in field_names:
                 setattr(cfg, key, value)
         return cfg

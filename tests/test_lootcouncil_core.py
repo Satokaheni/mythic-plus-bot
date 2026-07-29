@@ -162,3 +162,30 @@ def test_secret_properties_read_exact_env_var_names(monkeypatch):
 def test_secret_properties_default_to_empty(monkeypatch):
     monkeypatch.delenv("wow_audit_api_key", raising=False)
     assert Config().wowaudit_key == ""
+
+
+def test_load_ignores_property_wowaudit_key(tmp_path):
+    """Regression: property with no setter must not raise AttributeError."""
+    path = tmp_path / "loot_config.json"
+    path.write_text(
+        json.dumps({"wowaudit_key": "x", "difficulty": 4}),
+        encoding="utf-8",
+    )
+    cfg = Config.load(str(path))
+    assert cfg.difficulty == 4
+    assert cfg.wowaudit_key == ""  # Property reads from env, not the ignored JSON key
+
+
+def test_load_ignores_method_validate(tmp_path):
+    """Regression: method must not be replaced with a string; cfg.validate() must remain callable."""
+    path = tmp_path / "loot_config.json"
+    path.write_text(
+        json.dumps({"validate": "oops", "difficulty": 4}),
+        encoding="utf-8",
+    )
+    cfg = Config.load(str(path))
+    assert cfg.difficulty == 4
+    assert callable(cfg.validate)
+    # Validate should still raise ConfigError on an otherwise-empty config
+    with pytest.raises(ConfigError):
+        cfg.validate()
