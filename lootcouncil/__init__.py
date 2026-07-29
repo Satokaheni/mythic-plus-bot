@@ -2,5 +2,6 @@
 
 from lootcouncil.config import Config, ConfigError
 from lootcouncil.performance import PerformanceAnalyzer
+from lootcouncil.ranker import LootRanker, LootResult, RankedCandidate
 
-__all__ = ["Config", "ConfigError", "PerformanceAnalyzer"]
+__all__ = ["Config", "ConfigError", "LootRanker", "LootResult", "PerformanceAnalyzer", "RankedCandidate"]
