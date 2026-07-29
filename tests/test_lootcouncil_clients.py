@@ -1,6 +1,14 @@
 """Tests for the WoWAudit and Warcraft Logs response parsers — captured shapes, no network."""
 
+import pytest
+
 from lootcouncil.models import DPS, HEALER, TANK
+from lootcouncil.warcraftlogs import (
+    _parse_fights,
+    _parse_recent_reports,
+    _parse_table_entries,
+    _parse_zone_rankings,
+)
 from lootcouncil.wowaudit import _parse_roster, _parse_wishlists
 
 # ---------------------------------------------------------------------------
@@ -321,3 +329,109 @@ def test_best_upgrade_handles_none_in_specs_and_non_numeric_values():
     assert fury.spec == "Fury"
     # Invalid absolute value becomes 0.0
     assert fury.absolute == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Warcraft Logs — parsers
+# ---------------------------------------------------------------------------
+
+ZONE_RANKINGS_PAYLOAD = {
+    "data": {
+        "characterData": {
+            "character": {
+                "zoneRankings": {
+                    "bestPerformanceAverage": 88.5,
+                    "medianPerformanceAverage": 74.25,
+                    "rankings": [
+                        {"encounter": {"id": 3159, "name": "Rotmire"}, "rankPercent": 91.0},
+                        {"encounter": {"id": 3160, "name": "Second"}, "rankPercent": 61.0},
+                        {"encounter": {"id": 3161, "name": "Third"}, "rankPercent": None},
+                    ],
+                    "metric": "dps",
+                }
+            }
+        }
+    }
+}
+
+
+def test_parse_zone_rankings_averages_only_real_percents():
+    parsed = _parse_zone_rankings(ZONE_RANKINGS_PAYLOAD)
+    assert parsed.metric == "dps"
+    assert parsed.per_encounter == {3159: 91.0, 3160: 61.0}  # the None entry is dropped
+    assert parsed.average == pytest.approx(76.0)
+
+
+def test_parse_zone_rankings_handles_missing_character():
+    parsed = _parse_zone_rankings({"data": {"characterData": {"character": None}}})
+    assert parsed.per_encounter == {}
+    assert parsed.average == 0.0
+    assert parsed.metric == ""
+
+
+def test_parse_recent_reports_extracts_codes():
+    payload = {
+        "data": {
+            "characterData": {
+                "character": {
+                    "recentReports": {
+                        "data": [
+                            {"code": "abc123", "zone": {"name": "Sporefall"}, "startTime": 1700000000000},
+                            {"code": "def456", "zone": None, "startTime": 1700100000000},
+                        ]
+                    }
+                }
+            }
+        }
+    }
+    refs = _parse_recent_reports(payload)
+    assert [r.code for r in refs] == ["abc123", "def456"]
+    assert refs[0].zone_name == "Sporefall"
+    assert refs[1].zone_name == ""
+    assert refs[0].start_time == 1700000000000
+
+
+def test_parse_fights_filters_to_the_requested_difficulty():
+    payload = {
+        "data": {
+            "reportData": {
+                "report": {
+                    "fights": [
+                        {"id": 1, "name": "Rotmire", "encounterID": 3159, "difficulty": 5, "kill": True},
+                        {"id": 2, "name": "Rotmire", "encounterID": 3159, "difficulty": 4, "kill": False},
+                        {"id": 3, "name": "Trash", "encounterID": 0, "difficulty": 5, "kill": False},
+                    ]
+                }
+            }
+        }
+    }
+    fights = _parse_fights(payload, difficulty=5)
+    assert [f.id for f in fights] == [1]  # difficulty 4 and encounterID 0 both excluded
+
+
+def test_parse_table_entries_reads_the_nested_entries_list():
+    payload = {
+        "data": {
+            "reportData": {
+                "report": {
+                    "table": {
+                        "data": {
+                            "entries": [
+                                {"name": "Thrall", "total": 100},
+                                {"name": "Grom", "total": 200},
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    }
+    entries = _parse_table_entries(payload)
+    assert [e["name"] for e in entries] == ["Thrall", "Grom"]
+
+
+def test_parse_table_entries_accepts_a_bare_list_and_empty_shapes():
+    bare = {"data": {"reportData": {"report": {"table": {"data": [{"name": "Thrall"}]}}}}}
+    assert _parse_table_entries(bare) == [{"name": "Thrall"}]
+    assert _parse_table_entries({}) == []
+    assert _parse_table_entries({"data": {"reportData": {"report": {"table": {"data": {}}}}}}) == []
