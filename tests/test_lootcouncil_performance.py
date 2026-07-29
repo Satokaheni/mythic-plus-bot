@@ -1,11 +1,13 @@
-"""Tests for lootcouncil.performance — pure scoring, death order, cache freshness."""
+"""Tests for lootcouncil.performance — pure scoring, death order, cache freshness,
+and network aggregation (_collect / _report_codes / _accumulate_report / _table)."""
 
 import json
+import time
 
 import pytest
 
 from lootcouncil.config import Config
-from lootcouncil.models import DPS, HEALER, TANK, RawMetrics
+from lootcouncil.models import DPS, HEALER, TANK, Character, RawMetrics
 from lootcouncil.performance import (
     PerformanceAnalyzer,
     cache_is_fresh,
@@ -16,6 +18,7 @@ from lootcouncil.performance import (
     rank_normalize,
     score_cohort,
 )
+from lootcouncil.warcraftlogs import Fight, ParseData, ReportRef
 
 # ---------------------------------------------------------------------------
 # death order
@@ -310,3 +313,209 @@ def test_aggregate_season_uses_a_fresh_cache_without_calling_wcl(tmp_path):
     analyzer = PerformanceAnalyzer(cfg, wcl=ExplodingClient())
     raws = analyzer.aggregate_season(roster=[], cache_path=path)
     assert raws["thrall-malganis"].fights == 9
+
+
+# ---------------------------------------------------------------------------
+# network aggregation (_collect / _report_codes / _accumulate_report / _table)
+# ---------------------------------------------------------------------------
+
+_RAISE = object()  # sentinel: report_table should raise instead of returning rows
+
+
+class FakeWCL:
+    """Hand-written fake standing in for WarcraftLogsClient in aggregation tests.
+
+    `tables` maps (code, tuple(fight_ids), data_type) -> rows, or the _RAISE
+    sentinel to simulate that call raising. `parses`/`recent` map a character
+    name to its return value; `raise_on_parse`/`raise_on_recent` are sets of
+    names whose call should raise instead of returning.
+    """
+
+    def __init__(
+        self, reports=None, tables=None, parses=None, recent=None, raise_on_parse=None, raise_on_recent=None
+    ):
+        self._reports = reports or {}
+        self._tables = tables or {}
+        self._parses = parses or {}
+        self._recent = recent or {}
+        self._raise_on_parse = raise_on_parse or set()
+        self._raise_on_recent = raise_on_recent or set()
+
+    def character_parses(self, name, server_slug, region, zone_id):
+        if name in self._raise_on_parse:
+            raise RuntimeError(f"parses failed for {name}")
+        return self._parses.get(name, ParseData())
+
+    def recent_report_codes(self, name, server_slug, region):
+        if name in self._raise_on_recent:
+            raise RuntimeError(f"recent reports failed for {name}")
+        return self._recent.get(name, [])
+
+    def report_fights(self, code, difficulty):
+        return self._reports.get(code, [])
+
+    def report_table(self, code, fight_ids, data_type):
+        value = self._tables.get((code, tuple(fight_ids), data_type), [])
+        if value is _RAISE:
+            raise RuntimeError(f"table failed for {code} {fight_ids} {data_type}")
+        return value
+
+
+def _char(name, realm="Mal'Ganis", role=DPS):
+    return Character(name=name, realm=realm, role=role, class_name="Shaman")
+
+
+def test_collect_counts_true_fights_not_reports(tmp_path):
+    """Regression for Finding 1: two reports, three total fights participated in.
+
+    Both the per-fight single-ID DamageTaken rows (what the fixed code queries)
+    and the whole-report batched row (what the old buggy code queried instead)
+    are present in the fake, so this test discriminates the two implementations
+    — it must fail if `_accumulate_report` goes back to batching DamageTaken
+    across the report's full `fight_ids` list.
+    """
+    now_ms = time.time() * 1000
+    thrall = _char("Thrall")
+    roster = [thrall]
+
+    reports = {
+        "R1": [
+            Fight(id=1, name="Boss1", encounter_id=1, difficulty=5, kill=True),
+            Fight(id=2, name="Boss2", encounter_id=2, difficulty=5, kill=True),
+        ],
+        "R2": [Fight(id=3, name="Boss3", encounter_id=3, difficulty=5, kill=True)],
+    }
+    tables = {
+        ("R1", (1,), "Deaths"): [],
+        ("R1", (2,), "Deaths"): [],
+        ("R2", (3,), "Deaths"): [],
+        ("R1", (1,), "DamageTaken"): [{"name": "Thrall", "total": 100, "activeTime": 1000}],
+        ("R1", (2,), "DamageTaken"): [{"name": "Thrall", "total": 150, "activeTime": 1000}],
+        ("R2", (3,), "DamageTaken"): [{"name": "Thrall", "total": 200, "activeTime": 1000}],
+        # The whole-report batched call an un-fixed implementation would make instead
+        # of per-fight calls — WCL aggregates this to one row per actor regardless of
+        # how many of the requested fights they were in.
+        ("R1", (1, 2), "DamageTaken"): [{"name": "Thrall", "total": 999, "activeTime": 9999}],
+        ("R1", (1, 2), "Interrupts"): [],
+        ("R1", (1, 2), "Dispels"): [],
+        ("R2", (3,), "Interrupts"): [],
+        ("R2", (3,), "Dispels"): [],
+    }
+    recent = {
+        "Thrall": [
+            ReportRef(code="R1", zone_name="Z", start_time=int(now_ms)),
+            ReportRef(code="R2", zone_name="Z", start_time=int(now_ms)),
+        ]
+    }
+
+    wcl = FakeWCL(reports=reports, tables=tables, recent=recent)
+    analyzer = PerformanceAnalyzer(Config(), wcl)
+
+    cache_path = str(tmp_path / "cache.json")
+    raws = analyzer.aggregate_season(roster, refresh=True, cache_path=cache_path)
+
+    assert raws[thrall.key].fights == 3
+
+
+def test_accumulate_report_early_death_attribution():
+    """A character among the first two to die gets early_deaths; a later death doesn't."""
+    thrall = _char("Thrall")
+    jaina = _char("Jaina", role=HEALER)
+    roster = [thrall, jaina]
+    by_name = {c.name: c.key for c in roster}
+    raws = {c.key: RawMetrics() for c in roster}
+
+    fights = [Fight(id=1, name="Boss", encounter_id=1, difficulty=5, kill=True)]
+    tables = {
+        ("R1", (1,), "Deaths"): [
+            {"name": "Thrall", "timestamp": 1000},
+            {"name": "Grom", "timestamp": 2000},  # not on roster, ignored
+            {"name": "Jaina", "timestamp": 5000},
+        ],
+        ("R1", (1,), "DamageTaken"): [
+            {"name": "Thrall", "total": 100, "activeTime": 1000},
+            {"name": "Jaina", "total": 50, "activeTime": 1000},
+        ],
+        ("R1", (1,), "Interrupts"): [],
+        ("R1", (1,), "Dispels"): [],
+    }
+    analyzer = PerformanceAnalyzer(Config(), FakeWCL(tables=tables))
+
+    analyzer._accumulate_report("R1", fights, raws, by_name)
+
+    assert raws[thrall.key].deaths == 1
+    assert raws[thrall.key].early_deaths == 1
+    assert raws[jaina.key].deaths == 1
+    assert raws[jaina.key].early_deaths == 0
+
+
+def test_accumulate_report_skips_fight_atomically_on_partial_failure():
+    """Finding 2 regression: a fight whose DamageTaken call raises leaves no partial
+    mutation — not even the Deaths half that succeeded — while a healthy sibling
+    fight in the same report still accumulates normally."""
+    thrall = _char("Thrall")
+    roster = [thrall]
+    by_name = {c.name: c.key for c in roster}
+    raws = {c.key: RawMetrics() for c in roster}
+
+    fights = [
+        Fight(id=10, name="Healthy", encounter_id=1, difficulty=5, kill=True),
+        Fight(id=11, name="Broken", encounter_id=2, difficulty=5, kill=True),
+    ]
+    tables = {
+        ("R1", (10,), "Deaths"): [],
+        ("R1", (10,), "DamageTaken"): [{"name": "Thrall", "total": 500, "activeTime": 1000}],
+        ("R1", (11,), "Deaths"): [{"name": "Thrall", "timestamp": 42}],
+        ("R1", (11,), "DamageTaken"): _RAISE,
+        ("R1", (10, 11), "Interrupts"): [],
+        ("R1", (10, 11), "Dispels"): [],
+    }
+    analyzer = PerformanceAnalyzer(Config(), FakeWCL(tables=tables))
+
+    analyzer._accumulate_report("R1", fights, raws, by_name)
+
+    raw = raws[thrall.key]
+    assert raw.fights == 1
+    assert raw.damage_taken == 500
+    assert raw.deaths == 0
+    assert raw.early_deaths == 0
+
+
+def test_report_codes_dedupes_and_excludes_stale_reports():
+    now_ms = time.time() * 1000
+    old_ms = now_ms - 90 * 86400 * 1000  # 90 days ago
+    roster = [_char("Thrall"), _char("Jaina")]
+
+    recent = {
+        "Thrall": [
+            ReportRef(code="R1", zone_name="Z", start_time=int(now_ms)),
+            ReportRef(code="R2", zone_name="Z", start_time=int(old_ms)),
+        ],
+        "Jaina": [
+            ReportRef(code="R1", zone_name="Z", start_time=int(now_ms)),
+            ReportRef(code="R3", zone_name="Z", start_time=int(now_ms)),
+        ],
+    }
+    analyzer = PerformanceAnalyzer(Config(report_lookback_days=60), FakeWCL(recent=recent))
+
+    cutoff_ms = (time.time() - 60 * 86400) * 1000
+    codes = analyzer._report_codes(roster, cutoff_ms)
+
+    assert set(codes) == {"R1", "R3"}
+    assert len(codes) == 2  # R1 is de-duplicated despite appearing for both characters
+
+
+def test_collect_skips_character_whose_parses_call_raises():
+    thrall = _char("Thrall")
+    grom = _char("Grom")
+    roster = [thrall, grom]
+
+    parses = {"Thrall": ParseData(average=85.0, per_encounter={1: 85.0})}
+    analyzer = PerformanceAnalyzer(Config(), FakeWCL(parses=parses, raise_on_parse={"Grom"}))
+
+    raws = analyzer._collect(roster)
+
+    assert raws[thrall.key].parse_total == pytest.approx(85.0)
+    assert raws[thrall.key].parse_count == 1
+    assert raws[grom.key].parse_total == 0.0
+    assert raws[grom.key].parse_count == 0

@@ -217,10 +217,28 @@ class PerformanceAnalyzer:
     def _accumulate_report(self, code, fights, raws, by_name) -> None:
         fight_ids = [f.id for f in fights]
 
-        # Deaths are queried per fight because death *order* is only meaningful
-        # within a single pull.
+        # Deaths and DamageTaken are both queried per fight, one fight ID at a
+        # time. Deaths because death *order* is only meaningful within a single
+        # pull. DamageTaken because WCL's report.table aggregates its results
+        # per actor across *all* requested fight IDs — a single batched call
+        # over the whole report would return one row per player no matter how
+        # many of those fights they were actually in, corrupting `fights` (the
+        # participation count that gates low_confidence and divides the deaths/
+        # utility rates). Querying one fight ID at a time makes a returned row
+        # unambiguously mean "present in that one fight," regardless of how the
+        # endpoint aggregates.
+        #
+        # The two calls are fetched before either is applied so a fight is
+        # accumulated all-or-nothing: if either table fetch fails, the fight is
+        # skipped entirely rather than leaving e.g. a deaths increment with no
+        # matching fights increment (a silently wrong ratio).
         for fight in fights:
             deaths = self._table(code, [fight.id], "Deaths")
+            damage = self._table(code, [fight.id], "DamageTaken")
+            if deaths is None or damage is None:
+                logger.warning("Skipping fight %s in report %s: a table fetch failed", fight.id, code)
+                continue
+
             early = set(early_death_names(deaths))
             for entry in deaths:
                 key = by_name.get(entry.get("name"))
@@ -230,31 +248,39 @@ class PerformanceAnalyzer:
                 if entry["name"] in early:
                     raws[key].early_deaths += 1
 
-        # Fight participation comes from DamageTaken, which lists every player
-        # present in the fight.
-        for entry in self._table(code, fight_ids, "DamageTaken"):
-            key = by_name.get(entry.get("name"))
-            if key is None:
-                continue
-            raw = raws[key]
-            raw.fights += 1
-            raw.damage_taken += int(entry.get("total") or 0)
-            raw.active_time_ms += int(entry.get("activeTime") or 0)
-            tmi = entry.get("tmi")
-            if tmi is not None:
-                raw.tmi_total += float(tmi)
-                raw.tmi_count += 1
+            for entry in damage:
+                key = by_name.get(entry.get("name"))
+                if key is None:
+                    continue
+                raw = raws[key]
+                raw.fights += 1
+                raw.damage_taken += int(entry.get("total") or 0)
+                raw.active_time_ms += int(entry.get("activeTime") or 0)
+                tmi = entry.get("tmi")
+                if tmi is not None:
+                    raw.tmi_total += float(tmi)
+                    raw.tmi_count += 1
 
+        # Interrupts and Dispels are summed totals with no per-fight semantics
+        # (no participation count, no ordering), so batching all of the
+        # report's fight IDs into one call is correct and cheaper.
         for data_type, field_name in (("Interrupts", "interrupts"), ("Dispels", "dispels")):
-            for entry in self._table(code, fight_ids, data_type):
+            entries = self._table(code, fight_ids, data_type)
+            if entries is None:
+                continue
+            for entry in entries:
                 key = by_name.get(entry.get("name"))
                 if key is None:
                     continue
                 setattr(raws[key], field_name, getattr(raws[key], field_name) + int(entry.get("total") or 0))
 
-    def _table(self, code: str, fight_ids: List[int], data_type: str) -> List[dict]:
+    def _table(self, code: str, fight_ids: List[int], data_type: str) -> Optional[List[dict]]:
+        """Fetch one WCL report table. Returns None on failure, distinct from an
+        empty-but-successful `[]`, so callers can tell "the call failed" apart
+        from "there were legitimately no rows" (needed for all-or-nothing
+        per-fight accumulation)."""
         try:
             return self._wcl.report_table(code, fight_ids, data_type)
         except Exception as exc:
             logger.warning("%s table failed for %s: %s", data_type, code, exc)
-            return []
+            return None
