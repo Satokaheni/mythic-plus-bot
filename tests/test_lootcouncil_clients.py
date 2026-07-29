@@ -1,0 +1,160 @@
+"""Tests for the WoWAudit and Warcraft Logs response parsers — captured shapes, no network."""
+
+from lootcouncil.models import DPS, HEALER, TANK
+from lootcouncil.wowaudit import _parse_roster, _parse_wishlists
+
+# ---------------------------------------------------------------------------
+# WoWAudit — roster
+# ---------------------------------------------------------------------------
+
+ROSTER_PAYLOAD = {
+    "characters": [
+        {"id": 1, "name": "Thrall", "realm": "Mal'Ganis", "class": "Shaman", "role": "Healer", "rank": 0, "blizzard_id": 111},
+        {"id": 2, "name": "Grom", "realm": "Aerie Peak", "class": "Warrior", "role": "Tank", "rank": 1, "blizzard_id": 222},
+        {"id": 3, "name": "Sylvanas", "realm": "Illidan", "class": "Hunter", "role": "Ranged", "rank": 2, "blizzard_id": 333},
+    ]
+}
+
+
+def test_parse_roster_maps_fields_and_normalizes_roles():
+    chars = _parse_roster(ROSTER_PAYLOAD)
+    assert len(chars) == 3
+    by_name = {c.name: c for c in chars}
+    assert by_name["Thrall"].role == HEALER
+    assert by_name["Grom"].role == TANK
+    assert by_name["Sylvanas"].role == DPS  # "Ranged" collapses to dps
+    assert by_name["Thrall"].key == "thrall-malganis"
+    assert by_name["Grom"].key == "grom-aeriepeak"
+    assert by_name["Thrall"].class_name == "Shaman"
+    assert by_name["Grom"].blizzard_id == 222
+
+
+def test_parse_roster_accepts_a_bare_list():
+    chars = _parse_roster(ROSTER_PAYLOAD["characters"])
+    assert len(chars) == 3
+
+
+def test_parse_roster_skips_rows_missing_name_or_realm():
+    chars = _parse_roster({"characters": [{"name": "NoRealm"}, {"realm": "NoName"}, {}]})
+    assert chars == []
+
+
+def test_parse_roster_handles_empty_payload():
+    assert _parse_roster({}) == []
+    assert _parse_roster({"characters": None}) == []
+
+
+# ---------------------------------------------------------------------------
+# WoWAudit — wishlists
+# ---------------------------------------------------------------------------
+
+# Path confirmed during the design spike:
+# characters[].instances[].difficulties[].wishlist.encounters[].items[]
+WISHLIST_PAYLOAD = {
+    "characters": [
+        {
+            "name": "Thrall",
+            "realm": "Mal'Ganis",
+            "instances": [
+                {
+                    "name": "Sporefall",
+                    "difficulties": [
+                        {
+                            "difficulty": "Mythic",
+                            "wishlist": {
+                                "encounters": [
+                                    {
+                                        "name": "Rotmire",
+                                        "items": [
+                                            {"id": 215147, "name": "Vibrant Shard", "percentage": 4.2, "absolute": 1800, "spec": "Restoration"},
+                                            {"id": 215148, "name": "Dull Shard", "percentage": 0.3, "absolute": 90, "spec": "Restoration"},
+                                        ],
+                                    }
+                                ]
+                            },
+                        },
+                        {
+                            "difficulty": "Heroic",
+                            "wishlist": {
+                                "encounters": [
+                                    {"name": "Rotmire", "items": [{"id": 215147, "percentage": 1.1, "absolute": 400, "spec": "Restoration"}]}
+                                ]
+                            },
+                        },
+                    ],
+                }
+            ],
+        },
+        {
+            "name": "Grom",
+            "realm": "Aerie Peak",
+            "instances": [
+                {
+                    "difficulties": [
+                        {
+                            "difficulty": "Mythic",
+                            "wishlist": {
+                                "encounters": [
+                                    {
+                                        "items": [
+                                            # Alternate shape: per-spec list instead of flat fields.
+                                            {"id": 215147, "specs": [
+                                                {"spec": "Protection", "percentage": 2.0, "absolute": 700},
+                                                {"spec": "Fury", "percentage": 6.5, "absolute": 2400},
+                                            ]}
+                                        ]
+                                    }
+                                ]
+                            },
+                        }
+                    ]
+                }
+            ],
+        },
+    ]
+}
+
+
+def test_parse_wishlists_indexes_by_item_difficulty_and_character():
+    wl = _parse_wishlists(WISHLIST_PAYLOAD)
+    assert 215147 in wl
+    mythic = wl[215147]["Mythic"]
+    assert set(mythic) == {"thrall-malganis", "grom-aeriepeak"}
+    assert mythic["thrall-malganis"].percentage == 4.2
+    assert mythic["thrall-malganis"].absolute == 1800
+    assert mythic["thrall-malganis"].spec == "Restoration"
+
+
+def test_parse_wishlists_keeps_difficulties_separate():
+    wl = _parse_wishlists(WISHLIST_PAYLOAD)
+    assert wl[215147]["Heroic"]["thrall-malganis"].percentage == 1.1
+    assert "grom-aeriepeak" not in wl[215147]["Heroic"]
+
+
+def test_parse_wishlists_picks_best_spec_from_a_specs_list():
+    wl = _parse_wishlists(WISHLIST_PAYLOAD)
+    grom = wl[215147]["Mythic"]["grom-aeriepeak"]
+    assert grom.percentage == 6.5  # the Fury line wins on percentage
+    assert grom.spec == "Fury"
+
+
+def test_parse_wishlists_returns_empty_for_the_end_of_season_case():
+    # Wishlists were empty during the design spike; this must not raise.
+    assert _parse_wishlists({"characters": []}) == {}
+    assert _parse_wishlists({}) == {}
+    assert _parse_wishlists({"characters": [{"name": "Thrall", "realm": "Illidan", "instances": []}]}) == {}
+
+
+def test_parse_wishlists_skips_items_without_an_id():
+    payload = {
+        "characters": [
+            {
+                "name": "Thrall",
+                "realm": "Illidan",
+                "instances": [
+                    {"difficulties": [{"difficulty": "Mythic", "wishlist": {"encounters": [{"items": [{"percentage": 5.0}]}]}}]}
+                ],
+            }
+        ]
+    }
+    assert _parse_wishlists(payload) == {}
