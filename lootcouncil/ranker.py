@@ -1,14 +1,11 @@
 """Blend upgrade size with role-aware performance into a single loot ranking."""
 
-import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from lootcouncil.config import Config
 from lootcouncil.models import Character, PerformanceScore
 from lootcouncil.performance import PerformanceAnalyzer, score_cohort
-
-logger = logging.getLogger("lootcouncil")
 
 
 def normalize_upgrades(pcts: Dict[str, float]) -> Dict[str, float]:
