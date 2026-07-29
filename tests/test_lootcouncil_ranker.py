@@ -4,9 +4,10 @@ from typing import Dict, Optional
 
 import pytest
 
+from loot import format_loot_table, format_performance_table, parse_weights
 from lootcouncil.config import Config
 from lootcouncil.models import DPS, HEALER, TANK, Character, PerformanceScore, RawMetrics, UpgradeInfo
-from lootcouncil.ranker import LootRanker, normalize_upgrades, weighted_score
+from lootcouncil.ranker import LootRanker, LootResult, RankedCandidate, normalize_upgrades, weighted_score
 
 # ---------------------------------------------------------------------------
 # normalize_upgrades
@@ -274,3 +275,78 @@ def test_rank_produces_different_orderings_by_loot_score_and_performance():
     # The orderings should differ: loot_score favors the big upgrade,
     # performance favors the high-perf candidate.
     assert by_loot_order != by_perf_order
+
+
+# ---------------------------------------------------------------------------
+# CLI formatting
+# ---------------------------------------------------------------------------
+
+
+def _candidate(name, role=DPS, upgrade=5.0, norm=1.0, perf=0.8, low=False):
+    return RankedCandidate(
+        key=f"{name.lower()}-illidan",
+        name=name,
+        role=role,
+        spec="Fury",
+        upgrade_pct=upgrade,
+        upgrade_norm=norm,
+        performance=perf,
+        components={"parse": 0.9, "deaths": 0.8, "damage": 0.7, "utility": 0.0, "survivability": 0.0},
+        loot_score=0.6 * norm + 0.4 * perf,
+        low_confidence=low,
+    )
+
+
+def _result(rows):
+    by_role = {}
+    for row in rows:
+        by_role.setdefault(row.role, []).append(row)
+    return LootResult(
+        item_id=215147,
+        difficulty=5,
+        weight_upgrade=0.6,
+        weight_performance=0.4,
+        by_role=by_role,
+        performance_by_role=by_role,
+    )
+
+
+def test_parse_weights_accepts_a_comma_pair():
+    assert parse_weights("0.7,0.3") == (0.7, 0.3)
+
+
+def test_parse_weights_rejects_malformed_input():
+    for bad in ("0.7", "a,b", "", "0.1,0.2,0.3"):
+        with pytest.raises(ValueError):
+            parse_weights(bad)
+
+
+def test_loot_table_lists_candidates_best_first_with_the_weights_in_the_header():
+    result = _result([_candidate("Ace", perf=0.9, norm=1.0), _candidate("Rookie", perf=0.2, norm=0.9)])
+    out = format_loot_table(result)
+    assert "215147" in out
+    assert "0.6" in out and "0.4" in out  # weights surfaced per the spec
+    assert out.index("Ace") < out.index("Rookie")
+
+
+def test_loot_table_marks_low_confidence_rows():
+    out = format_loot_table(_result([_candidate("Thin", low=True)]))
+    assert "low confidence" in out.lower()
+
+
+def test_loot_table_reports_the_empty_case_clearly():
+    empty = LootResult(item_id=999, difficulty=5, weight_upgrade=0.6, weight_performance=0.4)
+    out = format_loot_table(empty)
+    assert "no candidates" in out.lower()
+
+
+def test_tables_group_by_role():
+    out = format_loot_table(_result([_candidate("Tanky", role=TANK), _candidate("Stabby", role=DPS)]))
+    assert "TANK" in out.upper()
+    assert "DPS" in out.upper()
+
+
+def test_performance_table_shows_the_component_breakdown():
+    out = format_performance_table(_result([_candidate("Ace")]))
+    assert "parse" in out.lower()
+    assert "deaths" in out.lower()
