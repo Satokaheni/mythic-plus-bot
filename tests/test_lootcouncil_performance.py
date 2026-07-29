@@ -184,9 +184,39 @@ def test_components_are_reported_for_transparency():
 
 
 def test_unknown_role_falls_back_to_dps_weights():
-    good, _ = _dps_pair()
-    scores = score_cohort({"g": good}, {"g": "sponge"}, Config())
-    assert 0.0 <= scores["g"].score <= 1.0
+    base = dict(fights=10, parse_total=700.0, parse_count=10, deaths=1, early_deaths=0,
+                interrupts=0, dispels=0, damage_taken=1000, active_time_ms=1000,
+                tmi_total=10.0, tmi_count=10)
+    metrics = RawMetrics(**base)
+    scores_unknown = score_cohort({"x": metrics}, {"x": "sponge"}, Config())
+    scores_dps = score_cohort({"x": metrics}, {"x": DPS}, Config())
+    assert scores_unknown["x"].score == pytest.approx(scores_dps["x"].score)
+
+
+def test_damage_inversion_isolated():
+    """Lower damage_taken must score higher when damage is the only differing component."""
+    base = dict(fights=10, parse_total=700.0, parse_count=10, deaths=1, early_deaths=0,
+                interrupts=0, dispels=0, active_time_ms=1000, tmi_total=10.0, tmi_count=10)
+    low_damage = RawMetrics(damage_taken=1000, **base)
+    high_damage = RawMetrics(damage_taken=3000, **base)
+    scores = score_cohort({"low": low_damage, "high": high_damage}, {"low": DPS, "high": DPS},
+                          Config())
+    assert scores["low"].score > scores["high"].score
+    assert scores["low"].components["damage"] == pytest.approx(1.0)
+    assert scores["high"].components["damage"] == pytest.approx(0.0)
+
+
+def test_survivability_inversion_isolated_tank():
+    """Lower tmi_avg must score higher for TANK when survivability is the only differing component."""
+    base = dict(fights=10, parse_total=500.0, parse_count=10, deaths=0, early_deaths=0,
+                interrupts=0, dispels=0, damage_taken=50000, active_time_ms=1000)
+    low_tmi = RawMetrics(tmi_total=10.0, tmi_count=10, **base)
+    high_tmi = RawMetrics(tmi_total=50.0, tmi_count=10, **base)
+    scores = score_cohort({"low": low_tmi, "high": high_tmi}, {"low": TANK, "high": TANK},
+                          Config())
+    assert scores["low"].score > scores["high"].score
+    assert scores["low"].components["survivability"] == pytest.approx(1.0)
+    assert scores["high"].components["survivability"] == pytest.approx(0.0)
 
 
 def test_score_cohort_on_empty_input():
