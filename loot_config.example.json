@@ -1,0 +1,12 @@
+{
+  "guild_name": "Your Guild Name",
+  "guild_server_slug": "malganis",
+  "guild_region": "us",
+  "season_zone_id": 0,
+  "difficulty": 5,
+  "weight_upgrade": 0.6,
+  "weight_performance": 0.4,
+  "report_lookback_days": 60,
+  "cache_ttl_hours": 24,
+  "min_fights": 3
+}

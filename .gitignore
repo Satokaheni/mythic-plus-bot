@@ -31,6 +31,8 @@ snipes.json
 snipes.json.tmp
 events.jsonl
 character_mappings.json
+lootcouncil_cache.json
+loot_config.json
 
 # Logs (rotating file handler)
 bot.log
