@@ -369,3 +369,21 @@ the scoring/parse logic they feed is what's unit-tested.)*
 On completion: a `lootcouncil/README.md` (setup: the env vars, config, how to run,
 how to read the tables), and note the tool in the repo `README.md`. Not part of the
 bot's `CHANGELOG.md`/version (separate tool), unless/until it's folded into the bot.
+
+## Known data risk
+
+WoWAudit wishlists were empty during the design spike (end of season — nobody was
+re-simming). The **path** to wishlist items is confirmed
+(`characters[].instances[].difficulties[].wishlist.encounters[].items[]`), but the
+**leaf field names** for upgrade values (`percentage`, `absolute`, `spec` vs. a
+`specs[]` list) could not be confirmed. `_parse_wishlists()` in `lootcouncil/wowaudit.py`
+tolerates two shapes for this reason.
+
+**Deferred live-verification:** Once raiders upload droptimizers next season, run:
+
+```bash
+python -c "from lootcouncil.config import Config; from lootcouncil.wowaudit import WowAuditClient; import json; print(json.dumps(WowAuditClient(Config.load()).wishlists(), default=str)[:2000])"
+```
+
+and confirm the real leaf fields match `_best_upgrade`'s two tolerated shapes. If they
+do not, `_best_upgrade` is the only function that needs changing.

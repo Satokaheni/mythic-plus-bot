@@ -158,3 +158,166 @@ def test_parse_wishlists_skips_items_without_an_id():
         ]
     }
     assert _parse_wishlists(payload) == {}
+
+
+# ---------------------------------------------------------------------------
+# Regression tests — defensive parsing for malformed data
+# ---------------------------------------------------------------------------
+
+
+def test_parse_roster_survives_none_in_characters_list():
+    """_parse_roster should skip None elements in the characters list."""
+    payload = {"characters": [None, {"name": "Valid", "realm": "Illidan", "class": "Shaman"}]}
+    chars = _parse_roster(payload)
+    assert len(chars) == 1
+    assert chars[0].name == "Valid"
+
+
+def test_parse_wishlists_survives_none_in_characters_list():
+    """_parse_wishlists should skip None elements in the characters list."""
+    payload = {
+        "characters": [
+            None,
+            {
+                "name": "Thrall",
+                "realm": "Mal'Ganis",
+                "instances": [
+                    {
+                        "difficulties": [
+                            {"difficulty": "Mythic", "wishlist": {"encounters": [{"items": [{"id": 215147, "percentage": 5.0}]}]}}
+                        ]
+                    }
+                ],
+            },
+        ]
+    }
+    wl = _parse_wishlists(payload)
+    assert 215147 in wl
+    assert wl[215147]["Mythic"]["thrall-malganis"].percentage == 5.0
+
+
+def test_parse_wishlists_survives_none_in_nested_lists():
+    """_parse_wishlists should skip None in instances, difficulties, encounters, and items."""
+    payload = {
+        "characters": [
+            {
+                "name": "Thrall",
+                "realm": "Mal'Ganis",
+                "instances": [
+                    None,
+                    {
+                        "difficulties": [
+                            None,
+                            {
+                                "difficulty": "Mythic",
+                                "wishlist": {
+                                    "encounters": [
+                                        None,
+                                        {
+                                            "items": [
+                                                None,
+                                                {"id": 215147, "percentage": 5.0},
+                                            ]
+                                        },
+                                    ]
+                                },
+                            },
+                        ]
+                    },
+                ],
+            }
+        ]
+    }
+    wl = _parse_wishlists(payload)
+    assert 215147 in wl
+    assert wl[215147]["Mythic"]["thrall-malganis"].percentage == 5.0
+
+
+def test_parse_wishlists_skips_characters_missing_name_or_realm():
+    """_parse_wishlists should skip character entries missing name or realm."""
+    payload = {
+        "characters": [
+            {"realm": "Mal'Ganis", "instances": []},  # missing name
+            {"name": "Thrall", "instances": []},  # missing realm
+            {"name": "Valid", "realm": "Valid", "instances": []},  # valid but no instances
+        ]
+    }
+    wl = _parse_wishlists(payload)
+    assert wl == {}
+
+
+def test_best_upgrade_handles_empty_specs_list():
+    """_best_upgrade should handle items with an empty specs list."""
+    payload = {
+        "characters": [
+            {
+                "name": "Thrall",
+                "realm": "Mal'Ganis",
+                "instances": [
+                    {
+                        "difficulties": [
+                            {
+                                "difficulty": "Mythic",
+                                "wishlist": {
+                                    "encounters": [
+                                        {
+                                            "items": [
+                                                {"id": 215147, "specs": []},  # empty specs list
+                                            ]
+                                        }
+                                    ]
+                                },
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    wl = _parse_wishlists(payload)
+    assert wl == {}  # Empty specs list means no upgrade info
+
+
+def test_best_upgrade_handles_none_in_specs_and_non_numeric_values():
+    """_best_upgrade should skip None in specs and coerce non-numeric values to 0.0."""
+    payload = {
+        "characters": [
+            {
+                "name": "Thrall",
+                "realm": "Mal'Ganis",
+                "instances": [
+                    {
+                        "difficulties": [
+                            {
+                                "difficulty": "Mythic",
+                                "wishlist": {
+                                    "encounters": [
+                                        {
+                                            "items": [
+                                                {
+                                                    "id": 215147,
+                                                    "specs": [
+                                                        None,
+                                                        {"spec": "Protection", "percentage": "N/A", "absolute": 700},
+                                                        {"spec": "Fury", "percentage": 6.5, "absolute": "invalid"},
+                                                    ],
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                },
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    wl = _parse_wishlists(payload)
+    assert 215147 in wl
+    # Should pick Fury (percentage 6.5) over Protection (percentage "N/A" -> 0.0)
+    fury = wl[215147]["Mythic"]["thrall-malganis"]
+    assert fury.percentage == 6.5
+    assert fury.spec == "Fury"
+    # Invalid absolute value becomes 0.0
+    assert fury.absolute == 0.0

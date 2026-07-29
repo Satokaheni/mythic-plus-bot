@@ -19,12 +19,28 @@ class WowAuditError(RuntimeError):
 
 
 def _rows(data: Any, key: str) -> List[dict]:
-    """WoWAudit sometimes wraps collections in an object and sometimes returns a bare list."""
+    """WoWAudit sometimes wraps collections in an object and sometimes returns a bare list.
+
+    Filters out non-dict elements to defend against malformed payloads.
+    """
     if isinstance(data, dict):
         rows = data.get(key)
     else:
         rows = data
-    return rows or []
+    rows = rows or []
+    return [x for x in rows if isinstance(x, dict)]
+
+
+def _as_float(value: Any) -> float:
+    """Safely coerce a value to float, returning 0.0 on any error.
+
+    Handles None, falsy values, and non-numeric strings gracefully.
+    """
+    value = value or 0
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return 0.0
 
 
 def _parse_roster(data: Any) -> List[Character]:
@@ -56,16 +72,19 @@ def _best_upgrade(item: dict) -> Optional[UpgradeInfo]:
     """
     specs = item.get("specs") or item.get("wishlist_specs")
     if isinstance(specs, list) and specs:
-        best = max(specs, key=lambda s: float(s.get("percentage", 0) or 0))
-        return UpgradeInfo(
-            percentage=float(best.get("percentage", 0) or 0),
-            absolute=float(best.get("absolute", 0) or 0),
-            spec=best.get("spec", ""),
-        )
+        # Filter out non-dict elements to handle malformed payloads
+        specs = [x for x in specs if isinstance(x, dict)]
+        if specs:
+            best = max(specs, key=lambda s: _as_float(s.get("percentage", 0)))
+            return UpgradeInfo(
+                percentage=_as_float(best.get("percentage", 0)),
+                absolute=_as_float(best.get("absolute", 0)),
+                spec=best.get("spec", ""),
+            )
     if "percentage" in item or "absolute" in item:
         return UpgradeInfo(
-            percentage=float(item.get("percentage", 0) or 0),
-            absolute=float(item.get("absolute", 0) or 0),
+            percentage=_as_float(item.get("percentage", 0)),
+            absolute=_as_float(item.get("absolute", 0)),
             spec=item.get("spec", ""),
         )
     return None
@@ -80,12 +99,16 @@ def _parse_wishlists(data: Any) -> Dict[int, Dict[str, Dict[str, UpgradeInfo]]]:
         if not name or not realm:
             continue
         key = character_key(name, realm)
-        for instance in char.get("instances") or []:
-            for diff in instance.get("difficulties") or []:
+        instances = [x for x in (char.get("instances") or []) if isinstance(x, dict)]
+        for instance in instances:
+            difficulties = [x for x in (instance.get("difficulties") or []) if isinstance(x, dict)]
+            for diff in difficulties:
                 diff_name = diff.get("difficulty") or diff.get("name") or ""
                 wishlist = diff.get("wishlist") or {}
-                for encounter in wishlist.get("encounters") or []:
-                    for item in encounter.get("items") or []:
+                encounters = [x for x in (wishlist.get("encounters") or []) if isinstance(x, dict)]
+                for encounter in encounters:
+                    items = [x for x in (encounter.get("items") or []) if isinstance(x, dict)]
+                    for item in items:
                         item_id = item.get("id") or item.get("item_id")
                         if not item_id:
                             continue
