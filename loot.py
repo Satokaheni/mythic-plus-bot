@@ -16,8 +16,6 @@ from lootcouncil.ranker import LootRanker, LootResult
 from lootcouncil.warcraftlogs import WarcraftLogsClient
 from lootcouncil.wowaudit import WowAuditClient
 
-logger = logging.getLogger("lootcouncil")
-
 COMPONENT_ORDER = ("parse", "deaths", "damage", "utility", "survivability")
 
 
@@ -29,6 +27,10 @@ def parse_weights(text: str) -> Tuple[float, float]:
         upgrade, performance = float(parts[0]), float(parts[1])
     except ValueError:
         raise ValueError("--weights must be two numbers, e.g. 0.6,0.4")
+    if upgrade < 0.0 or performance < 0.0:
+        raise ValueError("--weights must both be non-negative")
+    if upgrade + performance <= 0.0:
+        raise ValueError("--weights must sum to a positive value")
     return upgrade, performance
 
 
@@ -107,7 +109,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     cfg = Config.load()
-    if args.weights:
+    if args.weights is not None:
         try:
             cfg.weight_upgrade, cfg.weight_performance = parse_weights(args.weights)
         except ValueError as exc:

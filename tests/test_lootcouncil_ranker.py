@@ -1,10 +1,11 @@
 """Tests for lootcouncil.ranker — pure normalization and the weighted blend."""
 
 from typing import Dict, Optional
+from unittest.mock import MagicMock
 
 import pytest
 
-from loot import format_loot_table, format_performance_table, parse_weights
+from loot import format_loot_table, format_performance_table, main, parse_weights
 from lootcouncil.config import Config
 from lootcouncil.models import DPS, HEALER, TANK, Character, PerformanceScore, RawMetrics, UpgradeInfo
 from lootcouncil.ranker import LootRanker, LootResult, RankedCandidate, normalize_upgrades, weighted_score
@@ -325,7 +326,13 @@ def test_loot_table_lists_candidates_best_first_with_the_weights_in_the_header()
     result = _result([_candidate("Ace", perf=0.9, norm=1.0), _candidate("Rookie", perf=0.2, norm=0.9)])
     out = format_loot_table(result)
     assert "215147" in out
-    assert "0.6" in out and "0.4" in out  # weights surfaced per the spec
+    # Strengthen: assert both weights appear on the header line specifically, not elsewhere
+    for line in out.split("\n"):
+        if "Weights:" in line:
+            assert "0.6" in line and "0.4" in line
+            break
+    else:
+        pytest.fail("Weights: header line not found")
     assert out.index("Ace") < out.index("Rookie")
 
 
@@ -350,3 +357,138 @@ def test_performance_table_shows_the_component_breakdown():
     out = format_performance_table(_result([_candidate("Ace")]))
     assert "parse" in out.lower()
     assert "deaths" in out.lower()
+
+
+# ---------------------------------------------------------------------------
+# main(argv) — CLI integration tests
+# ---------------------------------------------------------------------------
+
+
+def test_main_exits_2_on_bad_weights(monkeypatch, capsys, tmp_path):
+    """main() exits 2 and prints error to stderr when --weights is invalid (e.g. sum to zero)."""
+    monkeypatch.chdir(tmp_path)
+    # Use weights that sum to zero, which the fixed parse_weights now rejects
+    exit_code = main(["215147", "--weights=0,0"])
+    assert exit_code == 2
+    captured = capsys.readouterr()
+    assert "error:" in captured.err
+    assert captured.out == ""  # Error goes to stderr, not stdout
+
+
+def test_main_exits_2_on_config_validation_failure(monkeypatch, capsys, tmp_path):
+    """main() exits 2 when Config.validate() fails (e.g. no loot_config.json)."""
+    monkeypatch.chdir(tmp_path)
+    # No loot_config.json in tmp_path, so Config.load().validate() will raise
+    exit_code = main(["215147"])
+    assert exit_code == 2
+    captured = capsys.readouterr()
+    assert "error:" in captured.err
+
+
+def test_main_exits_0_on_success(monkeypatch, capsys, tmp_path):
+    """main() exits 0 and prints both tables to stdout on success."""
+    monkeypatch.chdir(tmp_path)
+
+    # Create a minimal valid config
+    valid_cfg = Config()
+    valid_cfg.guild_name = "Test Guild"
+    valid_cfg.guild_server_slug = "area-52"
+    valid_cfg.season_zone_id = 1
+    valid_cfg.weight_upgrade = 0.6
+    valid_cfg.weight_performance = 0.4
+
+    # Create a fake LootResult with one candidate
+    fake_result = LootResult(
+        item_id=215147,
+        difficulty=5,
+        weight_upgrade=0.6,
+        weight_performance=0.4,
+        by_role={DPS: [_candidate("TestChar", perf=0.8, norm=1.0)]},
+        performance_by_role={DPS: [_candidate("TestChar", perf=0.8, norm=1.0)]},
+    )
+
+    # Patch Config.load to return our valid config
+    monkeypatch.setattr("loot.Config.load", lambda: valid_cfg)
+
+    # Patch LootRanker to return our fake result
+    fake_ranker = MagicMock()
+    fake_ranker.rank.return_value = fake_result
+
+    def fake_loot_ranker_init(self, cfg, wowaudit, analyzer):
+        pass
+
+    monkeypatch.setattr("loot.LootRanker.__init__", fake_loot_ranker_init)
+    monkeypatch.setattr("loot.LootRanker.rank", lambda self, item_id, difficulty, refresh: fake_result)
+
+    exit_code = main(["215147"])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    # Should contain loot table and performance table headings and the character name
+    assert "Loot ranking" in captured.out
+    assert "Performance ranking" in captured.out
+    assert "TestChar" in captured.out
+
+
+def test_main_exits_1_when_ranking_raises(monkeypatch, capsys, tmp_path):
+    """main() exits 1 and prints error to stderr when LootRanker.rank() raises."""
+    monkeypatch.chdir(tmp_path)
+
+    valid_cfg = Config()
+    valid_cfg.guild_name = "Test Guild"
+    valid_cfg.guild_server_slug = "area-52"
+    valid_cfg.season_zone_id = 1
+
+    monkeypatch.setattr("loot.Config.load", lambda: valid_cfg)
+
+    # Patch LootRanker to raise RuntimeError
+    def fake_loot_ranker_init(self, cfg, wowaudit, analyzer):
+        pass
+
+    def fake_rank_raises(*args, **kwargs):
+        raise RuntimeError("Simulated ranking error")
+
+    monkeypatch.setattr("loot.LootRanker.__init__", fake_loot_ranker_init)
+    monkeypatch.setattr("loot.LootRanker.rank", fake_rank_raises)
+
+    exit_code = main(["215147"])
+    assert exit_code == 1
+
+    captured = capsys.readouterr()
+    assert "error:" in captured.err
+    assert "Simulated ranking error" in captured.err
+
+
+def test_main_exits_0_on_empty_result(monkeypatch, capsys, tmp_path):
+    """main() exits 0 on an empty LootResult (no candidates) and prints message to stdout."""
+    monkeypatch.chdir(tmp_path)
+
+    valid_cfg = Config()
+    valid_cfg.guild_name = "Test Guild"
+    valid_cfg.guild_server_slug = "area-52"
+    valid_cfg.season_zone_id = 1
+    valid_cfg.weight_upgrade = 0.6
+    valid_cfg.weight_performance = 0.4
+
+    # Create empty LootResult
+    empty_result = LootResult(
+        item_id=215147,
+        difficulty=5,
+        weight_upgrade=0.6,
+        weight_performance=0.4,
+    )
+
+    monkeypatch.setattr("loot.Config.load", lambda: valid_cfg)
+
+    def fake_loot_ranker_init(self, cfg, wowaudit, analyzer):
+        pass
+
+    monkeypatch.setattr("loot.LootRanker.__init__", fake_loot_ranker_init)
+    monkeypatch.setattr("loot.LootRanker.rank", lambda self, item_id, difficulty, refresh: empty_result)
+
+    exit_code = main(["215147"])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    # Should contain the "no candidates" message
+    assert "no candidates" in captured.out.lower()
