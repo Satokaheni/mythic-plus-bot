@@ -1,12 +1,18 @@
 """Tests for lootcouncil.performance — pure scoring, death order, cache freshness."""
 
+import json
+
 import pytest
 
 from lootcouncil.config import Config
 from lootcouncil.models import DPS, HEALER, TANK, RawMetrics
 from lootcouncil.performance import (
+    PerformanceAnalyzer,
+    cache_is_fresh,
     component_values,
     early_death_names,
+    metrics_from_dict,
+    metrics_to_dict,
     rank_normalize,
     score_cohort,
 )
@@ -221,3 +227,86 @@ def test_survivability_inversion_isolated_tank():
 
 def test_score_cohort_on_empty_input():
     assert score_cohort({}, {}, Config()) == {}
+
+
+# ---------------------------------------------------------------------------
+# cache
+# ---------------------------------------------------------------------------
+
+HOUR = 3600.0
+
+
+def test_cache_is_fresh_within_the_ttl():
+    cache = {"fetched_at": 1000.0, "zone_id": 42, "difficulty": 5}
+    cfg = Config(season_zone_id=42, difficulty=5, cache_ttl_hours=24)
+    assert cache_is_fresh(cache, cfg, now_ts=1000.0 + 23 * HOUR) is True
+
+
+def test_cache_is_stale_past_the_ttl():
+    cache = {"fetched_at": 1000.0, "zone_id": 42, "difficulty": 5}
+    cfg = Config(season_zone_id=42, difficulty=5, cache_ttl_hours=24)
+    assert cache_is_fresh(cache, cfg, now_ts=1000.0 + 25 * HOUR) is False
+
+
+def test_cache_is_stale_when_the_tier_or_difficulty_changed():
+    cfg = Config(season_zone_id=42, difficulty=5, cache_ttl_hours=24)
+    assert cache_is_fresh({"fetched_at": 1000.0, "zone_id": 99, "difficulty": 5}, cfg, 1000.0) is False
+    assert cache_is_fresh({"fetched_at": 1000.0, "zone_id": 42, "difficulty": 4}, cfg, 1000.0) is False
+
+
+def test_cache_is_stale_when_empty_or_malformed():
+    cfg = Config(season_zone_id=42, difficulty=5)
+    assert cache_is_fresh(None, cfg, 1000.0) is False
+    assert cache_is_fresh({}, cfg, 1000.0) is False
+
+
+def test_metrics_roundtrip_through_dicts():
+    raws = {"thrall-malganis": RawMetrics(fights=7, deaths=2, parse_total=500.0, parse_count=7)}
+    restored = metrics_from_dict(metrics_to_dict(raws))
+    assert restored["thrall-malganis"].fights == 7
+    assert restored["thrall-malganis"].deaths == 2
+    assert restored["thrall-malganis"].parse_avg == pytest.approx(500.0 / 7)
+
+
+def test_metrics_from_dict_ignores_unknown_fields():
+    restored = metrics_from_dict({"a": {"fights": 3, "bogus_field": 1}})
+    assert restored["a"].fights == 3
+
+
+def test_save_and_load_cache_roundtrip(tmp_path):
+    cfg = Config(season_zone_id=42, difficulty=5)
+    analyzer = PerformanceAnalyzer(cfg, wcl=None)
+    path = str(tmp_path / "cache.json")
+    analyzer.save_cache(path, {"thrall-malganis": RawMetrics(fights=4)})
+
+    loaded = analyzer.load_cache(path)
+    assert loaded["zone_id"] == 42
+    assert loaded["difficulty"] == 5
+    assert loaded["metrics"]["thrall-malganis"]["fights"] == 4
+
+    on_disk = json.loads((tmp_path / "cache.json").read_text(encoding="utf-8"))
+    assert "fetched_at" in on_disk
+
+
+def test_load_cache_returns_none_when_absent_or_corrupt(tmp_path):
+    analyzer = PerformanceAnalyzer(Config(), wcl=None)
+    assert analyzer.load_cache(str(tmp_path / "nope.json")) is None
+
+    bad = tmp_path / "bad.json"
+    bad.write_text("{ not json }", encoding="utf-8")
+    assert analyzer.load_cache(str(bad)) is None
+
+
+def test_aggregate_season_uses_a_fresh_cache_without_calling_wcl(tmp_path):
+    cfg = Config(season_zone_id=42, difficulty=5, cache_ttl_hours=24)
+
+    class ExplodingClient:
+        def __getattr__(self, name):
+            raise AssertionError(f"WCL must not be called on a cache hit (tried {name})")
+
+    path = str(tmp_path / "cache.json")
+    PerformanceAnalyzer(cfg, wcl=None).save_cache(path, {"thrall-malganis": RawMetrics(fights=9)})
+
+    analyzer = PerformanceAnalyzer(cfg, wcl=ExplodingClient())
+    raws = analyzer.aggregate_season(roster=[], cache_path=path)
+    assert raws["thrall-malganis"].fights == 9
