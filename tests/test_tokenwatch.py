@@ -1,6 +1,8 @@
 """Tests for the WoW Token sell-alert logic."""
 
-from tokenwatch import TokenWatch, evaluate, should_rearm
+import pytest
+
+from tokenwatch import TokenWatch, evaluate, format_alert, format_status, parse_threshold, should_rearm
 
 
 def test_defaults_are_disabled():
@@ -116,3 +118,55 @@ def test_worked_sequence_from_the_spec():
         assert fired == (expected * G if expected is not None else None), f"at {gold:,}g"
         if fired is not None:
             w.last_alert = fired
+
+
+def test_parse_threshold_accepts_plain_and_comma_formatted():
+    assert parse_threshold("300000") == 300_000 * G
+    assert parse_threshold("300,000") == 300_000 * G
+    assert parse_threshold("  300000  ") == 300_000 * G
+
+
+def test_parse_threshold_off_returns_none():
+    assert parse_threshold("off") is None
+    assert parse_threshold("OFF") is None
+
+
+def test_parse_threshold_rejects_garbage():
+    for bad in ["abc", "", "300.5", "-5", "0", "3e5"]:
+        with pytest.raises(ValueError):
+            parse_threshold(bad)
+
+
+def test_format_alert_first_crossing_mentions_crossing():
+    text = format_alert(300_000 * G, 290_000 * G, None)
+    assert "300,000g" in text
+    assert "290,000g" in text
+    assert "Crossed your threshold" in text
+
+
+def test_format_alert_new_high_shows_delta():
+    text = format_alert(310_000 * G, 290_000 * G, 300_000 * G)
+    assert "310,000g" in text
+    assert "10,000g" in text          # the delta since the last alert
+    assert "Crossed your threshold" not in text
+
+
+def test_format_status_disabled():
+    assert "disabled" in format_status(TokenWatch(), 275_828 * G).lower()
+
+
+def test_format_status_armed():
+    text = format_status(TokenWatch(threshold=290_000 * G), 275_828 * G)
+    assert "armed" in text
+    assert "290,000g" in text
+    assert "275,828g" in text
+
+
+def test_format_status_alerted():
+    text = format_status(TokenWatch(threshold=290_000 * G, last_alert=300_000 * G), 305_000 * G)
+    assert "alerted at" in text
+    assert "300,000g" in text
+
+
+def test_format_status_handles_unavailable_price():
+    assert "unavailable" in format_status(TokenWatch(), None)

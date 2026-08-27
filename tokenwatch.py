@@ -12,6 +12,8 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
+from watchlist import format_gold
+
 logger = logging.getLogger("discord")
 
 TOKEN_FILE = "token_watch.json"
@@ -90,3 +92,41 @@ def should_rearm(watch: TokenWatch, price: int) -> bool:
     does not rewrite the state file on every poll.
     """
     return watch.threshold is not None and watch.last_alert is not None and price < watch.threshold
+
+
+def parse_threshold(arg: str) -> Optional[int]:
+    """Parse a !tokenalert argument into copper.
+
+    Returns None for the literal "off" (disable). Raises ValueError for anything
+    that is not "off" or a positive whole number of gold, so the caller can reply
+    with usage text instead of silently accepting nonsense.
+    """
+    cleaned = arg.strip().replace(",", "")
+    if cleaned.lower() == "off":
+        return None
+    gold = int(cleaned)  # raises ValueError on garbage, decimals, or empty input
+    if gold <= 0:
+        raise ValueError("threshold must be a positive number of gold")
+    return gold * COPPER_PER_GOLD
+
+
+def format_alert(price: int, threshold: int, previous: Optional[int]) -> str:
+    """The sell-signal DM. `previous` is the last alerted price, or None on first crossing."""
+    lines = [
+        "💰 **WoW Token — sell signal**",
+        f"Price: **{format_gold(price)}**  (threshold: {format_gold(threshold)})",
+    ]
+    if previous is None:
+        lines.append("Crossed your threshold.")
+    else:
+        lines.append(f"▲ {format_gold(price - previous)} since your last alert.")
+    return "\n".join(lines)
+
+
+def format_status(watch: TokenWatch, price: Optional[int]) -> str:
+    """The !token reply: current price plus threshold and ratchet state."""
+    now_line = f"WoW Token: **{format_gold(price)}**" if price is not None else "WoW Token: price unavailable"
+    if watch.threshold is None:
+        return f"{now_line}\nAlerts disabled. Set one with `!tokenalert <gold>`."
+    state = "armed (waiting to cross)" if watch.last_alert is None else f"alerted at {format_gold(watch.last_alert)}"
+    return f"{now_line}\nThreshold: {format_gold(watch.threshold)} — {state}."
