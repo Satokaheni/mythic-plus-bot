@@ -1553,6 +1553,57 @@ class MyClient(discord.Client):
             await message.author.send("**Watched items:**\n" + "\n".join(lines))
             return
 
+        if message.content.startswith("!tokenalert") and message.author.id == BANKER_ID:
+            if message.guild is not None:
+                try:
+                    await message.delete()
+                except (discord.Forbidden, discord.NotFound):
+                    pass
+            parts = message.content.split(maxsplit=1)
+            if len(parts) < 2:
+                await message.author.send(
+                    "Usage: `!tokenalert <gold>` (e.g. `!tokenalert 300000`) or `!tokenalert off`."
+                )
+                return
+            try:
+                threshold = tokenwatch.parse_threshold(parts[1])
+            except ValueError:
+                await message.author.send(
+                    f"`{parts[1].strip()}` isn't a valid gold amount. "
+                    "Use `!tokenalert 300000`, `!tokenalert 300,000`, or `!tokenalert off`."
+                )
+                return
+            # Setting or clearing a threshold always re-arms, so a new threshold never
+            # inherits a stale ratchet position from the previous one.
+            self.token_watch.threshold = threshold
+            self.token_watch.last_alert = None
+            self.token_watch.save()
+            if threshold is None:
+                await message.author.send("🔕 WoW Token alerts disabled.")
+            else:
+                await message.author.send(
+                    f"💰 WoW Token alert set: I'll DM you when the price rises above "
+                    f"**{watchlist.format_gold(threshold)}**."
+                )
+            return
+
+        if message.content == "!token" and message.author.id == BANKER_ID:
+            if message.guild is not None:
+                try:
+                    await message.delete()
+                except (discord.Forbidden, discord.NotFound):
+                    pass
+            price = None
+            try:
+                async with aiohttp.ClientSession() as session:
+                    result = await self.blizzard.token_price(session)
+                if result is not None:
+                    price = result[0]
+            except Exception as exc:  # noqa: BLE001 - report state even if the API is down
+                logger.warning("!token: could not fetch token price: %s", exc)
+            await message.author.send(tokenwatch.format_status(self.token_watch, price))
+            return
+
         if message.content.startswith("!snipe ") and not message.content.startswith("!snipepet "):
             args = message.content.split()[1:]
             if len(args) < 2 or not args[0].isdigit():
@@ -1665,6 +1716,15 @@ class MyClient(discord.Client):
                     "`!watch <id1> <id2> …` — watch several at once\n"
                     "`!unwatch <itemId …>` — stop watching\n"
                     "`!watches` — list your watches"
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name="🪙 WoW Token — sell signal (banker)",
+                value=(
+                    "`!token` — current token price and your alert state\n"
+                    "`!tokenalert <gold>` — DM me when the price rises above this\n"
+                    "`!tokenalert off` — disable token alerts"
                 ),
                 inline=False,
             )
