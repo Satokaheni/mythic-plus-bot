@@ -195,8 +195,6 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-from watchlist import format_gold
-
 logger = logging.getLogger("discord")
 
 TOKEN_FILE = "token_watch.json"
@@ -246,12 +244,16 @@ class TokenWatch:
             return cls()
 ```
 
-`format_gold` is imported now and used in Task 4. Ruff's `F401` would flag it as unused at this point, so complete Task 4 before running a full lint; the tests in this task do not lint.
+Do **not** import `format_gold` yet — nothing in this task uses it, and ruff's `F401`
+would fail. Task 4 adds the import in the same edit that first uses it.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Run tests and lint**
 
 Run: `python -m pytest tests/test_tokenwatch.py -v`
 Expected: PASS — 6 tests
+
+Run: `python -m ruff check tokenwatch.py tests/test_tokenwatch.py`
+Expected: no findings
 
 - [ ] **Step 5: Commit**
 
@@ -488,7 +490,16 @@ Expected: FAIL — `ImportError: cannot import name 'parse_threshold' from 'toke
 
 - [ ] **Step 3: Write minimal implementation**
 
-Append to `tokenwatch.py`:
+First add the `format_gold` import to `tokenwatch.py`, after the `typing` import and
+separated by a blank line (ruff rule `I` requires first-party imports in their own block):
+
+```python
+from typing import Optional
+
+from watchlist import format_gold
+```
+
+Then append to `tokenwatch.py`:
 
 ```python
 def parse_threshold(arg: str) -> Optional[int]:
@@ -760,19 +771,7 @@ Expected: PASS — no regressions
 Run: `python -m ruff check bot.py`
 Expected: no findings
 
-- [ ] **Step 4: Manual smoke test**
-
-Restart the bot, then DM it:
-1. `!token` → replies with the live price and "Alerts disabled".
-2. `!tokenalert 1` → sets a 1g threshold (guaranteed to be under the real price).
-3. Within 20 minutes the poll fires and DMs a sell signal reading "Crossed your threshold."
-4. `!token` → now shows "alerted at <price>".
-5. `!tokenalert off` → replies "🔕 WoW Token alerts disabled."
-6. `!tokenalert abc` → replies with the usage error.
-
-Confirm `token_watch.json` exists and contains the expected `threshold` / `last_alert`.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add bot.py
