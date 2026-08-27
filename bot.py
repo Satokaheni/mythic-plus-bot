@@ -19,6 +19,7 @@ import eventlog
 import forecast
 import raiderio
 import snipelist as snipelist_mod
+import tokenwatch
 import undermine
 import watchlist
 from raider import Raider
@@ -84,6 +85,8 @@ BLIZZ_CLIENT_ID = _require_env("BLIZZ_CLIENT_ID")
 BLIZZ_CLIENT_SECRET = _require_env("BLIZZ_CLIENT_SECRET")
 os.environ.setdefault("BLIZZ_REGION", os.getenv("BLIZZ_REGION", "us"))
 SNIPE_SWEEP_MINUTES = 30
+# Blizzard refreshes the WoW Token price roughly every 20 minutes.
+TOKEN_POLL_MINUTES = 20
 MYTHIC_PLUS_ID = int(_require_env("MYTHIC_PLUS_ID"))
 ADMINS = [int(id_str) for id_str in _require_env("ADMIN_ID").split(",") if id_str.strip().isdigit()]
 ELEVATED_IDS = {COORDINATOR_ID} | set(ADMINS)
@@ -900,6 +903,51 @@ class MyClient(discord.Client):
 
         self.watchlist.save()
 
+    @tasks.loop(minutes=TOKEN_POLL_MINUTES)
+    async def token_watch_check(self):
+        """Poll the WoW Token price; DM the banker when it rises past their sell threshold."""
+        if not self.is_ready():
+            logger.warning("token_watch_check: Bot not ready yet, skipping this iteration")
+            return
+        if self.token_watch.threshold is None:
+            return
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                result = await self.blizzard.token_price(session)
+            if result is None:
+                logger.warning("token_watch_check: token payload carried no price, skipping")
+                return
+            price, _updated = result
+
+            # Price fell back under the threshold: reset the ratchet so the next
+            # crossing alerts again. Guarded so a quiet sub-threshold price does
+            # not rewrite the state file every 20 minutes.
+            if tokenwatch.should_rearm(self.token_watch, price):
+                self.token_watch.last_alert = None
+                self.token_watch.save()
+                return
+
+            report = tokenwatch.evaluate(self.token_watch, price)
+            if report is None:
+                return
+
+            banker = await self.fetch_user(BANKER_ID)
+            try:
+                await banker.send(
+                    tokenwatch.format_alert(report, self.token_watch.threshold, self.token_watch.last_alert)
+                )
+            except discord.HTTPException:
+                logger.warning("token_watch_check: could not DM banker; not advancing the ratchet")
+                return
+
+            # Commit the ratchet only after the DM actually landed, so a Discord
+            # failure cannot silently swallow an alert the owner never saw.
+            self.token_watch.last_alert = report
+            self.token_watch.save()
+        except Exception as exc:  # noqa: BLE001 - a bad poll must not kill the loop
+            logger.warning("token_watch_check failed: %s", exc)
+
     @tasks.loop(minutes=SNIPE_SWEEP_MINUTES)
     async def auction_snipe_check(self):
         """Sweep every region realm; DM subscribers when a snipe's cheapest price beats target."""
@@ -1299,6 +1347,7 @@ class MyClient(discord.Client):
         self.watchlist = Watchlist.load()
         self.blizzard = blizzard.BlizzardClient()
         self.snipelist = snipelist_mod.Snipelist.load()
+        self.token_watch = tokenwatch.TokenWatch.load()
         self._snipe_realm_ids: list = []  # cached connected-realm ids
         self._snipe_price_cache: dict = {}  # realm_id -> {(kind,key_id): (price, qty)}
         self._snipe_realm_modified: dict = {}  # realm_id -> Last-Modified str
@@ -1338,6 +1387,10 @@ class MyClient(discord.Client):
         # Start 30-minute auction snipe sweep
         if not self.auction_snipe_check.is_running():
             self.auction_snipe_check.start()
+
+        # Start 20-minute WoW Token sell-signal poll
+        if not self.token_watch_check.is_running():
+            self.token_watch_check.start()
 
     async def on_ready(self):
         """Called when the bot is ready. Loads state from file."""
