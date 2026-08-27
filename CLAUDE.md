@@ -210,6 +210,7 @@ In `manage_button` (views.py):
 - Legacy `state.pkl` migration supported
 - Price-watch state is persisted separately to `watches.json` (see `watchlist.py`)
 - Auction-snipe state is persisted separately to `snipes.json` (see `snipelist.py`)
+- Token sell-alert state is persisted separately to `token_watch.json` (see `tokenwatch.py`)
 - Event log is persisted separately to `events.jsonl` (gitignored, append-only JSONL, see `eventlog.py`) — not part of `state.json` and not migrated
 
 ---

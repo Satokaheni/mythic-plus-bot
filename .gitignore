@@ -29,6 +29,8 @@ watches.json
 watches.json.tmp
 snipes.json
 snipes.json.tmp
+token_watch.json
+token_watch.json.tmp
 events.jsonl
 character_mappings.json
 lootcouncil_cache.json
