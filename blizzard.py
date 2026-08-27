@@ -59,6 +59,17 @@ def _parse_realm_name(data: dict) -> str:
     return realms[0].get("name", "") if realms else ""
 
 
+def _parse_token_price(data: dict) -> Optional[Tuple[int, int]]:
+    """Parse a WoW Token index payload into (price_copper, last_updated_ms).
+
+    Returns None when the payload carries no price, so a malformed or partial
+    response is skipped rather than raising inside the poll loop.
+    """
+    if "price" not in data:
+        return None
+    return int(data["price"]), int(data.get("last_updated_timestamp", 0))
+
+
 class BlizzardClient:
     """Holds the OAuth token + name caches for the Auction House sweep.
 
@@ -152,3 +163,13 @@ class BlizzardClient:
             name = _parse_realm_name(await resp.json()) or f"Realm {connected_realm_id}"
         self._realm_name_cache[connected_realm_id] = name
         return name
+
+    async def token_price(self, session: aiohttp.ClientSession) -> Optional[Tuple[int, int]]:
+        """Current WoW Token price in copper, plus Blizzard's update timestamp (ms epoch).
+
+        The token is not an auction-house commodity — it has its own endpoint, and it
+        is region-wide, so there is no realm parameter.
+        """
+        async with await self._get(session, "/data/wow/token/index", "dynamic") as resp:
+            resp.raise_for_status()
+            return _parse_token_price(await resp.json())

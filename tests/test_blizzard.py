@@ -1,6 +1,13 @@
 """Tests for the pure parsers of the Blizzard Game Data client."""
 
-from blizzard import _parse_auctions, _parse_item_info, _parse_realm_index, _parse_realm_name, _parse_token
+from blizzard import (
+    _parse_auctions,
+    _parse_item_info,
+    _parse_realm_index,
+    _parse_realm_name,
+    _parse_token,
+    _parse_token_price,
+)
 
 
 def test_parse_token():
@@ -32,3 +39,13 @@ def test_parse_item_info_recipe_flag():
 def test_parse_realm_name():
     assert _parse_realm_name({"realms": [{"name": "Illidan"}, {"name": "Other"}]}) == "Illidan"
     assert _parse_realm_name({"realms": []}) == ""
+
+
+def test_parse_token_price():
+    data = {"_links": {}, "last_updated_timestamp": 1756328236000, "price": 2758280000}
+    assert _parse_token_price(data) == (2758280000, 1756328236000)
+
+
+def test_parse_token_price_missing_price_returns_none():
+    assert _parse_token_price({"_links": {}, "last_updated_timestamp": 1756328236000}) is None
+    assert _parse_token_price({}) is None
