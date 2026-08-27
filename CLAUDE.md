@@ -27,6 +27,7 @@ A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Myt
 | `watchlist.py` | `Watch`/`Watchlist` classes — price-watch state, buy-signal detection, formatters |
 | `blizzard.py` | Blizzard Game Data Auction House API client |
 | `snipelist.py` | `Snipe`/`Snipelist` classes — auction-snipe state, per-realm detection, alert planning |
+| `tokenwatch.py` | `TokenWatch` — WoW Token sell-threshold state, ratchet detection, formatters |
 | `raiderio.py` | Raider.io client + daily harvester seeding raiderio_run events |
 | `forecast.py` | Availability predictor + roster/slot optimizer + dry-run preview formatter |
 | `version.txt` | Current version string (triggers changelog DM on startup if changed) |
@@ -141,6 +142,23 @@ Open-to-all feature for tracking per-realm items (recipes, battle pets, mounts, 
 - Commands (open to all): `!snipe <itemId> <maxGold> [label]` (track a single item, e.g. `!snipe 215147 5000 Vibrant Shard`), `!snipepet <speciesId> <maxGold> [label]` (track a battle pet by species ID), `!unsnipe <id ...>` (unwatch one or more items), `!snipes` (list your tracked items with current cheapest prices).
 - Requires `BLIZZ_CLIENT_ID` and `BLIZZ_CLIENT_SECRET` from developing a client at develop.battle.net, plus optional `BLIZZ_REGION` (default `us`).
 
+### WoW Token Sell Alert (Blizzard)
+Owner-only feature gated to `BANKER_ID` — tracks the region's WoW Token price via Blizzard's
+`/data/wow/token/index` endpoint (region from `BLIZZ_REGION`, reusing the existing
+`BLIZZ_CLIENT_ID`/`BLIZZ_CLIENT_SECRET` credentials; no new env vars).
+- `token_watch_check` — a 20-minute background task (Blizzard refreshes the price about that
+  often) that fetches the current price and evaluates a **fixed-threshold sell signal**.
+- **Ratchet** — fires on the first crossing above the owner's threshold, then only on new highs
+  at least `STEP_COPPER` (10,000g) above the last alerted price. Because `last_alert` only moves
+  upward while above the threshold, a dip-and-reclimb stays silent until it beats the last
+  reported high. Falling back below the threshold re-arms it.
+- **No price history and no quiet hours** — deliberate scope decisions. The endpoint returns only
+  a current price, the fixed threshold needs no baseline, and the owner wants alerts at any hour.
+- **DM-before-commit** — `last_alert` is persisted only after the DM is delivered, so a Discord
+  failure cannot silently swallow an alert.
+- State persisted to `token_watch.json` (two fields: `threshold`, `last_alert`).
+- Commands: `!token`, `!tokenalert <gold>`, `!tokenalert off` — DM or key-channel, banker-only.
+
 ### Help Command
 `!help` / `!tools` — list all bot commands by category (scheduling, price watch, auction sniper, account) with usage and permissions.
 
@@ -236,6 +254,8 @@ RAIDERIO_REGION       Raider.io region (default: us)
 | `!watch <itemId> [-x<qty>] [label]`<br>`!watch <id1> -x<qty> <id2> -x<qty> ...` | KEY/DM | Banker | Watch an item (optional bulk target via `-x`), or several at once with per-item targets |
 | `!unwatch <itemId>` | KEY/DM | Banker | Stop watching an item |
 | `!watches` | KEY/DM | Banker | List currently watched items |
+| `!token` | KEY/DM | Banker | Show current WoW Token price and alert state |
+| `!tokenalert <gold>` | KEY/DM | Banker | DM when the token price rises above this (`off` to disable) |
 | `!snipe <itemId> <maxGold> [label]` | KEY/DM | Anyone | Track an item on all realms, alert when price drops below target |
 | `!snipepet <speciesId> <maxGold> [label]` | KEY/DM | Anyone | Track a battle pet species on all realms |
 | `!unsnipe <id ...>` | KEY/DM | Anyone | Stop watching one or more items |
