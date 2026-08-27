@@ -56,6 +56,6 @@ class TokenWatch:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return cls.from_dict(data.get("token_watch", {}))
-        except (json.JSONDecodeError, ValueError, TypeError, AttributeError, OSError) as exc:
+        except (json.JSONDecodeError, ValueError, TypeError, AttributeError, OSError, OverflowError) as exc:
             logger.warning("Error loading %s: %s. Token alerts start disabled.", path, exc)
             return cls()

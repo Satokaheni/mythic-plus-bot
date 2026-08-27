@@ -34,3 +34,9 @@ def test_load_corrupt_file_returns_disabled(tmp_path):
     path = tmp_path / "bad.json"
     path.write_text("{ not json at all", encoding="utf-8")
     assert TokenWatch.load(str(path)) == TokenWatch()
+
+
+def test_load_infinite_threshold_returns_disabled(tmp_path):
+    path = tmp_path / "inf.json"
+    path.write_text('{"token_watch": {"threshold": Infinity}}', encoding="utf-8")
+    assert TokenWatch.load(str(path)) == TokenWatch()
