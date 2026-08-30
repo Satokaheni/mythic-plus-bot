@@ -977,7 +977,9 @@ In the `!help` / `!tools` embed, add a field after the scheduling block:
 
 - [ ] **Step 5: Verify the module imports and the suite still passes**
 
-Run: `python -c "import bot"` — expected: no output (it must not raise; `.env` is present locally).
+Run: `python -m py_compile bot.py` — expected: no output.
+Run: `python -c "import ast; ast.parse(open('bot.py', encoding='utf-8').read())"` — expected: no output.
+**Never run `python -c "import bot"` or `python bot.py`.** `bot.py` has no `if __name__ == "__main__"` guard: `client.run(...)` executes at import, so importing it starts the live bot against the real Discord server — posting the changelog, DMing users, and rewriting `version.txt`.
 Run: `python -m pytest -q` — expected: PASS.
 Run: `python -m ruff check .` — expected: no violations (import order in particular).
 
