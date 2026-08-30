@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 import blizzard
 import eventlog
 import forecast
+import gearaudit
 import raiderio
 import snipelist as snipelist_mod
 import tokenwatch
@@ -80,6 +81,7 @@ BANKER_ID = int(_require_env("BANKER_ID"))
 BANKER_BUDGET_COPPER = int(os.getenv("BANKER_BUDGET_GOLD", "100000")) * 10000
 # Default bulk order size the price-watch buy signal targets (per-item overridable via `!watch -x`).
 BANKER_BULK_QTY = int(os.getenv("BANKER_BULK_QTY", "100"))
+GEAR_AUDIT_CONCURRENCY = 5  # Parallel Blizzard profile fetches; the roster is ~30 characters.
 # Blizzard Game Data API — server-specific auction sniper (see snipes.json).
 BLIZZ_CLIENT_ID = _require_env("BLIZZ_CLIENT_ID")
 BLIZZ_CLIENT_SECRET = _require_env("BLIZZ_CLIENT_SECRET")
@@ -1433,6 +1435,54 @@ class MyClient(discord.Client):
                 await button_msg.pin()
                 logger.info("on_ready: posted and pinned missing key request button in KEY_CHANNEL")
 
+    async def _run_gear_audit(
+        self, mappings: List[dict]
+    ) -> Tuple[List[gearaudit.CharacterFindings], List[Tuple[str, str]]]:
+        """Fetch and audit every mapped character. Returns (findings, failures).
+
+        One character's failure never ends the sweep — it is collected and reported, since a
+        404 usually means a rename or transfer the mapping file hasn't caught up with.
+        """
+        semaphore = asyncio.Semaphore(GEAR_AUDIT_CONCURRENCY)
+        findings: List[gearaudit.CharacterFindings] = []
+        failures: List[Tuple[str, str]] = []
+
+        async with aiohttp.ClientSession() as session:
+
+            async def audit_one(entry: dict) -> None:
+                character = entry.get("character") or ""
+                realm_slug = entry.get("realm_slug") or ""
+                realm_name = entry.get("realm_name") or realm_slug
+                if not character or not realm_slug:
+                    # Report it rather than dropping it silently — a half-filled mapping entry is
+                    # exactly the kind of drift this command is meant to surface.
+                    failures.append((character or "(unnamed entry)", realm_name or "?"))
+                    return
+                # The semaphore wraps the whole body, not just the equipment fetch: the per-gem
+                # item_info lookups are Blizzard calls too, and bounding only the first request
+                # would let ~30 characters' worth of gem lookups fan out at once.
+                async with semaphore:
+                    try:
+                        items = await self.blizzard.character_equipment(session, realm_slug, character)
+                    except Exception as exc:  # noqa: BLE001 - one bad character must not end the sweep
+                        logger.warning("gearaudit: %s/%s failed: %s", realm_slug, character, exc)
+                        failures.append((character, realm_name))
+                        return
+                    if items is None:
+                        failures.append((character, realm_name))
+                        return
+                    gem_quality: Dict[int, str] = {}
+                    for gem_id in gearaudit.gem_ids(items):
+                        try:
+                            gem_quality[gem_id] = (await self.blizzard.item_info(session, gem_id)).quality
+                        except Exception as exc:  # noqa: BLE001 - an unknown gem is simply not graded
+                            logger.warning("gearaudit: gem %s lookup failed: %s", gem_id, exc)
+                    findings.append(gearaudit.audit_character(character, realm_name, items, gem_quality))
+
+            await asyncio.gather(*(audit_one(entry) for entry in mappings))
+
+        return findings, failures
+
     # ---------------------------
     # Message Listener
     # ---------------------------
@@ -1551,6 +1601,32 @@ class MyClient(discord.Client):
                         sig = None
                     lines.append(watchlist.format_watch_line(watch, sig))
             await message.author.send("**Watched items:**\n" + "\n".join(lines))
+            return
+
+        if message.content.startswith("!gearaudit") and message.author.id in ELEVATED_IDS:
+            if message.guild is not None:
+                try:
+                    await message.delete()
+                except (discord.Forbidden, discord.NotFound):
+                    pass
+            wanted = message.content[len("!gearaudit"):].strip()
+            mappings = raiderio.load_character_mappings()
+            if wanted:
+                mappings = [m for m in mappings if (m.get("character") or "").lower() == wanted.lower()]
+                if not mappings:
+                    await message.author.send(f"No mapping for `{wanted}`.")
+                    return
+            if not mappings:
+                await message.author.send("No characters are mapped, so there is nothing to audit.")
+                return
+            try:
+                findings, failures = await self._run_gear_audit(mappings)
+            except Exception as exc:  # noqa: BLE001 - a failed audit must not kill on_message
+                logger.warning("gearaudit failed: %s", exc)
+                await message.author.send("The gear audit failed. Check the logs.")
+                return
+            for chunk in gearaudit.format_report(findings, failures):
+                await message.author.send(chunk)
             return
 
         if message.content.startswith("!tokenalert") and message.author.id == BANKER_ID:
@@ -1706,6 +1782,15 @@ class MyClient(discord.Client):
                     "`!avail` — post the weekly availability message\n"
                     "`!setup` — re-post the key-request button\n"
                     "`!cleanup` — purge the channel and reset state"
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name="🔍 Gear Audit (coordinator/admin)",
+                value=(
+                    "`!gearaudit` — check every mapped character for missing enchants, "
+                    "empty sockets, and low-quality enchants/gems\n"
+                    "`!gearaudit <character>` — check one character"
                 ),
                 inline=False,
             )
