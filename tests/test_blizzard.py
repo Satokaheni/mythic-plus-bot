@@ -100,3 +100,17 @@ def test_parse_equipment_tolerates_missing_and_malformed_entries():
     assert items[0].enchants == ()
     assert items[0].sockets == ()
     assert _parse_equipment({}) == []
+
+
+def test_parse_item_info_reads_quality():
+    data = {"name": "Flawless Deadly Peridot", "item_class": {"id": 3}, "quality": {"type": "EPIC"}}
+    info = _parse_item_info(data)
+    assert info.name == "Flawless Deadly Peridot"
+    assert info.is_recipe is False
+    assert info.quality == "EPIC"
+
+
+def test_parse_item_info_quality_defaults_to_empty():
+    info = _parse_item_info({"name": "Mystery Item", "item_class": {"id": 9}})
+    assert info.is_recipe is True
+    assert info.quality == ""
