@@ -154,3 +154,64 @@ def audit_character(
         empty_sockets=empty_sockets,
         low_gems=low_gems,
     )
+
+
+MAX_MESSAGE_CHARS = 1900  # Discord's hard limit is 2000; leave room for the trailing newline.
+
+GUILD_BANK_LINE = "Enchants and gems are free in the guild bank — grab what you need."
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def format_character_line(findings: CharacterFindings) -> str:
+    """One report line for a character with at least one problem."""
+    bits: List[str] = []
+    if findings.missing_enchants:
+        bits.append("missing " + ", ".join(slot_label(s) for s in findings.missing_enchants))
+    if findings.empty_sockets:
+        bits.append(_plural(findings.empty_sockets, "empty socket"))
+    if findings.low_enchants:
+        bits.append("Tier 1 enchant on " + ", ".join(slot_label(s) for s, _ in findings.low_enchants))
+    if findings.low_gems:
+        bits.append(_plural(len(findings.low_gems), "low-quality gem"))
+    return f"**{findings.name}** ({findings.realm}) — " + "; ".join(bits)
+
+
+def _chunk(lines: Sequence[str]) -> List[str]:
+    """Pack lines into messages under Discord's limit, never splitting a line."""
+    chunks: List[str] = []
+    current: List[str] = []
+    length = 0
+    for line in lines:
+        if current and length + len(line) + 1 > MAX_MESSAGE_CHARS:
+            chunks.append("\n".join(current))
+            current, length = [], 0
+        current.append(line)
+        length += len(line) + 1
+    if current:
+        chunks.append("\n".join(current))
+    return chunks or [""]
+
+
+def format_report(
+    findings: Sequence[CharacterFindings],
+    failures: Sequence[Tuple[str, str]],
+) -> List[str]:
+    """The officer-facing report, worst-first, split into sendable chunks."""
+    problems = sorted(
+        (f for f in findings if not f.is_clean),
+        key=lambda f: (-f.problem_count, f.name.lower()),
+    )
+    clean = len(findings) - len(problems)
+    lines = [f"**Gear Audit** — {len(problems)} of {len(findings)} characters need something", ""]
+    lines.extend(format_character_line(f) for f in problems)
+    if clean:
+        lines.extend(["", f"{_plural(clean, 'character')} clean."])
+    if failures:
+        lines.append("")
+        for character, realm in failures:
+            lines.append(f"Could not fetch: {character} ({realm}) — check the mapping.")
+    lines.extend(["", GUILD_BANK_LINE])
+    return _chunk(lines)

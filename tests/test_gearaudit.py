@@ -3,8 +3,12 @@
 from blizzard import Enchant, EquippedItem
 from gearaudit import (
     ENCHANTABLE_SLOTS,
+    MAX_MESSAGE_CHARS,
+    CharacterFindings,
     audit_character,
     enchantable_slots,
+    format_character_line,
+    format_report,
     gem_ids,
     parse_enchant_tier,
 )
@@ -122,3 +126,68 @@ def test_problem_count_sums_every_kind():
     items += [item("HEAD"), item("NECK", sockets=(None, 111))]
     findings = audit_character("Messy", "Mal'Ganis", items, {111: "RARE"})
     assert findings.problem_count == 3  # 1 missing enchant + 1 empty socket + 1 low gem
+
+
+def a_finding(name, missing=(), low_enchants=(), empty_sockets=0, low_gems=(), realm="Mal'Ganis"):
+    return CharacterFindings(
+        name=name, realm=realm, missing_enchants=list(missing), low_enchants=list(low_enchants),
+        empty_sockets=empty_sockets, low_gems=list(low_gems),
+    )
+
+
+def test_format_character_line_uses_friendly_slot_names():
+    line = format_character_line(a_finding("Talvan", missing=["HEAD", "FINGER_1", "MAIN_HAND"]))
+    assert "**Talvan** (Mal'Ganis)" in line
+    assert "missing Head, Ring 1, Weapon" in line
+
+
+def test_format_character_line_pluralizes_sockets():
+    assert "1 empty socket" in format_character_line(a_finding("A", empty_sockets=1))
+    assert "2 empty sockets" in format_character_line(a_finding("B", empty_sockets=2))
+
+
+def test_format_character_line_reports_every_kind():
+    line = format_character_line(
+        a_finding("Messy", missing=["HEAD"], low_enchants=[("CHEST", 1)], empty_sockets=1, low_gems=[("NECK", "RARE")])
+    )
+    assert "missing Head" in line
+    assert "Tier 1 enchant on Chest" in line
+    assert "1 empty socket" in line
+    assert "1 low-quality gem" in line
+
+
+def test_format_report_sorts_worst_first_then_by_name():
+    chunks = format_report(
+        [
+            a_finding("Talvan", missing=["HEAD"]),
+            a_finding("Desdemona", missing=["HEAD", "SHOULDER", "LEGS"]),
+            a_finding("Bitterbee", empty_sockets=1),
+            a_finding("Clean"),
+        ],
+        [],
+    )
+    body = "\n".join(chunks)
+    assert body.index("Desdemona") < body.index("Bitterbee") < body.index("Talvan")
+    assert "3 of 4 characters need something" in body
+    assert "1 character clean." in body
+
+
+def test_format_report_lists_failures_and_guild_bank_line():
+    chunks = format_report([a_finding("Clean")], [("Ghost", "Mal'Ganis")])
+    body = "\n".join(chunks)
+    assert "Could not fetch: Ghost (Mal'Ganis)" in body
+    assert "guild bank" in body
+
+
+def test_format_report_handles_an_empty_roster():
+    chunks = format_report([], [])
+    assert len(chunks) == 1
+    assert "0 of 0" in chunks[0]
+
+
+def test_format_report_chunks_long_output():
+    many = [a_finding(f"Character{n:03d}", missing=["HEAD", "SHOULDER", "LEGS", "FEET"]) for n in range(120)]
+    chunks = format_report(many, [])
+    assert len(chunks) > 1
+    assert all(len(chunk) <= MAX_MESSAGE_CHARS for chunk in chunks)
+    assert "Character119" in "\n".join(chunks)
