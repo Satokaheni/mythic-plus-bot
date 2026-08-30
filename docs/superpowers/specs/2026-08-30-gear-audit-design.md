@@ -183,8 +183,10 @@ a thin command in `bot.py`.
 
 ### `bot.py` (modified)
 
-`!gearaudit [character]`, gated to `self.elevated_ids`, allowed in the key
-channel or a DM — the same gate and channel rule `!watch` uses.
+`!gearaudit [character]`, gated on `message.author.id in ELEVATED_IDS` (the
+module-level constant `!cleanup` uses, not the `self.elevated_ids` copy). Like
+`!watch` and `!token`, it works anywhere the author can reach the bot, deletes
+its own invocation in a guild channel, and replies by DM.
 
 Flow: `raiderio.load_character_mappings()` → filter to one character if an
 argument was given → open one `aiohttp.ClientSession` → fetch equipment with an

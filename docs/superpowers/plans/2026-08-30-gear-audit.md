@@ -19,7 +19,7 @@
 - **Do NOT modify `version.txt`.** The bot writes it after posting the changelog; editing it by hand suppresses that post. `CHANGELOG.md` *is* updated (Task 7), under the existing unreleased `[1.9.0]` heading.
 - **Do not commit** `practice.py`, `test.py`, or `version.txt` — unrelated in-flight work in the same worktree. Always `git add` explicit paths, never `git add -A` or `git add .`.
 - **`character_mappings.json` is gitignored** and must not be committed or modified by this work. It currently holds 30 entries matching the Midnight S2 roster.
-- **`pyproject.toml` is deliberately not modified.** Its `py-modules` list already omits `blizzard`, `snipelist`, `raiderio`, and `forecast`; the bot runs as flat modules and is not pip-installed, so leaving `gearaudit` out is consistent with existing practice.
+- **`pyproject.toml` is deliberately not modified.** Its `py-modules` list already omits `blizzard`, `snipelist`, and `tokenwatch`; the bot runs as flat modules and is not pip-installed, so leaving `gearaudit` out is consistent with existing practice.
 - **Enchant tier cap this expansion is Tier 2** (`MAX_ENCHANT_TIER = 2`). Flag Tier 1 only. Every enchant on the live roster measured 2026-08-30 was Tier 2; a "below max rank" rule would flag all 30 characters.
 - **Enchantable slots:** `HEAD, SHOULDER, CHEST, LEGS, FEET, FINGER_1, FINGER_2, MAIN_HAND`, plus `OFF_HAND` only when the equipped off-hand is a weapon (`item_class.id == 2`).
 - **No DMs to audited players and no opt-out state.** The report goes to the officer who ran the command.
@@ -682,7 +682,7 @@ git commit -m "feat: audit a character's enchants, sockets, and gems"
 Append to `tests/test_gearaudit.py` (add `CharacterFindings`, `format_character_line`, `format_report` to the `gearaudit` import):
 
 ```python
-def findings(name, missing=(), low_enchants=(), empty_sockets=0, low_gems=(), realm="Mal'Ganis"):
+def a_finding(name, missing=(), low_enchants=(), empty_sockets=0, low_gems=(), realm="Mal'Ganis"):
     return CharacterFindings(
         name=name, realm=realm, missing_enchants=list(missing), low_enchants=list(low_enchants),
         empty_sockets=empty_sockets, low_gems=list(low_gems),
@@ -690,19 +690,19 @@ def findings(name, missing=(), low_enchants=(), empty_sockets=0, low_gems=(), re
 
 
 def test_format_character_line_uses_friendly_slot_names():
-    line = format_character_line(findings("Talvan", missing=["HEAD", "FINGER_1", "MAIN_HAND"]))
+    line = format_character_line(a_finding("Talvan", missing=["HEAD", "FINGER_1", "MAIN_HAND"]))
     assert "**Talvan** (Mal'Ganis)" in line
     assert "missing Head, Ring 1, Weapon" in line
 
 
 def test_format_character_line_pluralizes_sockets():
-    assert "1 empty socket" in format_character_line(findings("A", empty_sockets=1))
-    assert "2 empty sockets" in format_character_line(findings("B", empty_sockets=2))
+    assert "1 empty socket" in format_character_line(a_finding("A", empty_sockets=1))
+    assert "2 empty sockets" in format_character_line(a_finding("B", empty_sockets=2))
 
 
 def test_format_character_line_reports_every_kind():
     line = format_character_line(
-        findings("Messy", missing=["HEAD"], low_enchants=[("CHEST", 1)], empty_sockets=1, low_gems=[("NECK", "RARE")])
+        a_finding("Messy", missing=["HEAD"], low_enchants=[("CHEST", 1)], empty_sockets=1, low_gems=[("NECK", "RARE")])
     )
     assert "missing Head" in line
     assert "Tier 1 enchant on Chest" in line
@@ -713,10 +713,10 @@ def test_format_character_line_reports_every_kind():
 def test_format_report_sorts_worst_first_then_by_name():
     chunks = format_report(
         [
-            findings("Talvan", missing=["HEAD"]),
-            findings("Desdemona", missing=["HEAD", "SHOULDER", "LEGS"]),
-            findings("Bitterbee", empty_sockets=1),
-            findings("Clean"),
+            a_finding("Talvan", missing=["HEAD"]),
+            a_finding("Desdemona", missing=["HEAD", "SHOULDER", "LEGS"]),
+            a_finding("Bitterbee", empty_sockets=1),
+            a_finding("Clean"),
         ],
         [],
     )
@@ -727,7 +727,7 @@ def test_format_report_sorts_worst_first_then_by_name():
 
 
 def test_format_report_lists_failures_and_guild_bank_line():
-    chunks = format_report([findings("Clean")], [("Ghost", "Mal'Ganis")])
+    chunks = format_report([a_finding("Clean")], [("Ghost", "Mal'Ganis")])
     body = "\n".join(chunks)
     assert "Could not fetch: Ghost (Mal'Ganis)" in body
     assert "guild bank" in body
@@ -740,7 +740,7 @@ def test_format_report_handles_an_empty_roster():
 
 
 def test_format_report_chunks_long_output():
-    many = [findings(f"Character{n:03d}", missing=["HEAD", "SHOULDER", "LEGS", "FEET"]) for n in range(120)]
+    many = [a_finding(f"Character{n:03d}", missing=["HEAD", "SHOULDER", "LEGS", "FEET"]) for n in range(120)]
     chunks = format_report(many, [])
     assert len(chunks) > 1
     assert all(len(chunk) <= MAX_MESSAGE_CHARS for chunk in chunks)
@@ -897,7 +897,13 @@ Add this method to `MyClient`, next to the other private helpers:
                 realm_slug = entry.get("realm_slug") or ""
                 realm_name = entry.get("realm_name") or realm_slug
                 if not character or not realm_slug:
+                    # Report it rather than dropping it silently — a half-filled mapping entry is
+                    # exactly the kind of drift this command is meant to surface.
+                    failures.append((character or "(unnamed entry)", realm_name or "?"))
                     return
+                # The semaphore wraps the whole body, not just the equipment fetch: the per-gem
+                # item_info lookups are Blizzard calls too, and bounding only the first request
+                # would let ~30 characters' worth of gem lookups fan out at once.
                 async with semaphore:
                     try:
                         items = await self.blizzard.character_equipment(session, realm_slug, character)
@@ -905,16 +911,16 @@ Add this method to `MyClient`, next to the other private helpers:
                         logger.warning("gearaudit: %s/%s failed: %s", realm_slug, character, exc)
                         failures.append((character, realm_name))
                         return
-                if items is None:
-                    failures.append((character, realm_name))
-                    return
-                gem_quality: Dict[int, str] = {}
-                for gem_id in gearaudit.gem_ids(items):
-                    try:
-                        gem_quality[gem_id] = (await self.blizzard.item_info(session, gem_id)).quality
-                    except Exception as exc:  # noqa: BLE001 - an unknown gem is simply not graded
-                        logger.warning("gearaudit: gem %s lookup failed: %s", gem_id, exc)
-                findings.append(gearaudit.audit_character(character, realm_name, items, gem_quality))
+                    if items is None:
+                        failures.append((character, realm_name))
+                        return
+                    gem_quality: Dict[int, str] = {}
+                    for gem_id in gearaudit.gem_ids(items):
+                        try:
+                            gem_quality[gem_id] = (await self.blizzard.item_info(session, gem_id)).quality
+                        except Exception as exc:  # noqa: BLE001 - an unknown gem is simply not graded
+                            logger.warning("gearaudit: gem %s lookup failed: %s", gem_id, exc)
+                    findings.append(gearaudit.audit_character(character, realm_name, items, gem_quality))
 
             await asyncio.gather(*(audit_one(entry) for entry in mappings))
 
@@ -1026,7 +1032,7 @@ rather than flagged. A Tier-1 crafted variant of an epic gem is not detectable �
 `bonus_list` entries the equipment payload doesn't resolve.
 ```
 
-Add a row to the Commands table:
+Add a row to the Commands table, after the `!snipes` row and before the `!help`, `!tools` row:
 
 ```markdown
 | `!gearaudit [character]` | KEY/DM | Coord/Admin | Report missing enchants, empty sockets, and low-quality enchants/gems |
