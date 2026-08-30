@@ -1,4 +1,4 @@
-"""Async client for Blizzard's WoW Game Data Auction House API (per-realm listings)."""
+"""Async client for Blizzard's WoW Game Data and Profile APIs (auctions, token price, character equipment)."""
 
 import base64
 import logging
@@ -7,6 +7,7 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 import aiohttp
 
@@ -26,9 +27,31 @@ def _api_host() -> str:
 
 
 @dataclass(frozen=True)
+class Enchant:
+    """One enchantment on an equipped item. `slot_type` is PERMANENT, TEMPORARY, or ON_USE_SPELL."""
+
+    slot_type: str
+    display_string: str
+    enchantment_id: int
+
+
+@dataclass(frozen=True)
+class EquippedItem:
+    """One equipped item. `sockets` holds a gem item id per socket, None where the socket is empty."""
+
+    slot: str
+    name: str
+    item_id: int
+    item_class_id: int
+    enchants: Tuple[Enchant, ...]
+    sockets: Tuple[Optional[int], ...]
+
+
+@dataclass(frozen=True)
 class ItemInfo:
     name: str
     is_recipe: bool
+    quality: str = ""
 
 
 def _parse_token(data: dict) -> Tuple[str, int]:
@@ -51,7 +74,42 @@ def _parse_auctions(data: dict) -> List[dict]:
 def _parse_item_info(data: dict) -> ItemInfo:
     name = data.get("name", "")
     is_recipe = data.get("item_class", {}).get("id") == RECIPE_ITEM_CLASS_ID
-    return ItemInfo(name=name, is_recipe=is_recipe)
+    quality = (data.get("quality") or {}).get("type", "")
+    return ItemInfo(name=name, is_recipe=is_recipe, quality=quality)
+
+
+def _parse_equipment(data: dict) -> List[EquippedItem]:
+    """Parse a character equipment payload. Skips malformed entries rather than raising."""
+    items: List[EquippedItem] = []
+    for raw in data.get("equipped_items", []):
+        if not isinstance(raw, dict):
+            continue
+        slot = (raw.get("slot") or {}).get("type")
+        if not slot:
+            continue
+        enchants = tuple(
+            Enchant(
+                slot_type=(e.get("enchantment_slot") or {}).get("type", ""),
+                display_string=e.get("display_string", ""),
+                enchantment_id=int(e.get("enchantment_id", 0)),
+            )
+            for e in raw.get("enchantments", [])
+            if isinstance(e, dict)
+        )
+        sockets = tuple(
+            (s.get("item") or {}).get("id") for s in raw.get("sockets", []) if isinstance(s, dict)
+        )
+        items.append(
+            EquippedItem(
+                slot=slot,
+                name=raw.get("name", ""),
+                item_id=int((raw.get("item") or {}).get("id", 0)),
+                item_class_id=int((raw.get("item_class") or {}).get("id", 0)),
+                enchants=enchants,
+                sockets=sockets,
+            )
+        )
+    return items
 
 
 def _parse_realm_name(data: dict) -> str:
@@ -143,6 +201,21 @@ class BlizzardClient:
             info = _parse_item_info(await resp.json())
         self._item_cache[item_id] = info
         return info
+
+    async def character_equipment(
+        self, session: aiohttp.ClientSession, realm_slug: str, character: str
+    ) -> Optional[List[EquippedItem]]:
+        """Equipped items for one character, or None when Blizzard has no such character.
+
+        A 404 means the character was renamed, transferred, or deleted — a stale mapping,
+        which the caller reports rather than treating as an error.
+        """
+        path = f"/profile/wow/character/{realm_slug}/{quote(character.lower())}/equipment"
+        async with await self._get(session, path, "profile") as resp:
+            if resp.status == 404:
+                return None
+            resp.raise_for_status()
+            return _parse_equipment(await resp.json())
 
     async def pet_name(self, session: aiohttp.ClientSession, species_id: int) -> str:
         if species_id in self._pet_cache:

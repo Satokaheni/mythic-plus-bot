@@ -8,7 +8,7 @@ This file reflects the **current state** of the codebase. Rewrite relevant secti
 
 A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Mythic+ runs. Manages team assembly, availability tracking, DM outreach, and schedule lifecycle.
 
-**Version:** 1.9.0
+**Version:** 1.10.0
 **Entry point:** `bot.py` (`MyClient` class)
 
 ---
@@ -27,6 +27,7 @@ A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Myt
 | `watchlist.py` | `Watch`/`Watchlist` classes — price-watch state, buy-signal detection, formatters |
 | `blizzard.py` | Blizzard Game Data Auction House API client |
 | `snipelist.py` | `Snipe`/`Snipelist` classes — auction-snipe state, per-realm detection, alert planning |
+| `gearaudit.py` | Gear audit rules — enchant/socket/gem findings and officer report formatting |
 | `tokenwatch.py` | `TokenWatch` — WoW Token sell-threshold state, ratchet detection, formatters |
 | `raiderio.py` | Raider.io client + daily harvester seeding raiderio_run events |
 | `forecast.py` | Availability predictor + roster/slot optimizer + dry-run preview formatter |
@@ -159,6 +160,27 @@ Owner-only feature gated to `BANKER_ID` — tracks the region's WoW Token price 
 - State persisted to `token_watch.json` (two fields: `threshold`, `last_alert`).
 - Commands: `!token`, `!tokenalert <gold>`, `!tokenalert off` — DM or key-channel, banker-only.
 
+### Gear Audit (Blizzard)
+
+Officer-only, on demand. `!gearaudit [character]` (coordinator/admin, `ELEVATED_IDS`) reads
+`character_mappings.json`, fetches each character's equipped items from Blizzard's
+`/profile/wow/character/{realm}/{name}/equipment` endpoint (reusing `BLIZZ_CLIENT_ID`/
+`BLIZZ_CLIENT_SECRET`), and DMs the caller a worst-first report.
+
+Flagged: a missing **permanent** enchant on an enchantable slot, an **empty gem socket**, a
+**Tier-1 enchant**, and a **below-epic gem**. Not flagged: Tier-2 enchants (the cap this
+expansion), temporary weapon oils, and off-hands that are not weapons (`item_class.id != 2`).
+`ENCHANTABLE_SLOTS` is a module constant in `gearaudit.py` — head, shoulder, chest, legs, feet,
+both rings, main hand, plus a weapon off-hand — measured against the live roster and updated
+per expansion.
+
+There is **no background task, no DM to the audited player, and no persisted state**: officers
+run the command and relay the result. Characters that fail to fetch (404 = rename or transfer)
+are listed separately, which doubles as a stale-mapping report. Gem grading reuses the client's
+`_item_cache` via `ItemInfo.quality`; a gem whose quality can't be resolved is left ungraded
+rather than flagged. A Tier-1 crafted variant of an epic gem is not detectable — that lives in
+`bonus_list` entries the equipment payload doesn't resolve.
+
 ### Help Command
 `!help` / `!tools` — list all bot commands by category (scheduling, price watch, auction sniper, account) with usage and permissions.
 
@@ -261,6 +283,7 @@ RAIDERIO_REGION       Raider.io region (default: us)
 | `!snipepet <speciesId> <maxGold> [label]` | KEY/DM | Anyone | Track a battle pet species on all realms |
 | `!unsnipe <id ...>` | KEY/DM | Anyone | Stop watching one or more items |
 | `!snipes` | KEY/DM | Anyone | List your watched items with current cheapest prices |
+| `!gearaudit [character]` | KEY/DM | Coord/Admin | Report missing enchants, empty sockets, and low-quality enchants/gems |
 | `!help`, `!tools` | Any | Anyone | List all bot commands by category |
 
 ---
@@ -277,3 +300,4 @@ RAIDERIO_REGION       Raider.io region (default: us)
 - **Changelog bullet prefix** uses `•` not `- ` — Discord renders `- ` as markdown list syntax, stripping the dash and adding commas when copied
 - **Changelog sections** — each version entry uses `### Improvements` and `### Bug Fixes` subsections; `_read_changelog` converts `###` headers to `**bold**` in the Discord post so sections are visible there too
 - **version.txt** is written by the bot after posting the changelog; never edit it manually to the new version or the post will be skipped
+- **BOT_VERSION coupling** — adding a new `## [x.y.z]` section to `CHANGELOG.md` also requires bumping `BOT_VERSION` in `bot.py`, because that constant is what `on_ready` compares against `version.txt` to decide whether to post. A new section with a stale `BOT_VERSION` is never announced to the guild

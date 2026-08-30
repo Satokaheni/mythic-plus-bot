@@ -164,6 +164,17 @@ An all-member feature for tracking items across every realm in your region (via 
 
 These commands work via DM or in the key channel, and respond to anyone. Your watchlist is saved to `snipes.json` and reloaded on startup. Alerts are sent any time the price dips below your target (no quiet-hours limit like price watch), and re-arm when the price recovers.
 
+### Gear Audit
+
+A coordinator/admin command for checking the roster's enchants and gems against Blizzard's armory data. Every character in `character_mappings.json` is fetched and checked; the report comes back as a DM, worst-first, so an officer can work down the list. Every mapped character is audited including alts (`alt_of` is ignored), so people with alts on the roster will see them reported too.
+
+- `!gearaudit` — audit every mapped character
+- `!gearaudit <character>` — audit one character
+
+Flagged: a missing permanent enchant on an enchantable slot (head, shoulder, chest, legs, feet, both rings, main hand, and a weapon off-hand), an empty gem socket, a Tier-1 enchant, and a below-epic gem. Not flagged: Tier-2 enchants (the cap this expansion), temporary weapon oils, and shields. Characters that fail to fetch are listed separately — a 404 usually means a rename or transfer, so the mapping needs updating.
+
+Runs on demand only: there is no background task, and the audited player is never DM'd. Uses the existing `BLIZZ_CLIENT_ID` / `BLIZZ_CLIENT_SECRET` credentials, and needs a populated `character_mappings.json`.
+
 ### Availability Forecasting
 
 The bot learns **when your raiders actually play** and predicts the best time for a run — entirely automatically, no commands.
@@ -190,6 +201,7 @@ The bot learns **when your raiders actually play** and predicts the best time fo
 | `!snipepet <speciesId> <maxGold> [label]` | `KEY_CHANNEL` or DM | Anyone | Track a battle pet species on all realms |
 | `!unsnipe <id ...>` | `KEY_CHANNEL` or DM | Anyone | Stop watching one or more items |
 | `!snipes` | `KEY_CHANNEL` or DM | Anyone | List your watched items with current cheapest prices |
+| `!gearaudit [character]` | `KEY_CHANNEL` or DM | Coord/Admin | Report missing enchants, empty sockets, and low-quality enchants/gems |
 | `!help`, `!tools` | Any | Anyone | List all bot commands by category |
 
 ## Project Structure
@@ -205,6 +217,7 @@ mythic-plus-bot/
 ├── watchlist.py        # Watch/Watchlist state, buy-signal detection, formatters
 ├── blizzard.py         # Blizzard Game Data Auction House API client
 ├── snipelist.py        # Snipe/Snipelist state, per-realm detection, alert planning
+├── gearaudit.py        # Gear audit rules — enchant/socket/gem findings and report formatting
 ├── eventlog.py         # Append-only availability/attendance event log (forecasting data)
 ├── raiderio.py         # Raider.io client + daily harvester seeding raiderio_run events
 ├── forecast.py         # Availability predictor + roster/slot optimizer + dry-run preview
