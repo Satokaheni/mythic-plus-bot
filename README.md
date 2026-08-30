@@ -166,7 +166,7 @@ These commands work via DM or in the key channel, and respond to anyone. Your wa
 
 ### Gear Audit
 
-A coordinator/admin command for checking the roster's enchants and gems against Blizzard's armory data. Every character in `character_mappings.json` is fetched and checked; the report comes back as a DM, worst-first, so an officer can work down the list.
+A coordinator/admin command for checking the roster's enchants and gems against Blizzard's armory data. Every character in `character_mappings.json` is fetched and checked; the report comes back as a DM, worst-first, so an officer can work down the list. Every mapped character is audited including alts (`alt_of` is ignored), so people with alts on the roster will see them reported too.
 
 - `!gearaudit` — audit every mapped character
 - `!gearaudit <character>` — audit one character

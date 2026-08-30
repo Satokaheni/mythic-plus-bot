@@ -173,7 +173,10 @@ def format_character_line(findings: CharacterFindings) -> str:
     if findings.empty_sockets:
         bits.append(_plural(findings.empty_sockets, "empty socket"))
     if findings.low_enchants:
-        bits.append("Tier 1 enchant on " + ", ".join(slot_label(s) for s, _ in findings.low_enchants))
+        bits.append(
+            "low-tier enchant on "
+            + ", ".join(f"{slot_label(s)} (Tier {t})" for s, t in findings.low_enchants)
+        )
     if findings.low_gems:
         bits.append(_plural(len(findings.low_gems), "low-quality gem"))
     return f"**{findings.name}** ({findings.realm}) — " + "; ".join(bits)
@@ -197,7 +200,7 @@ def _chunk(lines: Sequence[str]) -> List[str]:
 
 def format_report(
     findings: Sequence[CharacterFindings],
-    failures: Sequence[Tuple[str, str]],
+    failures: Sequence[Tuple[str, str, str]],
 ) -> List[str]:
     """The officer-facing report, worst-first, split into sendable chunks."""
     problems = sorted(
@@ -211,7 +214,7 @@ def format_report(
         lines.extend(["", f"{_plural(clean, 'character')} clean."])
     if failures:
         lines.append("")
-        for character, realm in failures:
-            lines.append(f"Could not fetch: {character} ({realm}) — check the mapping.")
+        for character, realm, reason in failures:
+            lines.append(f"Could not fetch: {character} ({realm}) — {reason}.")
     lines.extend(["", GUILD_BANK_LINE])
     return _chunk(lines)

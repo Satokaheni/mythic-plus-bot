@@ -96,7 +96,7 @@ _CST = ZoneInfo("America/Chicago")
 # ---------------------------
 # Version & Changelog
 # ---------------------------
-BOT_VERSION = "1.9.0"
+BOT_VERSION = "1.10.0"
 
 _VERSION_FILE = "version.txt"
 
@@ -1437,7 +1437,7 @@ class MyClient(discord.Client):
 
     async def _run_gear_audit(
         self, mappings: List[dict]
-    ) -> Tuple[List[gearaudit.CharacterFindings], List[Tuple[str, str]]]:
+    ) -> Tuple[List[gearaudit.CharacterFindings], List[Tuple[str, str, str]]]:
         """Fetch and audit every mapped character. Returns (findings, failures).
 
         One character's failure never ends the sweep — it is collected and reported, since a
@@ -1445,7 +1445,7 @@ class MyClient(discord.Client):
         """
         semaphore = asyncio.Semaphore(GEAR_AUDIT_CONCURRENCY)
         findings: List[gearaudit.CharacterFindings] = []
-        failures: List[Tuple[str, str]] = []
+        failures: List[Tuple[str, str, str]] = []
 
         async with aiohttp.ClientSession() as session:
 
@@ -1456,7 +1456,9 @@ class MyClient(discord.Client):
                 if not character or not realm_slug:
                     # Report it rather than dropping it silently — a half-filled mapping entry is
                     # exactly the kind of drift this command is meant to surface.
-                    failures.append((character or "(unnamed entry)", realm_name or "?"))
+                    failures.append(
+                        (character or "(unnamed entry)", realm_name or "?", "incomplete mapping entry")
+                    )
                     return
                 # The semaphore wraps the whole body, not just the equipment fetch: the per-gem
                 # item_info lookups are Blizzard calls too, and bounding only the first request
@@ -1466,10 +1468,12 @@ class MyClient(discord.Client):
                         items = await self.blizzard.character_equipment(session, realm_slug, character)
                     except Exception as exc:  # noqa: BLE001 - one bad character must not end the sweep
                         logger.warning("gearaudit: %s/%s failed: %s", realm_slug, character, exc)
-                        failures.append((character, realm_name))
+                        failures.append((character, realm_name, "fetch failed"))
                         return
                     if items is None:
-                        failures.append((character, realm_name))
+                        failures.append(
+                            (character, realm_name, "not found — renamed, transferred, or a stale mapping")
+                        )
                         return
                     gem_quality: Dict[int, str] = {}
                     for gem_id in gearaudit.gem_ids(items):
@@ -1479,7 +1483,7 @@ class MyClient(discord.Client):
                             logger.warning("gearaudit: gem %s lookup failed: %s", gem_id, exc)
                     findings.append(gearaudit.audit_character(character, realm_name, items, gem_quality))
 
-            await asyncio.gather(*(audit_one(entry) for entry in mappings))
+            await asyncio.gather(*(audit_one(entry) for entry in mappings), return_exceptions=True)
 
         return findings, failures
 

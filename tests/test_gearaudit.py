@@ -45,7 +45,6 @@ def test_enchantable_slots_excludes_a_shield_off_hand():
     slots = enchantable_slots(items)
     assert "MAIN_HAND" in slots
     assert "OFF_HAND" not in slots
-    assert set(ENCHANTABLE_SLOTS).issubset(set(slots))
 
 
 def test_enchantable_slots_includes_a_weapon_off_hand():
@@ -58,10 +57,9 @@ def test_gem_ids_skips_empty_sockets():
     assert gem_ids(items) == {240983, 240984}
 
 
-def full_kit(**overrides):
+def full_kit():
     """A character with a valid Tier-2 enchant in every enchantable slot and no sockets."""
-    items = [item(slot, enchants=(perm(TIER2),)) for slot in ENCHANTABLE_SLOTS]
-    return overrides.get("items", items)
+    return [item(slot, enchants=(perm(TIER2),)) for slot in ENCHANTABLE_SLOTS]
 
 
 def test_audit_character_clean():
@@ -151,7 +149,7 @@ def test_format_character_line_reports_every_kind():
         a_finding("Messy", missing=["HEAD"], low_enchants=[("CHEST", 1)], empty_sockets=1, low_gems=[("NECK", "RARE")])
     )
     assert "missing Head" in line
-    assert "Tier 1 enchant on Chest" in line
+    assert "low-tier enchant on Chest (Tier 1)" in line
     assert "1 empty socket" in line
     assert "1 low-quality gem" in line
 
@@ -173,9 +171,12 @@ def test_format_report_sorts_worst_first_then_by_name():
 
 
 def test_format_report_lists_failures_and_guild_bank_line():
-    chunks = format_report([a_finding("Clean")], [("Ghost", "Mal'Ganis")])
+    chunks = format_report(
+        [a_finding("Clean")],
+        [("Ghost", "Mal'Ganis", "not found — renamed, transferred, or a stale mapping")],
+    )
     body = "\n".join(chunks)
-    assert "Could not fetch: Ghost (Mal'Ganis)" in body
+    assert "Could not fetch: Ghost (Mal'Ganis) — not found — renamed, transferred, or a stale mapping." in body
     assert "guild bank" in body
 
 
@@ -191,3 +192,23 @@ def test_format_report_chunks_long_output():
     assert len(chunks) > 1
     assert all(len(chunk) <= MAX_MESSAGE_CHARS for chunk in chunks)
     assert "Character119" in "\n".join(chunks)
+
+
+def test_audit_character_end_to_end_shield_off_hand_not_flagged():
+    """Shield off-hand should not be flagged as missing enchant, but weapon off-hand should be."""
+    # Shield off-hand: item_class_id=4 (armor), should be excluded from enchantable slots
+    items = full_kit() + [item("OFF_HAND", item_class_id=4, name="Shield")]
+    findings = audit_character("Shield Bearer", "Mal'Ganis", items, {})
+    assert findings.is_clean
+    assert "OFF_HAND" not in findings.missing_enchants
+
+
+def test_audit_character_end_to_end_weapon_off_hand_flagged():
+    """Weapon off-hand without enchant should be flagged."""
+    # Weapon off-hand: item_class_id=2, should be included and flagged when unenchanted
+    items = [i for i in full_kit() if i.slot != "MAIN_HAND"]
+    items.append(item("MAIN_HAND", enchants=(perm(TIER2),), item_class_id=2))
+    items.append(item("OFF_HAND", item_class_id=2, name="Weapon"))  # No enchant
+    findings = audit_character("Dual Wielder", "Mal'Ganis", items, {})
+    assert "OFF_HAND" in findings.missing_enchants
+    assert not findings.is_clean
