@@ -1,3 +1,8 @@
+## [1.10.0]
+
+### Improvements
+- **Gear Audit** — new coordinator/admin command `!gearaudit [character]` that checks every mapped character against Blizzard's armory data and reports who is missing an enchant, who has an empty gem socket, and who is carrying a Tier-1 enchant or a below-epic gem, worst-first. Characters that fail to fetch are listed separately so stale entries in `character_mappings.json` surface. On demand only — no background task and no DMs to the audited player.
+
 ## [1.9.0]
 
 ### Improvements
