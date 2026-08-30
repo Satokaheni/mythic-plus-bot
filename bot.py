@@ -2283,5 +2283,7 @@ intents.members = True
 intents.dm_messages = True
 
 client = MyClient(intents=intents)
-# log_handler=None: we configured logging ourselves (file + console) in _configure_logging.
-client.run(CLIENT_ID, log_handler=None)
+
+if __name__ == "__main__":
+    # log_handler=None: we configured logging ourselves (file + console) in _configure_logging.
+    client.run(CLIENT_ID, log_handler=None)
