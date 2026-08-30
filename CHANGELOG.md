@@ -1,3 +1,61 @@
+## [1.9.0]
+
+### Improvements
+- **Auction Sniper** — track per-realm items (recipes, battle pets, mounts, gear) across every realm in your region via Blizzard's official Game Data API. Every 30 minutes, the bot sweeps all realms and DMs you when your watched item's cheapest listing drops below your target price. Each guild member tracks their own target prices independently. Recipes also alert the banker for coordinated bulk buying. Open to everyone: `!snipe <itemId> <maxGold> [label]`, `!snipepet <speciesId> <maxGold> [label]`, `!unsnipe <id ...>`, `!snipes`. Requires `BLIZZ_CLIENT_ID`/`BLIZZ_CLIENT_SECRET` (register at develop.battle.net) and optional `BLIZZ_REGION` (default `us`).
+- **`!help` / `!tools`** — new command listing all bot commands by category (scheduling, price watch, auction sniper, account) with usage and permissions.
+
+## [1.8.0]
+
+### Improvements
+- Price-watch buy signals are now **bulk-aware**: the watched price is the effective price to fill a bulk order (the volume-weighted average across auction lots), not the single cheapest listing. A thin 20-unit lot at the floor no longer triggers a buy alert when you actually want 100+ — the signal reflects what you'd really pay to fill the order. If fewer than the target quantity are even listed, nothing fires (a depth gate).
+- The bulk target quantity defaults to `BANKER_BULK_QTY` (default 100) and can be set per item with the `-x` flag (quantity glued: `-x200`): `!watch <itemId> -x<qty> [label]` (e.g. `!watch 212283 -x200 Rousing Fire`). The multi-item form takes per-item targets too — `!watch 212283 -x100 212284 -x200` — and ids without a `-x` use the default. Bare all-numeric `!watch` args still mean "watch several items at once", so nothing changes for existing usage. `!watches` shows the bulk fill price, or "insufficient depth" when the target can't be filled. A malformed `!watch` now gets a specific, actionable error instead of silently watching a garbage label.
+
+## [1.7.2]
+
+### Bug Fixes
+- On startup, a deleted availability message (or any DM message that had gone missing) made `on_ready` crash with a 404 `NotFound`, which aborted the rest of startup — the changelog post, key-request button, and background tasks never ran. Message-cache warming is now best-effort: missing or inaccessible messages are skipped, matching every other `fetch_message` call in the bot.
+
+## [1.7.1]
+
+### Bug Fixes
+- Declare `tzdata` as a dependency so the IANA timezone database is always available. On minimal systems (e.g. Raspberry Pi) the OS may lack the `US/*` timezone aliases, which made `state.json` fail to load ("No time zone found with key US/Central") and fall back to empty state.
+
+## [1.7.0]
+
+### Improvements
+- The bot now writes logs to a rotating file (`bot.log`, ~5 MB × 3 backups) in addition to the console, so logs are available on headless deployments like a Raspberry Pi. Configurable via `LOG_FILE` and `LOG_LEVEL`.
+
+## [1.6.0]
+
+### Improvements
+- Price-watch buy alerts now suggest **how much to buy** on your gold budget (default 100,000, configurable via `BANKER_BUDGET_GOLD`), walking the auction listings up to the item's low band so you stockpile without overpaying.
+- Price-watch alerts are only sent during waking hours (**10 AM–11:59 PM Central**); a dip that happens overnight alerts the next morning if it's still a good deal, instead of pinging you at 4 AM.
+
+## [1.5.0]
+
+### Improvements
+- `!watch` and `!unwatch` now accept multiple item IDs at once (e.g. `!watch 212283 212391 212284`), so the banker can add or remove several items in a single command.
+
+## [1.4.0]
+
+### Improvements
+- The bot now automatically predicts the best weekly Mythic+ run from availability and play-history data and DMs a dry-run preview to the banker (no runs are created yet).
+- Predicted rosters now prefer people's primary role, only using someone's off-role when a role can't be filled by a main (off-role assignments are flagged in the preview).
+
+### Bug Fixes
+- Raider.io run history is now parsed from the response's top-level fields (there is no `result` wrapper), so the daily harvest actually collects runs.
+- The availability predictor now uses a fixed low baseline so slots rank by how often people actually play, instead of every slot saturating to 100% confidence.
+
+## [1.3.0]
+
+### Improvements
+- The bot now backfills and daily-harvests Mythic+ run history from Raider.io for mapped, registered raiders, seeding the availability dataset with real play-time data.
+
+## [1.2.0]
+
+### Improvements
+- The bot now logs availability reactions, DM offer accept/declines, and completed-run rosters to a local event log (events.jsonl), and no longer discards run history — building the dataset for a future automatic scheduler.
+
 ## [1.1.0]
 ### Improvements
 - Added an owner-only Undermine Exchange price watch: `!watch`, `!unwatch`, and `!watches` let the banker track region-wide commodities and receive a DM when a price dips into a self-adjusting "pounce" low.

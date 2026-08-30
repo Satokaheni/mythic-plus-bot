@@ -10,6 +10,11 @@ requires-python = ">=3.9"
 dependencies = [
     "discord.py>=2.0.0",
     "python-dotenv>=1.0.0",
+    # Bundled IANA timezone database — zoneinfo falls back to it when the OS tz data
+    # lacks a key (e.g. the US/* aliases on minimal Raspberry Pi / container images).
+    "tzdata>=2024.1",
+    # Sync HTTP for the standalone loot council CLI (the bot itself uses aiohttp).
+    "requests>=2.31.0",
 ]
 
 [project.optional-dependencies]
@@ -25,7 +30,8 @@ dev = [
 # them explicitly — otherwise setuptools' flat-layout auto-discovery refuses to
 # build with "Multiple top-level modules discovered".
 [tool.setuptools]
-py-modules = ["bot", "raider", "schedule", "utils", "views", "undermine", "watchlist"]
+py-modules = ["bot", "raider", "schedule", "utils", "views", "undermine", "watchlist", "eventlog", "raiderio", "forecast", "loot"]
+packages = ["lootcouncil"]
 
 [tool.black]
 line-length = 120
@@ -38,7 +44,7 @@ select = ["E", "F", "W", "I"]
 ignore = ["E501"]
 
 [tool.ruff.isort]
-known-first-party = ["bot", "raider", "schedule", "views", "utils", "undermine", "watchlist"]
+known-first-party = ["bot", "raider", "schedule", "views", "utils", "undermine", "watchlist", "lootcouncil"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -12,7 +12,7 @@ COPY pyproject.toml .
 RUN pip install --no-cache-dir "discord.py>=2.0.0" "python-dotenv>=1.0.0"
 
 # Copy source files
-COPY bot.py raider.py schedule.py views.py utils.py ./
+COPY bot.py raider.py schedule.py views.py utils.py undermine.py watchlist.py eventlog.py raiderio.py forecast.py ./
 
 # Run as non-root user
 RUN useradd -m botuser && chown -R botuser:botuser /app
@@ -20,4 +20,6 @@ USER botuser
 
 # state.pkl and version.txt are written here at runtime.
 # Mount an EFS volume at /app to persist state across container restarts.
+# character_mappings.json (like .env) must be provided on the mounted runtime volume,
+# not baked into the image.
 CMD ["python", "bot.py"]

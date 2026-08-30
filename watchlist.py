@@ -6,7 +6,6 @@ import math
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from textwrap import dedent
 from typing import List, Optional
 
 logger = logging.getLogger("discord")
@@ -23,6 +22,64 @@ FLOOD_ALERTS = 2
 FLOOD_DAYS = 7
 TIGHTEN_STEP = 1.0
 ADJUST_INTERVAL_HOURS = 24
+
+# Only send buy alerts during waking hours (local CST hour, inclusive): 10:00 AM–11:59 PM.
+ALERT_START_HOUR = 10
+ALERT_END_HOUR = 23
+
+
+def in_alert_window(now_cst: datetime) -> bool:
+    """True if `now_cst` (a Central-time datetime) is within the alert window (10 AM–11:59 PM)."""
+    return ALERT_START_HOUR <= now_cst.hour <= ALERT_END_HOUR
+
+
+def bulk_price(auctions, target_qty: int) -> tuple:
+    """Volume-weighted price to actually acquire `target_qty` units off the ladder.
+
+    Walks the auction lots cheapest-first and blends their prices over exactly
+    `target_qty` units. Returns ``(fillable, vwap, units_available)``:
+
+    - ``units_available`` — total units listed across all lots.
+    - ``fillable`` — whether at least ``target_qty`` units exist (the depth gate).
+    - ``vwap`` — total cost to buy ``target_qty`` units divided by ``target_qty``
+      ("the overall bulk buy price"); ``0.0`` when not fillable.
+
+    A thin cheapest lot no longer dominates: if only 20 units sit at the floor and
+    you want 100, the VWAP reflects the more expensive lots you'd have to buy too.
+    """
+    units_available = sum(qty for _, qty in auctions)
+    if target_qty <= 0 or units_available < target_qty:
+        return (False, 0.0, units_available)
+    remaining = target_qty
+    cost = 0
+    for price, qty in sorted(auctions):
+        take = min(qty, remaining)
+        cost += take * price
+        remaining -= take
+        if remaining <= 0:
+            break
+    return (True, cost / target_qty, units_available)
+
+
+def suggest_buy(auctions, ceiling_price: float, budget_copper: int) -> tuple:
+    """Walk the auction ladder cheapest-first, buying lots priced at or below `ceiling_price`
+    until the budget runs out or the price crosses the ceiling. Returns (units, cost_copper)."""
+    units = 0
+    cost = 0
+    remaining = budget_copper
+    for price, qty in sorted(auctions):
+        if price > ceiling_price or remaining < price:
+            break
+        take = min(qty, remaining // price)
+        if take <= 0:
+            break
+        units += take
+        spent = take * price
+        cost += spent
+        remaining -= spent
+        if take < qty:  # budget exhausted within this price tier
+            break
+    return units, cost
 
 
 def format_gold(copper: int) -> str:
@@ -65,6 +122,8 @@ class Watch:
 
     item_id: int
     label: str
+    # Bulk order size this item's buy signal targets. None -> use the global default.
+    target_qty: Optional[int] = None
     percentile: float = START_PERCENTILE
     state: str = "idle"  # "idle" -> armed; "alerted" -> already pinged this dip
     alert_history: List[datetime] = field(default_factory=list)
@@ -75,6 +134,7 @@ class Watch:
         return {
             "item_id": self.item_id,
             "label": self.label,
+            "target_qty": self.target_qty,
             "percentile": self.percentile,
             "state": self.state,
             "alert_history": [t.isoformat() for t in self.alert_history],
@@ -84,9 +144,11 @@ class Watch:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Watch":
+        raw_target = d.get("target_qty")
         return cls(
             item_id=int(d["item_id"]),
             label=d["label"],
+            target_qty=int(raw_target) if raw_target is not None else None,
             percentile=float(d.get("percentile", START_PERCENTILE)),
             state=d.get("state", "idle"),
             alert_history=[datetime.fromisoformat(t) for t in d.get("alert_history", [])],
@@ -101,20 +163,49 @@ class Signal:
 
     fired: bool
     enough_history: bool
-    price: int
+    price: int  # the watched price: bulk VWAP to fill target_qty (falls back to the min lot)
     median: float
     low_band: float
     quantity: int
+    auctions: tuple = ()  # cheapest-first (price, quantity) lots, for the budget buy estimate
+    fillable: bool = True  # whether target_qty units are actually available (depth gate)
+    units_available: int = 0
+    target_qty: int = 1
 
 
-def evaluate(now_price: int, quantity: int, daily_prices: List[int], watch: Watch) -> Signal:
-    """Decide whether the current price sits in the item's recent low band."""
+def evaluate(
+    now_price: int,
+    quantity: int,
+    daily_prices: List[int],
+    watch: Watch,
+    auctions: tuple = (),
+    target_qty: int = 1,
+) -> Signal:
+    """Decide whether the *bulk* price to fill ``target_qty`` units sits in the low band.
+
+    Instead of the single cheapest lot, the detector watches the VWAP to actually
+    acquire ``target_qty`` units by walking the auction ladder (`bulk_price`). If fewer
+    than ``target_qty`` units are listed there's no bulk opportunity — the depth gate
+    fails and nothing fires. When no ladder is supplied the detector degrades to the
+    legacy cheapest-lot behavior so existing callers keep working.
+    """
+    target = target_qty if target_qty and target_qty > 0 else 1
     window = daily_prices[-BASELINE_WINDOW_DAYS:]
+
+    if auctions:
+        fillable, vwap, units_available = bulk_price(auctions, target)
+        watched_price = int(round(vwap)) if fillable else now_price
+    else:
+        # No ladder: fall back to the cheapest-lot price, no depth gate.
+        fillable, units_available = True, quantity
+        watched_price = now_price
+
     if len(window) < MIN_HISTORY_DAYS:
-        return Signal(False, False, now_price, 0.0, 0.0, quantity)
+        return Signal(False, False, watched_price, 0.0, 0.0, quantity, auctions, fillable, units_available, target)
     m = median(window)
     low = percentile(window, watch.percentile)
-    return Signal(now_price < low, True, now_price, m, low, quantity)
+    fired = fillable and watched_price < low
+    return Signal(fired, True, watched_price, m, low, quantity, auctions, fillable, units_available, target)
 
 
 def process_signal(watch: Watch, signal: Signal, now: datetime) -> bool:
@@ -153,12 +244,14 @@ class Watchlist:
     def __init__(self) -> None:
         self._watches: dict = {}
 
-    def add(self, item_id: int, label: str) -> Watch:
+    def add(self, item_id: int, label: str, target_qty: Optional[int] = None) -> Watch:
         existing = self._watches.get(item_id)
         if existing is not None:
             existing.label = label
+            if target_qty is not None:  # only overwrite the target when one was given
+                existing.target_qty = target_qty
             return existing
-        watch = Watch(item_id=item_id, label=label)
+        watch = Watch(item_id=item_id, label=label, target_qty=target_qty)
         self._watches[item_id] = watch
         return watch
 
@@ -198,26 +291,107 @@ class Watchlist:
         return wl
 
 
-def format_alert(watch: Watch, signal: Signal) -> str:
-    """Build the buy-signal DM sent to the banker."""
+def _take_x_target(args: List[str], i: int):
+    """If args[i] is a glued ``-x<qty>`` flag, return ``(qty, next_index)``.
+
+    Returns ``(None, i)`` when args[i] is not a ``-x`` flag, or ``(False, i)`` on a
+    malformed one. The quantity MUST be glued to ``-x`` (``-x100``, not ``-x 100``):
+    a spaced form in the multi-item run would silently swallow the following item id
+    as the quantity, which is exactly how a real command lost an item.
+    """
+    if i >= len(args):
+        return (None, i)
+    a = args[i]
+    if a.startswith("-x"):
+        rest = a[2:]
+        if rest.isdigit() and int(rest) > 0:
+            return (int(rest), i + 1)
+        return (False, i)  # bare "-x", "-x 100" (space), non-numeric, or non-positive
+    return (None, i)
+
+
+def parse_watch_command(args: List[str]) -> dict:
+    """Parse the arguments of a ``!watch`` command into an intent dict.
+
+    Grammar (the ``-x`` quantity must be glued: ``-x100``, never ``-x 100``):
+      ``!watch <id> [-x<qty>] [label]``
+                          -> {"kind": "single", "item_id", "label", "target_qty"}
+      ``!watch <id> [-x<qty>] <id> [-x<qty>] ...``
+                          -> {"kind": "multi", "items": [(item_id, target_qty|None), ...]}
+      anything unusable   -> {"kind": "error", "reason": ...}
+
+    Each ``-x`` binds to the item id immediately before it. Two or more ids form the
+    multi-item form (no custom labels — each is auto-labelled); a single id may carry a
+    trailing free-text label. ``label``/``target_qty`` are ``None`` when omitted (the
+    caller supplies defaults). Error reasons: ``"bad_flag"`` (malformed ``-x``),
+    ``"multi_label"`` (free text alongside several ids), ``"no_item"`` (no leading id).
+    """
+    items: list = []  # (item_id, target_qty|None)
+    i = 0
+    while i < len(args) and args[i].isdigit():
+        item_id = int(args[i])
+        i += 1
+        target, i = _take_x_target(args, i)
+        if target is False:  # malformed -x flag (e.g. a spaced "-x 100")
+            return {"kind": "error", "reason": "bad_flag"}
+        items.append((item_id, target))
+
+    if not items:
+        return {"kind": "error", "reason": "no_item"}
+
+    trailing = args[i:]  # whatever's left after the run of ids
+
+    # Two or more ids -> multi. A leftover token is ambiguous across items.
+    if len(items) >= 2:
+        if trailing:
+            reason = "bad_flag" if trailing[0].startswith("-x") else "multi_label"
+            return {"kind": "error", "reason": reason}
+        return {"kind": "multi", "items": items}
+
+    # Single id: the remainder (if any) is its label. A stray -x here is malformed.
+    item_id, target_qty = items[0]
+    if trailing and trailing[0].startswith("-x"):
+        return {"kind": "error", "reason": "bad_flag"}
+    label = " ".join(trailing) if trailing else None
+    return {"kind": "single", "item_id": item_id, "label": label, "target_qty": target_qty}
+
+
+def format_alert(watch: Watch, signal: Signal, budget_copper: int = 0) -> str:
+    """Build the buy-signal DM sent to the banker.
+
+    When `budget_copper` > 0, add a line suggesting how much to buy within budget by walking the
+    auction ladder up to the low band (the pounce threshold that fired the alert).
+    """
     pct_below = (1 - signal.price / signal.median) * 100 if signal.median else 0
-    return dedent(
-        f"""
-        🛎️ **Buy signal** — {watch.label} (item {watch.item_id})
-        Current: **{format_gold(signal.price)}** ({pct_below:.0f}% below {format_gold(int(signal.median))} median)
-        Low band (p{watch.percentile:.0f}): {format_gold(int(signal.low_band))}
-        Quantity available: {signal.quantity:,}
-        https://www.wowhead.com/item={watch.item_id}
-        """
-    ).strip()
+    fill_note = f" to fill {signal.target_qty:,}" if signal.target_qty > 1 else ""
+    lines = [
+        f"🛎️ **Buy signal** — {watch.label} (item {watch.item_id})",
+        f"Bulk price{fill_note}: **{format_gold(signal.price)}** "
+        f"({pct_below:.0f}% below {format_gold(int(signal.median))} median)",
+        f"Low band (p{watch.percentile:.0f}): {format_gold(int(signal.low_band))}",
+    ]
+    if budget_copper > 0:
+        units, cost = suggest_buy(signal.auctions, signal.low_band, budget_copper)
+        if units > 0:
+            lines.append(
+                f"💰 **Buy up to {units:,} for {format_gold(cost)}** (budget: {format_gold(budget_copper)})"
+            )
+    lines.append(f"Quantity available: {signal.quantity:,}")
+    lines.append(f"https://www.wowhead.com/item={watch.item_id}")
+    return "\n".join(lines)
 
 
 def format_watch_line(watch: Watch, signal: Optional[Signal]) -> str:
     """Build one line describing a watch for the !watches command."""
     if signal is None or not signal.enough_history:
         return f"• **{watch.label}** (item {watch.item_id}) — p{watch.percentile:.0f}, {watch.state} — insufficient data"
+    if not signal.fillable:
+        return (
+            f"• **{watch.label}** (item {watch.item_id}) — p{watch.percentile:.0f}, {watch.state} — "
+            f"insufficient depth ({signal.units_available:,}/{signal.target_qty:,})"
+        )
     return (
         f"• **{watch.label}** (item {watch.item_id}) — "
-        f"now {format_gold(signal.price)}, median {format_gold(int(signal.median))}, "
+        f"bulk {format_gold(signal.price)} (fill {signal.target_qty:,}), median {format_gold(int(signal.median))}, "
         f"low band {format_gold(int(signal.low_band))} (p{watch.percentile:.0f}), {watch.state}"
     )

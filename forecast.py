@@ -1,0 +1,183 @@
+"""Availability forecaster: events -> per-person, per-(weekday, block) probabilities."""
+
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional
+
+HALF_LIFE = 4.0      # weeks; recency decay half-life
+ALPHA = 2.0          # smoothing pseudo-count
+BASE_PRIOR = 0.15    # availability prior when a person has no data
+
+_POSITIVE_TYPES = {"offer_accepted", "raiderio_run"}
+_NEGATIVE_TYPES = {"offer_declined"}
+
+
+@dataclass(frozen=True)
+class Obs:
+    """One signed availability observation for a user in a local (weekday, block)."""
+
+    user_id: int
+    weekday: int
+    block: int
+    age_weeks: float
+    sign: int  # +1 positive, -1 negative
+
+
+def _age_weeks(ts_utc: datetime, now: datetime) -> float:
+    return (now - ts_utc).total_seconds() / (7 * 86400)
+
+
+def observations(events: List[dict], raiders: dict, now: datetime) -> List[Obs]:
+    """Normalize raw events into signed per-user, per-local-slot observations.
+
+    - run_completed: one +1 obs per roster member, slot from ts_utc + that member's tz.
+    - offer_accepted / raiderio_run: +1 at the event's stored (local_weekday, local_block).
+    - offer_declined: -1 at its stored slot.
+    - avail_reaction and slotless/tz-less events are skipped.
+    """
+    out: List[Obs] = []
+    for e in events:
+        etype = e.get("type")
+        ts_raw = e.get("ts_utc")
+        if ts_raw is None:
+            continue
+        ts = datetime.fromisoformat(ts_raw)
+        age = _age_weeks(ts, now)
+        if etype == "run_completed":
+            for uid in e.get("roster") or []:
+                raider = raiders.get(uid)
+                if raider is None or getattr(raider, "timezone", None) is None:
+                    continue
+                local = ts.astimezone(raider.timezone)
+                out.append(Obs(uid, local.weekday(), local.hour // 2, age, 1))
+        elif etype in _POSITIVE_TYPES or etype in _NEGATIVE_TYPES:
+            uid = e.get("user_id")
+            wd = e.get("local_weekday")
+            blk = e.get("local_block")
+            if uid is None or wd is None or blk is None:
+                continue
+            sign = 1 if etype in _POSITIVE_TYPES else -1
+            out.append(Obs(uid, wd, blk, age, sign))
+    return out
+
+
+def _weight(age_weeks: float) -> float:
+    return 0.5 ** (age_weeks / HALF_LIFE)
+
+
+def predict(user_obs: List[Obs], weekday: int, block: int) -> float:
+    """P(user available at local weekday/block), recency-weighted + smoothed."""
+    block_obs = [o for o in user_obs if o.weekday == weekday and o.block == block]
+    wpos = sum(_weight(o.age_weeks) for o in block_obs if o.sign > 0)
+    wneg = sum(_weight(o.age_weeks) for o in block_obs if o.sign < 0)
+    prior = BASE_PRIOR
+    return (wpos + ALPHA * prior) / (wpos + wneg + ALPHA)
+
+
+@dataclass
+class Team:
+    """A role-valid roster, its mean predicted availability, and per-member probs."""
+
+    tank: object
+    healer: object
+    dps: list
+    mean: float
+    probs: dict  # user_id -> predicted probability
+
+
+def _is_primary(raider, role: str) -> bool:
+    return bool(raider.roles) and raider.roles[0] == role
+
+
+def select_team(candidates: List[tuple]) -> Optional[Team]:
+    """Pick 1 tank + 1 healer + 3 dps (distinct, multi-role aware), preferring PRIMARY-role
+    assignments (mains first; off-role only to fill a role no primary can cover), then max mean prob."""
+    prob = {id(r): p for r, p in candidates}
+    tanks = [r for r, _ in candidates if "tank" in r.roles]
+    healers = [r for r, _ in candidates if "healer" in r.roles]
+    dps_pool = [r for r, _ in candidates if "dps" in r.roles]
+
+    best: Optional[Team] = None
+    best_key = None
+    for tank in tanks:
+        for healer in healers:
+            if healer is tank:
+                continue
+            remaining = [r for r in dps_pool if r is not tank and r is not healer]
+            if len(remaining) < 3:
+                continue
+            # maximize (primary-dps count, then prob) for the trio
+            top3 = sorted(remaining, key=lambda r: (_is_primary(r, "dps"), prob[id(r)]), reverse=True)[:3]
+            assigned = [(tank, "tank"), (healer, "healer")] + [(d, "dps") for d in top3]
+            primary_count = sum(_is_primary(m, role) for m, role in assigned)
+            mean = sum(prob[id(m)] for m, _ in assigned) / 5
+            key = (primary_count, mean)
+            if best_key is None or key > best_key:
+                best_key = key
+                best = Team(
+                    tank=tank,
+                    healer=healer,
+                    dps=top3,
+                    mean=mean,
+                    probs={m.user_id: prob[id(m)] for m, _ in assigned},
+                )
+    return best
+
+
+def can_field_team(raiders: list) -> bool:
+    """Feasibility gate: can a role-valid team of 5 be assembled from these raiders?"""
+    return select_team([(r, 1.0) for r in raiders]) is not None
+
+
+def _next_slot_datetime(now_cst: datetime, weekday: int, block: int) -> datetime:
+    """Next CST-anchored datetime with the given weekday/2h-block, strictly after now (within 7 days)."""
+    days_ahead = (weekday - now_cst.weekday()) % 7
+    candidate = now_cst.replace(hour=block * 2, minute=0, second=0, microsecond=0) + timedelta(days=days_ahead)
+    if candidate <= now_cst:
+        candidate += timedelta(days=7)
+    return candidate
+
+
+def rank_slots(green: list, obs_by_user: Dict[int, List["Obs"]], now_cst: datetime) -> List[tuple]:
+    """Rank the coming week's candidate slots by the best role-valid team's mean availability."""
+    ranked = []
+    for weekday in range(7):
+        for block in range(12):
+            slot_cst = _next_slot_datetime(now_cst, weekday, block)
+            candidates = []
+            for raider in green:
+                local = slot_cst.astimezone(raider.timezone)
+                p = predict(obs_by_user.get(raider.user_id, []), local.weekday(), local.hour // 2)
+                candidates.append((raider, p))
+            team = select_team(candidates)
+            if team is not None:
+                ranked.append((slot_cst.astimezone(timezone.utc), team))
+    ranked.sort(key=lambda t: t[1].mean, reverse=True)
+    return ranked
+
+
+def format_preview(ranked: List[tuple]) -> str:
+    """Dry-run preview DM text for the top pick + up to two runners-up."""
+    if not ranked:
+        return "🔮 No role-valid team could be predicted from this week's available pool."
+    best_dt, best = ranked[0]
+    ts = int(best_dt.timestamp())
+    dps_str = ", ".join(f"{r.name} ({_p(best, r)}){_role_tag(r, 'dps')}" for r in best.dps)
+    lines = [
+        "🔮 **Predicted run for this week** (dry-run — not scheduled)",
+        f"🕐 <t:{ts}:F> · confidence **{best.mean:.2f}**",
+        f"🛡️ {best.tank.name} ({_p(best, best.tank)}){_role_tag(best.tank, 'tank')}  "
+        f"💚 {best.healer.name} ({_p(best, best.healer)}){_role_tag(best.healer, 'healer')}  ⚔️ {dps_str}",
+    ]
+    for dt, team in ranked[1:3]:
+        lines.append(f"_Runner-up: <t:{int(dt.timestamp())}:F> ({team.mean:.2f})_")
+    return "\n".join(lines)
+
+
+def _p(team: "Team", raider) -> str:
+    """Per-member predicted probability for display."""
+    return f"{team.probs.get(raider.user_id, 0.0):.2f}"
+
+
+def _role_tag(raider, role: str) -> str:
+    return "" if (raider.roles and raider.roles[0] == role) else " ⚠️off-role"
