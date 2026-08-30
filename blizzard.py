@@ -26,6 +26,27 @@ def _api_host() -> str:
 
 
 @dataclass(frozen=True)
+class Enchant:
+    """One enchantment on an equipped item. `slot_type` is PERMANENT, TEMPORARY, or ON_USE_SPELL."""
+
+    slot_type: str
+    display_string: str
+    enchantment_id: int
+
+
+@dataclass(frozen=True)
+class EquippedItem:
+    """One equipped item. `sockets` holds a gem item id per socket, None where the socket is empty."""
+
+    slot: str
+    name: str
+    item_id: int
+    item_class_id: int
+    enchants: Tuple[Enchant, ...]
+    sockets: Tuple[Optional[int], ...]
+
+
+@dataclass(frozen=True)
 class ItemInfo:
     name: str
     is_recipe: bool
@@ -52,6 +73,40 @@ def _parse_item_info(data: dict) -> ItemInfo:
     name = data.get("name", "")
     is_recipe = data.get("item_class", {}).get("id") == RECIPE_ITEM_CLASS_ID
     return ItemInfo(name=name, is_recipe=is_recipe)
+
+
+def _parse_equipment(data: dict) -> List[EquippedItem]:
+    """Parse a character equipment payload. Skips malformed entries rather than raising."""
+    items: List[EquippedItem] = []
+    for raw in data.get("equipped_items", []):
+        if not isinstance(raw, dict):
+            continue
+        slot = (raw.get("slot") or {}).get("type")
+        if not slot:
+            continue
+        enchants = tuple(
+            Enchant(
+                slot_type=(e.get("enchantment_slot") or {}).get("type", ""),
+                display_string=e.get("display_string", ""),
+                enchantment_id=int(e.get("enchantment_id", 0)),
+            )
+            for e in raw.get("enchantments", [])
+            if isinstance(e, dict)
+        )
+        sockets = tuple(
+            (s.get("item") or {}).get("id") for s in raw.get("sockets", []) if isinstance(s, dict)
+        )
+        items.append(
+            EquippedItem(
+                slot=slot,
+                name=raw.get("name", ""),
+                item_id=int((raw.get("item") or {}).get("id", 0)),
+                item_class_id=int((raw.get("item_class") or {}).get("id", 0)),
+                enchants=enchants,
+                sockets=sockets,
+            )
+        )
+    return items
 
 
 def _parse_realm_name(data: dict) -> str:
