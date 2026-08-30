@@ -1,4 +1,4 @@
-"""Async client for Blizzard's WoW Game Data Auction House API (per-realm listings)."""
+"""Async client for Blizzard's WoW Game Data and Profile APIs (auctions, token price, character equipment)."""
 
 import base64
 import logging
