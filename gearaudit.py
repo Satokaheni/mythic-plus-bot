@@ -5,6 +5,7 @@ module is testable without Discord or Blizzard. The flow layer in bot.py does th
 """
 
 import re
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from blizzard import EquippedItem
@@ -77,3 +78,79 @@ def enchantable_slots(items: Sequence[EquippedItem]) -> List[str]:
 def gem_ids(items: Sequence[EquippedItem]) -> Set[int]:
     """Every socketed gem's item id, so the caller can look their qualities up once."""
     return {gem_id for item in items for gem_id in item.sockets if gem_id is not None}
+
+
+@dataclass
+class CharacterFindings:
+    """Everything wrong with one character's gear. Empty lists and a zero count mean clean."""
+
+    name: str
+    realm: str
+    missing_enchants: List[str]
+    low_enchants: List[Tuple[str, int]]
+    empty_sockets: int
+    low_gems: List[Tuple[str, str]]
+
+    @property
+    def problem_count(self) -> int:
+        return len(self.missing_enchants) + len(self.low_enchants) + self.empty_sockets + len(self.low_gems)
+
+    @property
+    def is_clean(self) -> bool:
+        return self.problem_count == 0
+
+
+def _is_below_min_quality(quality: str) -> bool:
+    """True only when the quality is known and ranks below GEM_MIN_QUALITY."""
+    if quality not in _QUALITY_ORDER:
+        return False
+    return _QUALITY_ORDER.index(quality) < _QUALITY_ORDER.index(GEM_MIN_QUALITY)
+
+
+def audit_character(
+    name: str,
+    realm: str,
+    items: Sequence[EquippedItem],
+    gem_quality: Dict[int, str],
+) -> CharacterFindings:
+    """Audit one character's equipped items.
+
+    `gem_quality` maps a gem's item id to its quality string; ids missing from it are left
+    ungraded, so an unresolvable gem never produces a false positive.
+    """
+    by_slot = {item.slot: item for item in items}
+    missing: List[str] = []
+    low_enchants: List[Tuple[str, int]] = []
+    low_gems: List[Tuple[str, str]] = []
+    empty_sockets = 0
+
+    for slot in enchantable_slots(items):
+        item = by_slot.get(slot)
+        if item is None:
+            continue  # An empty slot is a different problem, and not this command's job.
+        permanent = [e for e in item.enchants if e.slot_type == "PERMANENT"]
+        if not permanent:
+            missing.append(slot)
+            continue
+        for enchant in permanent:
+            tier = parse_enchant_tier(enchant.display_string)
+            if tier is not None and tier < MAX_ENCHANT_TIER:
+                low_enchants.append((slot, tier))
+
+    for item in items:
+        for gem_id in item.sockets:
+            if gem_id is None:
+                empty_sockets += 1
+                continue
+            quality = gem_quality.get(gem_id, "")
+            if _is_below_min_quality(quality):
+                low_gems.append((item.slot, quality))
+
+    return CharacterFindings(
+        name=name,
+        realm=realm,
+        missing_enchants=missing,
+        low_enchants=low_enchants,
+        empty_sockets=empty_sockets,
+        low_gems=low_gems,
+    )
