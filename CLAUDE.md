@@ -168,7 +168,7 @@ Officer-only, on demand. `!gearaudit [character]` (coordinator/admin, `ELEVATED_
 `BLIZZ_CLIENT_SECRET`), and DMs the caller a worst-first report.
 
 Flagged: a missing **permanent** enchant on an enchantable slot, an **empty gem socket**, a
-**Tier-1 enchant**, and a **below-epic gem**. Not flagged: Tier-2 enchants (the cap this
+**Tier-1 enchant**, and a **rank-1 gem**. Not flagged: Tier-2 enchants (the cap this
 expansion), temporary weapon oils, and off-hands that are not weapons (`item_class.id != 2`).
 `ENCHANTABLE_SLOTS` is a module constant in `gearaudit.py` — head, shoulder, chest, legs, feet,
 both rings, main hand, plus a weapon off-hand — measured against the live roster and updated
@@ -178,8 +178,12 @@ There is **no background task, no DM to the audited player, and no persisted sta
 run the command and relay the result. Characters that fail to fetch (404 = rename or transfer)
 are listed separately, which doubles as a stale-mapping report. Gem grading reuses the client's
 `_item_cache` via `ItemInfo.quality`; a gem whose quality can't be resolved is left ungraded
-rather than flagged. A Tier-1 crafted variant of an epic gem is not detectable — that lives in
-`bonus_list` entries the equipment payload doesn't resolve.
+rather than flagged. Gem rank reads off item quality, but not the way rarity usually reads:
+in the current gem line (all item level 295) rank 1 stat gems are UNCOMMON, rank 2 are RARE
+(the `Flawless` prefix), and the meta diamonds are EPIC — so `GEM_MIN_QUALITY = "RARE"` is the
+floor, and requiring EPIC would flag every correctly-gemmed character. Rarity does not track
+recency either: decade-old Mists gems are EPIC at item level 32, so an outdated gem of the right
+rarity is not caught.
 
 ### Help Command
 `!help` / `!tools` — list all bot commands by category (scheduling, price watch, auction sniper, account) with usage and permissions.

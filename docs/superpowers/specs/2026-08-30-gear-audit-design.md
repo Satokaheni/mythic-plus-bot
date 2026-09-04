@@ -9,7 +9,7 @@ Add an officer-facing gear audit to the Mythic+ bot. `!gearaudit` fetches every
 mapped character's equipped items from Blizzard's
 [character equipment endpoint](https://develop.battle.net/documentation/world-of-warcraft/profile-apis)
 and reports who is missing an enchant, who has an empty gem socket, and who is
-carrying a Tier-1 enchant or a below-epic gem — so officers can tell those people
+carrying a Tier-1 enchant or a rank-1 gem — so officers can tell those people
 to grab the free replacements from the guild bank.
 
 The audit is **on demand only**. There is no background task and the bot never
@@ -46,11 +46,13 @@ one Tier 3. Tier 2 is the cap this expansion, so **Tier 1 is the only quality
 level worth flagging**. A "below max rank" rule would flag all 30 people and be
 worthless.
 
-**Gems** — a socket reports only `{socket_type, item: {id, name}, display_string}`;
-there is no quality marker. The gem's own item record does carry
-`quality: {type: "EPIC"}`, so grading requires a separate item lookup. Gems seen:
-`Indecipherable Eversong Diamond` (epic, neck), and `Flawless <stat> <stone>`
-variants.
+**Gems** — a socket reports only `{socket_type, item: {id, name}, display_string}`,
+with no quality marker and no rank field, so grading needs a separate item
+lookup. Every stat gem worn on the roster is a rank 2 `Flawless <stat> <stone>`
+(`RARE`), plus the `Eversong Diamond` meta (`EPIC`); all are item level 295. The
+`display_string` stats are identical within a gem (`+16/+7`), so they carry no
+rank signal — the rank is in the item id and its quality. See **Gem rank** under
+Rules.
 
 **Off-hands** — only 5/30 characters have an enchanted off-hand, because most
 off-hands are shields or held-in-off-hand items rather than weapons (verified on
@@ -114,7 +116,7 @@ A finding is one of four kinds:
 | `missing_enchant` | An enchantable slot holds an item with no `PERMANENT` enchantment. |
 | `empty_socket` | An equipped item has a socket whose `item` key is absent. |
 | `low_enchant` | A `PERMANENT` enchantment whose display string parses to Tier 1. |
-| `low_gem` | A socketed gem whose item quality is below `EPIC`. |
+| `low_gem` | A socketed gem whose item quality is below `RARE` — i.e. a rank 1 gem. |
 
 **Enchantable slots** are a module constant, derived from the evidence above:
 
@@ -133,12 +135,25 @@ and the comment records how it was measured.
 A slot with no equipped item is never flagged — an empty slot is a different
 problem, and not this command's job.
 
-**Known limit, stated rather than hidden:** a Tier-1 *crafted* variant of an
-otherwise-epic gem is indistinguishable through this API. Crafted quality lives
-in `bonus_list` entries the equipment payload does not resolve, and the gem's
-item record reports only the base quality. `low_gem` therefore catches
-wrong-rarity gems (a rare gem in an epic slot), not a low-rank craft of the
-right gem.
+**Gem rank** reads off the gem's item quality — but not the way item rarity
+usually reads, and an earlier revision of this spec got it wrong. Corrected
+2026-09-03 against Blizzard's item data for the whole current gem line (36 gems,
+all at item level 295):
+
+| Rank | Quality | Names | Item ids |
+|------|---------|-------|----------|
+| 1 | `UNCOMMON` | `Deadly Peridot`, `Quick Amethyst`, … | 240856-240886 |
+| 2 | `RARE` | `Flawless Deadly Peridot`, … | 240888-240918 |
+| meta | `EPIC` | `Indecipherable Eversong Diamond`, … | 240967-240983 |
+
+So `GEM_MIN_QUALITY = "RARE"`: below it is a rank 1 gem. The original `EPIC`
+threshold was generalized from a single sample — the neck meta diamond — and
+flagged all 90 correctly-socketed gems on the roster.
+
+**Known limit, stated rather than hidden:** rarity does not track recency, so an
+outdated gem of the right rarity is not caught — decade-old Mists gems are
+`EPIC` at item level 32. Detecting those would need an item-level floor, which
+is not in scope.
 
 ## Architecture
 
@@ -234,7 +249,7 @@ payloads captured 2026-08-30:
 
 - `parse_enchant_tier` — Tier 2 marker, Tier 1 marker, no marker (rune), garbage.
 - `audit_character` — clean character; missing enchant on each enchantable slot;
-  empty socket detection; Tier-1 enchant; below-epic gem; several problems at
+  empty socket detection; Tier-1 enchant; rank-1 gem; several problems at
   once.
 - Off-hand: a shield off-hand with no enchant is **not** flagged; a weapon
   off-hand with no enchant **is**.

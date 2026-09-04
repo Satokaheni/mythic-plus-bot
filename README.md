@@ -171,7 +171,7 @@ A coordinator/admin command for checking the roster's enchants and gems against 
 - `!gearaudit` — audit every mapped character
 - `!gearaudit <character>` — audit one character
 
-Flagged: a missing permanent enchant on an enchantable slot (head, shoulder, chest, legs, feet, both rings, main hand, and a weapon off-hand), an empty gem socket, a Tier-1 enchant, and a below-epic gem. Not flagged: Tier-2 enchants (the cap this expansion), temporary weapon oils, and shields. Characters that fail to fetch are listed separately — a 404 usually means a rename or transfer, so the mapping needs updating.
+Flagged: a missing permanent enchant on an enchantable slot (head, shoulder, chest, legs, feet, both rings, main hand, and a weapon off-hand), an empty gem socket, a Tier-1 enchant, and a rank-1 gem (rank 2 is the `Flawless` cut). Not flagged: Tier-2 enchants (the cap this expansion), temporary weapon oils, and shields. Characters that fail to fetch are listed separately — a 404 usually means a rename or transfer, so the mapping needs updating.
 
 Runs on demand only: there is no background task, and the audited player is never DM'd. Uses the existing `BLIZZ_CLIENT_ID` / `BLIZZ_CLIENT_SECRET` credentials, and needs a populated `character_mappings.json`.
 

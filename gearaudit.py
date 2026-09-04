@@ -26,7 +26,14 @@ ENCHANTABLE_SLOTS: Tuple[str, ...] = (
 )
 
 WEAPON_ITEM_CLASS_ID = 2  # OFF_HAND counts only when it holds a weapon; shields take no enchant.
-GEM_MIN_QUALITY = "EPIC"
+# Gem quality maps to crafted rank within the current gem line, but NOT the way item rarity
+# usually reads. Measured against Blizzard's item data on 2026-09-03 (all 36 gems at item
+# level 295): rank 1 stat gems are UNCOMMON ("Deadly Peridot", ids 240856-240886), rank 2 are
+# RARE ("Flawless Deadly Peridot", 240888-240918), and the meta diamonds are EPIC
+# ("Indecipherable Eversong Diamond", 240967-240983). So RARE is the acceptable floor: below it
+# is a rank 1 gem. Requiring EPIC would flag every correctly-gemmed character on the roster.
+# Rarity does not track recency either — decade-old Mists gems are EPIC at item level 32.
+GEM_MIN_QUALITY = "RARE"
 MAX_ENCHANT_TIER = 2  # The cap this expansion, so Tier 1 is the only rank worth flagging.
 
 # Blizzard's quality ladder, lowest first. Anything not listed is left ungraded.
