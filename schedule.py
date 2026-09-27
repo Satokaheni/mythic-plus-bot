@@ -27,9 +27,7 @@ class Schedule:
         """Initialize a new schedule with the scheduling raider and details."""
         self.level = level
         self.run_type = run_type  # "one" or "multiple"
-        # Parse date_scheduled as UTC
         self.date_scheduled = datetime.strptime(date_scheduled, "%Y-%m-%d").replace(tzinfo=raider_scheduled.timezone)
-        # Ensure start_time is in correct timezone
         self.start_time = (
             start_time.astimezone(raider_scheduled.timezone)
             if start_time.tzinfo
@@ -48,25 +46,25 @@ class Schedule:
         self.organizer_id: int = raider_scheduled.user_id
         self.raider_signup(raider_scheduled, role=organizer_role)
 
-    def _check_fill(self):
-        """Check fill raiders and assign them to available slots."""
-        filled = None
-        for raider in list(self.team["fill"]):
-            if not filled:
-                roles = raider.roles
-                for role in roles:
-                    if role == "dps":
-                        if len(self.team["dps"]) < 3:
-                            self.team["dps"].append(raider)
-                            self.signup += 1
-                            filled = raider
-                        else:
-                            if not self.team[role]:
-                                self.team[role] = raider
-                                self.signup += 1
-                                filled = raider
-        if filled:
-            self.team["fill"].remove(filled)
+    def _check_fill(self) -> Optional[Raider]:
+        """Promote the first fill raider who fits an open slot and return them, or None."""
+        for raider in self.team["fill"]:
+            for role in raider.roles:
+                if role == "dps":
+                    if len(self.team["dps"]) >= 3:
+                        continue
+                    self.team["dps"].append(raider)
+                    if len(self.team["dps"]) == 3:
+                        self.missing.remove("dps")
+                elif not self.team[role]:
+                    self.team[role] = raider
+                    self.missing.remove(role)
+                else:
+                    continue
+                self.signup += 1
+                self.team["fill"].remove(raider)
+                return raider
+        return None
 
     def send_message(
         self, role_mentions: dict = None, bot_client: "MyClient" = None
@@ -82,8 +80,6 @@ class Schedule:
         """
         from views import ScheduleButtonView
 
-        # Create the embed with a title and color
-        # Use different colors based on fill status
         if self.is_filled():
             color = Color.green()
         elif len(self.missing) == 0 or (
@@ -95,14 +91,11 @@ class Schedule:
 
         embed = Embed(title="⚔️ Scheduled Mythic+ Run", color=color, timestamp=self.start_time.astimezone(timezone.utc))
 
-        # Add the level field
         embed.add_field(name="📊 Key Level", value=f"**{self.level}**", inline=True)
 
-        # Add run type field (one or multiple keys)
         run_type_display = "🔑 One Key" if self.run_type == "one" else "🔑🔑 Multiple Keys"
         embed.add_field(name="📝 Run Type", value=f"**{run_type_display}**", inline=True)
 
-        # Add status field showing missing roles
         if self.is_filled():
             status_value = "✅ **FULL** - Ready to go!"
         else:
@@ -120,14 +113,12 @@ class Schedule:
 
         embed.add_field(name="📋 Status", value=status_value, inline=True)
 
-        # Add the scheduled time field
         embed.add_field(
             name="🕐 Scheduled Time",
             value=f"<t:{int(self.start_time.astimezone(timezone.utc).timestamp())}:F>",
             inline=True,
         )
 
-        # Add organizer field
         embed.add_field(
             name="📣 Posted By",
             value=f"<@{self.organizer_id}>",
@@ -137,7 +128,6 @@ class Schedule:
         # Spacer to complete the 3-column row (Scheduled Time | Posted By | blank)
         embed.add_field(name="\u200b", value="\u200b", inline=True)
 
-        # Add team composition
         tank_value = self.team["tank"].mention if self.team["tank"] else "`🔍 NEEDED`"
         healer_value = self.team["healer"].mention if self.team["healer"] else "`🔍 NEEDED`"
         dps1_value = self.team["dps"][0].mention if len(self.team["dps"]) > 0 else "`🔍 NEEDED`"
@@ -145,36 +135,29 @@ class Schedule:
         dps3_value = self.team["dps"][2].mention if len(self.team["dps"]) > 2 else "`🔍 NEEDED`"
 
         embed.add_field(name="🛡️ Tank", value=tank_value, inline=True)
-
         embed.add_field(name="💚 Healer", value=healer_value, inline=True)
-
         embed.add_field(name="⚔️ DPS", value=f"{dps1_value}\n{dps2_value}\n{dps3_value}", inline=True)
 
-        # Add fill queue if there are any
         if self.team["fill"]:
             fill_list = "\n".join([f"{raider.mention} ({', '.join(raider.roles)})" for raider in self.team["fill"]])
             embed.add_field(name="📋 Fill Queue", value=fill_list, inline=False)
 
-        # Add note if present
         if self.note:
             embed.add_field(name="📝 Note", value=self.note, inline=False)
 
-        # Add instructions footer
         embed.set_footer(text="Click 'Sign Up' to confirm attendance • Click 'Remove' to remove yourself")
 
-        # Create the button view
         view = ScheduleButtonView(self, bot_client) if bot_client else None
 
-        # Generate content for role mentions if schedule is not full
         content = ""
         if not self.is_filled() and role_mentions:
             mentions = []
             if "tank" in self.missing and "tank" in role_mentions:
-                mentions.append(f"{role_mentions['tank'].mention}")
+                mentions.append(role_mentions["tank"].mention)
             if "healer" in self.missing and "healer" in role_mentions:
-                mentions.append(f"{role_mentions['healer'].mention}")
+                mentions.append(role_mentions["healer"].mention)
             if "dps" in self.missing and "dps" in role_mentions:
-                mentions.append(f"{role_mentions['dps'].mention}")
+                mentions.append(role_mentions["dps"].mention)
 
             if mentions:
                 content = f"🔔 **Roles Needed:** {' '.join(mentions)}"
@@ -235,8 +218,6 @@ class Schedule:
         Returns the displaced Raider if displacement occurred, None otherwise.
         The displaced raider is fully removed from the slot and their current_runs.
         """
-        from datetime import datetime, timezone
-
         if effective_role != new_raider.roles[0]:
             return None
 
@@ -280,29 +261,30 @@ class Schedule:
 
         return displaced
 
-    def raider_remove(self, raider: Raider):
-        """Remove a raider from the schedule and update team composition."""
-        roles = raider.roles
+    def raider_remove(self, raider: Raider) -> Optional[Raider]:
+        """Remove a raider from the schedule and return the fill raider promoted into their slot, if any."""
+        promoted = None
         if raider in self.team["fill"]:
             self.team["fill"].remove(raider)
         else:
-            for role in roles:
+            for role in raider.roles:
                 if role == "dps" and raider in self.team["dps"]:
                     self.team["dps"].remove(raider)
                     self.signup -= 1
                     if "dps" not in self.missing:
                         self.missing.append("dps")
-                    self._check_fill()
+                    promoted = self._check_fill()
                 elif role in self.team and self.team[role] == raider:
                     self.team[role] = None
                     self.signup -= 1
                     self.missing.append(role)
-                    self._check_fill()
+                    promoted = self._check_fill()
         if raider in self.members:
             self.members.remove(raider)
         if self.signup < 5:
             self.full = False
         raider.remove_run(self)
+        return promoted
 
     def is_filled(self) -> bool:
         """Return True if the schedule is full (5 signups)."""
@@ -327,14 +309,13 @@ class Schedule:
             dps_needed = 3 - len(self.team["dps"])
             open_parts.append(f"⚔️ DPS ({dps_needed} needed)")
 
-        roster = (
+        return (
             f"**Current Roster:**\n"
             f"🛡️ Tank: {tank}\n"
             f"💚 Healer: {healer}\n"
             f"⚔️ DPS: {', '.join(dps_slots)}\n\n"
             f"**Open Spots:** {', '.join(open_parts) if open_parts else 'None'}"
         )
-        return roster
 
     def has_raider(self, raider: Raider) -> bool:
         """Check if a raider is already in this schedule."""
