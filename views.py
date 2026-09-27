@@ -209,7 +209,6 @@ class ScheduleButtonView(discord.ui.View):
         if schedule in raider.current_runs:
             fill_status = schedule.is_filled()
             promoted = schedule.raider_remove(raider)
-            raider.remove_run(schedule)
 
             if schedule.signup == 0:
                 await interaction.message.delete()
@@ -704,10 +703,6 @@ class RemoveRaiderSelect(discord.ui.Select):
 
         fill_status = schedule.is_filled()
         promoted = schedule.raider_remove(raider)
-        raider.remove_run(schedule)
-
-        if schedule.is_filled() != fill_status:
-            await bot.notify_schedule(schedule)
 
         embed, view, content = schedule.send_message(bot.role_mentions, bot)
         try:
@@ -719,6 +714,8 @@ class RemoveRaiderSelect(discord.ui.Select):
             bot.raiders, bot.schedules, bot.availability, bot.availability_message_id, bot.dm_map, bot.dm_timestamps
         )
         await interaction.response.send_message(f"✅ **{raider.name}** has been removed from the run.", ephemeral=True)
+        if schedule.is_filled() != fill_status:
+            await bot.notify_schedule(schedule)
         if promoted:
             await bot._notify_promoted(promoted, schedule)
         self.view.stop()
@@ -807,7 +804,6 @@ class ChangeRoleTargetSelect(discord.ui.Select):
         bot = self.bot_client
 
         promoted = schedule.raider_remove(raider)
-        raider.remove_run(schedule)
         schedule.raider_signup(raider, role=new_role)
         raider.add_run(schedule)
 

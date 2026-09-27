@@ -2212,9 +2212,6 @@ class MyClient(discord.Client):
                 if schedule in raider.current_runs:
                     fill_status = schedule.is_filled()
                     promoted = schedule.raider_remove(raider)
-                    raider.remove_run(schedule)
-                    if schedule.is_filled() != fill_status:
-                        await self.notify_schedule(schedule)
 
                     if schedule.signup == 0:
                         message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_id)
@@ -2225,6 +2222,8 @@ class MyClient(discord.Client):
                         message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_id)
                         embed, view, content = schedule.send_message(self.role_mentions, self)
                         await message.edit(content=content if content else None, embed=embed, view=view)
+                        if schedule.is_filled() != fill_status:
+                            await self.notify_schedule(schedule)
                         if promoted:
                             await self._notify_promoted(promoted, schedule)
 
