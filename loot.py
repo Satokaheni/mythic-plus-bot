@@ -10,7 +10,7 @@ from typing import List, Tuple
 
 from dotenv import load_dotenv
 
-from lootcouncil.config import Config
+from lootcouncil.config import Config, ConfigError
 from lootcouncil.performance import PerformanceAnalyzer
 from lootcouncil.ranker import LootRanker, LootResult
 from lootcouncil.warcraftlogs import WarcraftLogsClient
@@ -117,7 +117,7 @@ def main(argv=None) -> int:
             return 2
     try:
         cfg.validate()
-    except Exception as exc:
+    except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

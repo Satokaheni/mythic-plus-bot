@@ -355,3 +355,73 @@ def test_from_dict_skips_stale_user_ids(make_raider, make_schedule):
     restored = Schedule.from_dict(d, raiders_by_id={tank.user_id: tank})
     assert restored.team["tank"] is None
     assert restored.members == []
+
+
+# ---------------------------------------------------------------------------
+# Fill queue promotion
+# ---------------------------------------------------------------------------
+
+
+def test_fill_promoted_to_tank_after_tank_leaves(make_raider, make_full_schedule):
+    sched = make_full_schedule()
+    tank = sched.team["tank"]
+    backup = make_raider(user_id=6, roles=["tank"])
+    sched.raider_signup(backup)
+
+    sched.raider_remove(tank)
+
+    assert sched.team["tank"] is backup
+    assert backup not in sched.team["fill"]
+    assert "tank" not in sched.missing
+    assert sched.signup == 5
+    assert sched.is_filled()
+
+
+def test_fill_promoted_to_healer_after_healer_leaves(make_raider, make_full_schedule):
+    sched = make_full_schedule()
+    healer = sched.team["healer"]
+    backup = make_raider(user_id=6, roles=["healer"])
+    sched.raider_signup(backup)
+
+    sched.raider_remove(healer)
+
+    assert sched.team["healer"] is backup
+    assert "healer" not in sched.missing
+
+
+def test_dps_promotion_clears_missing(make_raider, make_full_schedule):
+    sched = make_full_schedule()
+    backup = make_raider(user_id=6, roles=["dps"])
+    sched.raider_signup(backup)
+
+    sched.raider_remove(sched.team["dps"][0])
+
+    assert backup in sched.team["dps"]
+    assert "dps" not in sched.missing
+
+
+def test_multi_role_fill_takes_only_one_slot(make_raider, make_schedule):
+    sched = make_schedule(raider=make_raider(user_id=1, roles=["healer"]))
+    flex = make_raider(user_id=6, roles=["tank", "dps"])
+    sched.team["fill"].append(flex)
+
+    sched._check_fill()
+
+    assert sched.team["tank"] is flex
+    assert flex not in sched.team["dps"]
+    assert "tank" not in sched.missing
+    assert sched.signup == 2
+
+
+def test_raider_remove_returns_promoted_raider(make_raider, make_full_schedule):
+    sched = make_full_schedule()
+    backup = make_raider(user_id=6, roles=["healer"])
+    sched.raider_signup(backup)
+
+    assert sched.raider_remove(sched.team["healer"]) is backup
+
+
+def test_raider_remove_returns_none_without_promotion(make_full_schedule):
+    sched = make_full_schedule()
+
+    assert sched.raider_remove(sched.team["healer"]) is None

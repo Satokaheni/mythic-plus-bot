@@ -33,7 +33,7 @@ def observations(events: List[dict], raiders: dict, now: datetime) -> List[Obs]:
     - run_completed: one +1 obs per roster member, slot from ts_utc + that member's tz.
     - offer_accepted / raiderio_run: +1 at the event's stored (local_weekday, local_block).
     - offer_declined: -1 at its stored slot.
-    - avail_reaction and slotless/tz-less events are skipped.
+    - avail_reaction and slotless events are skipped.
     """
     out: List[Obs] = []
     for e in events:
@@ -46,7 +46,7 @@ def observations(events: List[dict], raiders: dict, now: datetime) -> List[Obs]:
         if etype == "run_completed":
             for uid in e.get("roster") or []:
                 raider = raiders.get(uid)
-                if raider is None or getattr(raider, "timezone", None) is None:
+                if raider is None:
                     continue
                 local = ts.astimezone(raider.timezone)
                 out.append(Obs(uid, local.weekday(), local.hour // 2, age, 1))
@@ -70,8 +70,7 @@ def predict(user_obs: List[Obs], weekday: int, block: int) -> float:
     block_obs = [o for o in user_obs if o.weekday == weekday and o.block == block]
     wpos = sum(_weight(o.age_weeks) for o in block_obs if o.sign > 0)
     wneg = sum(_weight(o.age_weeks) for o in block_obs if o.sign < 0)
-    prior = BASE_PRIOR
-    return (wpos + ALPHA * prior) / (wpos + wneg + ALPHA)
+    return (wpos + ALPHA * BASE_PRIOR) / (wpos + wneg + ALPHA)
 
 
 @dataclass
@@ -138,7 +137,7 @@ def _next_slot_datetime(now_cst: datetime, weekday: int, block: int) -> datetime
     return candidate
 
 
-def rank_slots(green: list, obs_by_user: Dict[int, List["Obs"]], now_cst: datetime) -> List[tuple]:
+def rank_slots(green: list, obs_by_user: Dict[int, List[Obs]], now_cst: datetime) -> List[tuple]:
     """Rank the coming week's candidate slots by the best role-valid team's mean availability."""
     ranked = []
     for weekday in range(7):
@@ -174,10 +173,10 @@ def format_preview(ranked: List[tuple]) -> str:
     return "\n".join(lines)
 
 
-def _p(team: "Team", raider) -> str:
+def _p(team: Team, raider) -> str:
     """Per-member predicted probability for display."""
     return f"{team.probs.get(raider.user_id, 0.0):.2f}"
 
 
 def _role_tag(raider, role: str) -> str:
-    return "" if (raider.roles and raider.roles[0] == role) else " ⚠️off-role"
+    return "" if _is_primary(raider, role) else " ⚠️off-role"

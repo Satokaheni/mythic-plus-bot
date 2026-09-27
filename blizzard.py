@@ -161,7 +161,6 @@ class BlizzardClient:
     async def _get(self, session: aiohttp.ClientSession, path: str, namespace: str, headers: Optional[Dict[str, str]] = None) -> aiohttp.ClientResponse:
         # Retry once on 401: the cached token may have been revoked before its
         # assumed expiry, so clear it and re-mint before giving up.
-        resp = None
         for attempt in range(2):
             token = await self.ensure_token(session)
             h = {"Authorization": f"Bearer {token}", "Accept-Encoding": "gzip"}
@@ -175,7 +174,6 @@ class BlizzardClient:
                 self._token_expiry = 0.0
                 continue
             return resp
-        return resp
 
     async def list_connected_realms(self, session: aiohttp.ClientSession) -> List[int]:
         async with await self._get(session, "/data/wow/connected-realm/index", "dynamic") as resp:
@@ -190,8 +188,7 @@ class BlizzardClient:
             if resp.status == 304:
                 return NOT_MODIFIED
             resp.raise_for_status()
-            data = await resp.json()
-            return _parse_auctions(data), resp.headers.get("Last-Modified")
+            return _parse_auctions(await resp.json()), resp.headers.get("Last-Modified")
 
     async def item_info(self, session: aiohttp.ClientSession, item_id: int) -> ItemInfo:
         if item_id in self._item_cache:

@@ -74,13 +74,9 @@ def evaluate(watch: TokenWatch, price: int) -> Optional[int]:
     The caller is responsible for committing `last_alert` — and only after the DM
     has actually been delivered.
     """
-    if watch.threshold is None:
+    if watch.threshold is None or price < watch.threshold:
         return None
-    if price < watch.threshold:
-        return None
-    if watch.last_alert is None:
-        return price
-    if price >= watch.last_alert + STEP_COPPER:
+    if watch.last_alert is None or price >= watch.last_alert + STEP_COPPER:
         return price
     return None
 

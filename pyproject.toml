@@ -40,10 +40,12 @@ target-version = ["py39", "py310", "py311"]
 [tool.ruff]
 line-length = 120
 target-version = "py39"
+
+[tool.ruff.lint]
 select = ["E", "F", "W", "I"]
 ignore = ["E501"]
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 known-first-party = ["bot", "raider", "schedule", "views", "utils", "undermine", "watchlist", "lootcouncil"]
 
 [tool.pytest.ini_options]
