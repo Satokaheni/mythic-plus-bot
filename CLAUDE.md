@@ -55,7 +55,8 @@ A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Myt
 - `organizer_id` — Discord user ID of whoever created the run
 - `note` — optional run note
 - `try_displace_off_roler(raider, role)` — bumps off-role fillers for main-role players (>8 hrs before run)
-- `_check_fill()` — auto-promotes fill queue to empty slots
+- `_check_fill()` — promotes the first fill-queue raider who fits an open tank/healer/dps slot (one slot per raider), updating `missing`
+- `raider_remove(raider)` — frees the slot and returns the fill raider promoted into it (or `None`); callers DM them via `MyClient._notify_promoted`
 - `send_message(role_mentions, bot)` — returns `(embed, view, content)` for posting/editing
 
 ### `MyClient` (bot.py)

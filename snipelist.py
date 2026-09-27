@@ -143,7 +143,7 @@ def plan_alerts(snipe: Snipe, best: Optional[Tuple[int, int, int]], banker_id: i
     """
     plans: List[AlertPlan] = []
     if best is not None:
-        snipe.last_price, _, snipe.last_realm = best[0], best[1], best[2]
+        snipe.last_price, snipe.last_realm = best[0], best[2]
 
     alerted_ids = set()
     for uid, sub in snipe.subscribers.items():

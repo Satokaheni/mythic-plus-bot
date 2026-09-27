@@ -44,7 +44,7 @@ def bulk_price(auctions, target_qty: int) -> tuple:
     - ``vwap`` — total cost to buy ``target_qty`` units divided by ``target_qty``
       ("the overall bulk buy price"); ``0.0`` when not fillable.
 
-    A thin cheapest lot no longer dominates: if only 20 units sit at the floor and
+    A thin cheapest lot can't dominate: if only 20 units sit at the floor and
     you want 100, the VWAP reflects the more expensive lots you'd have to buy too.
     """
     units_available = sum(qty for _, qty in auctions)
@@ -183,11 +183,10 @@ def evaluate(
 ) -> Signal:
     """Decide whether the *bulk* price to fill ``target_qty`` units sits in the low band.
 
-    Instead of the single cheapest lot, the detector watches the VWAP to actually
-    acquire ``target_qty`` units by walking the auction ladder (`bulk_price`). If fewer
-    than ``target_qty`` units are listed there's no bulk opportunity — the depth gate
-    fails and nothing fires. When no ladder is supplied the detector degrades to the
-    legacy cheapest-lot behavior so existing callers keep working.
+    The watched price is the VWAP to acquire ``target_qty`` units off the auction
+    ladder (`bulk_price`). If fewer than ``target_qty`` units are listed there's no
+    bulk opportunity — the depth gate fails and nothing fires. When no ladder is
+    supplied the detector falls back to the cheapest-lot price with no depth gate.
     """
     target = target_qty if target_qty and target_qty > 0 else 1
     window = daily_prices[-BASELINE_WINDOW_DAYS:]
@@ -196,7 +195,6 @@ def evaluate(
         fillable, vwap, units_available = bulk_price(auctions, target)
         watched_price = int(round(vwap)) if fillable else now_price
     else:
-        # No ladder: fall back to the cheapest-lot price, no depth gate.
         fillable, units_available = True, quantity
         watched_price = now_price
 
@@ -332,14 +330,14 @@ def parse_watch_command(args: List[str]) -> dict:
         item_id = int(args[i])
         i += 1
         target, i = _take_x_target(args, i)
-        if target is False:  # malformed -x flag (e.g. a spaced "-x 100")
+        if target is False:
             return {"kind": "error", "reason": "bad_flag"}
         items.append((item_id, target))
 
     if not items:
         return {"kind": "error", "reason": "no_item"}
 
-    trailing = args[i:]  # whatever's left after the run of ids
+    trailing = args[i:]
 
     # Two or more ids -> multi. A leftover token is ambiguous across items.
     if len(items) >= 2:

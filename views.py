@@ -1,8 +1,9 @@
 """Discord UI components for WoW class/role and key request selections."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from logging import getLogger
 from typing import TYPE_CHECKING, Optional
+from zoneinfo import ZoneInfo
 
 import discord
 
@@ -32,36 +33,29 @@ class ScheduleButtonView(discord.ui.View):
     async def signup_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Handle signup button click."""
         from raider import Raider
-        from views import WoWSelectionView
 
         user = interaction.user
         schedule = self.schedule
         bot = self.bot_client
 
-        # Message must be a schedule
         if interaction.message.id not in bot.schedules:
             await interaction.response.send_message("❌ This is not a valid schedule.", ephemeral=True)
             return
 
-        # Handle unregistered users - prompt them to register
         if user.id not in bot.raiders:
-            # Respond to the interaction first to prevent timeout
             await interaction.response.send_message(
                 "📝 You're not registered yet! Please check your DMs to select your class and roles.", ephemeral=True
             )
 
             try:
-                # Send registration form via DM
-                selection_view = WoWSelectionView(timeout=180)  # 3 minutes timeout
+                selection_view = WoWSelectionView(timeout=180)
                 await user.send(
                     "👋 Welcome! Before you can sign up for runs, please choose your **World of Warcraft class** and **roles** if you have only one role please ignore the secondary selection:",
                     view=selection_view,
                 )
 
-                # Wait for the user to complete the form
                 await selection_view.wait()
 
-                # Build roles list from selections
                 roles = []
                 if selection_view.selected_primary:
                     roles.append(selection_view.selected_primary)
@@ -71,14 +65,12 @@ class ScheduleButtonView(discord.ui.View):
                 ):
                     roles.append(selection_view.selected_secondary)
 
-                # Validate that user completed the form
                 if not selection_view.selected_class or not roles or not selection_view.selected_timezone:
                     await user.send(
                         "❌ Registration incomplete. Please try clicking the button again and fill out all fields."
                     )
                     return
 
-                # Create the new raider
                 bot.raiders[user.id] = Raider(
                     user, selection_view.selected_class, roles, selection_view.selected_timezone
                 )
@@ -87,7 +79,6 @@ class ScheduleButtonView(discord.ui.View):
                     f"New raider registered via button: {user.display_name}: class={selection_view.selected_class} roles={roles} timezone={selection_view.selected_timezone}"
                 )
 
-                # Now process the signup action
                 raider = bot.raiders[user.id]
                 logger.info(f"Raider: {raider} current runs: {raider.current_runs} sign up: {schedule}")
                 if raider.check_availability(schedule) and schedule not in raider.current_runs:
@@ -97,7 +88,6 @@ class ScheduleButtonView(discord.ui.View):
                     schedule.raider_signup(raider)
                     raider.add_run(schedule)
 
-                    # Update the message with new embed and view
                     embed, view, content = schedule.send_message(bot.role_mentions, bot)
                     await interaction.message.edit(content=content if content else None, embed=embed, view=view)
 
@@ -140,18 +130,15 @@ class ScheduleButtonView(discord.ui.View):
 
             return
 
-        # User is registered, process normally
         raider = bot.raiders[user.id]
         logger.info(f"Raider: {raider} current runs: {raider.current_runs} sign up: {schedule}")
 
-        # Check availability before prompting for role
         if not raider.check_availability(schedule) or schedule in raider.current_runs:
             await interaction.response.defer(ephemeral=True)
             conflict_reason = raider.get_schedule_conflict_reason(schedule)
             await interaction.followup.send(conflict_reason or "❌ Unable to sign up for this run.", ephemeral=True)
             return
 
-        # If raider has multiple roles, ask which one they want to fill
         selected_role = None
         if len(raider.roles) > 1:
             role_view = RoleSelectView(raider.roles)
@@ -178,7 +165,6 @@ class ScheduleButtonView(discord.ui.View):
         schedule.raider_signup(raider, selected_role)
         raider.add_run(schedule)
 
-        # Update the message with new embed and view
         embed, view, content = schedule.send_message(bot.role_mentions, bot)
         await interaction.message.edit(content=content if content else None, embed=embed, view=view)
 
@@ -206,30 +192,24 @@ class ScheduleButtonView(discord.ui.View):
         schedule = self.schedule
         bot = self.bot_client
 
-        # Message must be a schedule
         if interaction.message.id not in bot.schedules:
             await interaction.response.send_message("❌ This is not a valid schedule.", ephemeral=True)
             return
 
-        # Handle unregistered users
         if user.id not in bot.raiders:
             await interaction.response.send_message(
                 "📝 You're not registered yet, so you can't be signed up for this run.", ephemeral=True
             )
             return
 
-        # User is registered, process normally
         raider = bot.raiders[user.id]
 
-        # Defer immediately to prevent interaction timeout
         await interaction.response.defer(ephemeral=True)
 
         if schedule in raider.current_runs:
             fill_status = schedule.is_filled()
-            schedule.raider_remove(raider)
-            raider.remove_run(schedule)
+            promoted = schedule.raider_remove(raider)
 
-            # If schedule is now empty, delete it
             if schedule.signup == 0:
                 await interaction.message.delete()
                 del bot.schedules[interaction.message.id]
@@ -240,7 +220,6 @@ class ScheduleButtonView(discord.ui.View):
                     "❌ You've been removed. Schedule deleted (no remaining signups).", ephemeral=True
                 )
             else:
-                # Update the message with new embed and view
                 embed, view, content = schedule.send_message(bot.role_mentions, bot)
                 await interaction.message.edit(content=content if content else None, embed=embed, view=view)
                 await interaction.followup.send("❌ You've been removed from this run.", ephemeral=True)
@@ -248,6 +227,8 @@ class ScheduleButtonView(discord.ui.View):
             # Notify remaining members of fill status change AFTER the embed is updated
             if schedule.is_filled() != fill_status:
                 await bot.notify_schedule(schedule)
+            if promoted:
+                await bot._notify_promoted(promoted, schedule)
 
             await bot.message_user(raider, "❌", schedule)
 
@@ -269,7 +250,7 @@ class ScheduleButtonView(discord.ui.View):
             return
 
         is_organizer = interaction.user.id == schedule.organizer_id
-        is_coordinator = interaction.user.id in self.bot_client.elevated_ids
+        is_coordinator = interaction.user.id in bot.elevated_ids
         if not is_organizer and not is_coordinator:
             await interaction.response.send_message(
                 "❌ Only the organizer or coordinator can manage this schedule.", ephemeral=True
@@ -324,8 +305,6 @@ class ConfirmDeleteView(discord.ui.View):
 
     @discord.ui.button(label="Yes, Delete", style=discord.ButtonStyle.danger, emoji="🗑️")
     async def confirm_delete(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from datetime import timezone
-
         bot = self.bot_client
         schedule = self.schedule
 
@@ -407,9 +386,6 @@ class ModifyScheduleModal(discord.ui.Modal, title="Modify Schedule"):
         self.add_item(self.note_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        from datetime import datetime as dt
-        from datetime import timezone
-
         bot = self.bot_client
         schedule = self.schedule
 
@@ -418,18 +394,16 @@ class ModifyScheduleModal(discord.ui.Modal, title="Modify Schedule"):
         date_str = self.date_input.value.strip()
         time_str = self.time_input.value.strip()
 
-        # Parse date
         try:
-            new_date = dt.strptime(date_str, "%Y-%m-%d")
+            new_date = datetime.strptime(date_str, "%Y-%m-%d")
         except ValueError:
             await interaction.response.send_message("❌ Invalid date format. Use YYYY-MM-DD.", ephemeral=True)
             return
 
-        # Parse time (accept 24h or 12h AM/PM)
         new_time = None
         for fmt in ("%H:%M", "%I:%M %p", "%I:%M%p"):
             try:
-                new_time = dt.strptime(time_str, fmt)
+                new_time = datetime.strptime(time_str, fmt)
                 break
             except ValueError:
                 continue
@@ -440,9 +414,11 @@ class ModifyScheduleModal(discord.ui.Modal, title="Modify Schedule"):
             return
 
         orig_tz = schedule.start_time.tzinfo
-        new_start_time = dt(new_date.year, new_date.month, new_date.day, new_time.hour, new_time.minute, tzinfo=orig_tz)
+        new_start_time = datetime(
+            new_date.year, new_date.month, new_date.day, new_time.hour, new_time.minute, tzinfo=orig_tz
+        )
 
-        if new_start_time.astimezone(timezone.utc) < dt.now(timezone.utc):
+        if new_start_time.astimezone(timezone.utc) < datetime.now(timezone.utc):
             await interaction.response.send_message(
                 "❌ The new date/time is in the past. Please choose a future time.", ephemeral=True
             )
@@ -726,11 +702,7 @@ class RemoveRaiderSelect(discord.ui.Select):
             return
 
         fill_status = schedule.is_filled()
-        schedule.raider_remove(raider)
-        raider.remove_run(schedule)
-
-        if schedule.is_filled() != fill_status:
-            await bot.notify_schedule(schedule)
+        promoted = schedule.raider_remove(raider)
 
         embed, view, content = schedule.send_message(bot.role_mentions, bot)
         try:
@@ -742,6 +714,10 @@ class RemoveRaiderSelect(discord.ui.Select):
             bot.raiders, bot.schedules, bot.availability, bot.availability_message_id, bot.dm_map, bot.dm_timestamps
         )
         await interaction.response.send_message(f"✅ **{raider.name}** has been removed from the run.", ephemeral=True)
+        if schedule.is_filled() != fill_status:
+            await bot.notify_schedule(schedule)
+        if promoted:
+            await bot._notify_promoted(promoted, schedule)
         self.view.stop()
 
 
@@ -827,8 +803,7 @@ class ChangeRoleTargetSelect(discord.ui.Select):
         schedule = self.schedule
         bot = self.bot_client
 
-        schedule.raider_remove(raider)
-        raider.remove_run(schedule)
+        promoted = schedule.raider_remove(raider)
         schedule.raider_signup(raider, role=new_role)
         raider.add_run(schedule)
 
@@ -852,6 +827,8 @@ class ChangeRoleTargetSelect(discord.ui.Select):
         await interaction.response.send_message(
             f"✅ **{raider.name}** has been moved to **{role_display}**.", ephemeral=True
         )
+        if promoted:
+            await bot._notify_promoted(promoted, schedule)
         self.view.stop()
 
 
@@ -985,14 +962,13 @@ class WoWClassSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         """Handle class selection and store it on the parent view."""
-        # store the chosen value on the parent view for retrieval
         if self.view:
             self.view.selected_class = self.values[0]
         await interaction.response.defer()
 
 
 class PrimaryRoleSelect(discord.ui.Select):
-    """Dropdown select for choosing primary role with class validation."""
+    """Dropdown select for choosing primary role."""
 
     def __init__(self):
         roles = ["tank", "healer", "dps"]
@@ -1007,14 +983,14 @@ class PrimaryRoleSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        """Handle primary role selection with validation against class roles."""
+        """Store the primary role on the parent view."""
         if self.view:
             self.view.selected_primary = self.values[0]
         await interaction.response.defer()
 
 
 class SecondaryRoleSelect(discord.ui.Select):
-    """Dropdown select for choosing secondary role with class and primary role validation."""
+    """Dropdown select for choosing an optional secondary role."""
 
     def __init__(self):
         roles = ["tank", "healer", "dps", "none"]
@@ -1029,7 +1005,7 @@ class SecondaryRoleSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        """Handle secondary role selection with validation against class roles and primary role."""
+        """Store the secondary role, rejecting a duplicate of the primary."""
         if self.view:
             if self.view.selected_primary and self.values[0] == self.view.selected_primary:
                 await interaction.response.send_message(
@@ -1073,7 +1049,6 @@ class SubmitButton(discord.ui.Button):
         """Handle submit button click and stop the view."""
         view = self.view
 
-        # Build response message with user's selections
         message = "**Your Selection:**\n"
         if view.selected_class:
             message += f"Class: **{view.selected_class.title()}**\n"
@@ -1085,8 +1060,7 @@ class SubmitButton(discord.ui.Button):
             message += f"Timezone: **{view.selected_timezone}**"
 
         await interaction.response.send_message(message, ephemeral=True)
-        if view:
-            view.stop()
+        view.stop()
 
 
 class WoWSelectionView(discord.ui.View):
@@ -1094,7 +1068,6 @@ class WoWSelectionView(discord.ui.View):
 
     def __init__(self, timeout: int = 60) -> None:
         super().__init__(timeout=timeout)
-        # attributes to hold the user's choices
         self.selected_class: Optional[str] = None
         self.selected_primary: Optional[str] = None
         self.selected_secondary: Optional[str] = None
@@ -1125,7 +1098,6 @@ class WoWLevelSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         """Handle level selection and store it on the parent view."""
-        # store the chosen value on the parent view for retrieval
         if self.view:
             self.view.selected_level = self.values[0]
         await interaction.response.defer()
@@ -1137,19 +1109,17 @@ class WoWDaySelect(discord.ui.Select):
     def __init__(self):
         today = datetime.now().date()
         days = []
-        for i in range(7):  # Next 7 days starting from today
+        for i in range(7):
             date = today + timedelta(days=i)
-            label = date.strftime("%A, %B %d")  # e.g., "Monday, January 16"
+            label = date.strftime("%A, %B %d")
             if i == 0:
                 label += " (Today)"
-            value = date.isoformat()  # e.g., "2026-01-16"
-            days.append(discord.SelectOption(label=label, value=value))
+            days.append(discord.SelectOption(label=label, value=date.isoformat()))
 
         super().__init__(placeholder="Choose the day", min_values=1, max_values=1, options=days, custom_id="wow_day")
 
     async def callback(self, interaction: discord.Interaction) -> None:
         """Handle day selection and store it on the parent view."""
-        # store the chosen value on the parent view for retrieval
         if self.view:
             self.view.selected_day = self.values[0]
         await interaction.response.defer()
@@ -1159,22 +1129,13 @@ class WoWTimeRangeSelect(discord.ui.Select):
     """Dropdown select for choosing start time for key request (12-hour am/pm format)."""
 
     def __init__(self, timezone_str: str = "US/Eastern"):
-        from zoneinfo import ZoneInfo
-
         self.timezone = ZoneInfo(timezone_str)
-        self.timezone_str = timezone_str
 
-        times, am, pm = [], [], []
-        for hour in range(1, 12):
-            am.append(f"{hour}:00 AM")
-            pm.append(f"{hour}:00 PM")
-        am.insert(0, "12:00 AM")
-        pm.insert(0, "12:00 PM")
-        times = am + pm
-        options = [discord.SelectOption(label=t, value=t) for t in times]
+        am = ["12:00 AM"] + [f"{hour}:00 AM" for hour in range(1, 12)]
+        pm = ["12:00 PM"] + [f"{hour}:00 PM" for hour in range(1, 12)]
+        options = [discord.SelectOption(label=t, value=t) for t in am + pm]
 
-        # Extract timezone abbreviation for display (e.g., "US/Eastern" -> "EST" or "EDT")
-        tz_name = timezone_str.split("/")[-1] if "/" in timezone_str else timezone_str
+        tz_name = timezone_str.split("/")[-1]
 
         super().__init__(
             placeholder=f"Choose start time ({tz_name} time)",
@@ -1190,20 +1151,10 @@ class WoWTimeRangeSelect(discord.ui.Select):
             if not self.view.selected_day:
                 await interaction.response.send_message("Please select the day first.", ephemeral=True)
                 return
-            start_time_str = self.values[0]
-            # Parse to 24-hour time for datetime
-            from datetime import datetime
-
-            dt_str = f"{self.view.selected_day} {start_time_str}"
-            dt = datetime.strptime(dt_str, "%Y-%m-%d %I:%M %p")
-
-            # Make the datetime timezone-aware using the raider's timezone
+            dt = datetime.strptime(f"{self.view.selected_day} {self.values[0]}", "%Y-%m-%d %I:%M %p")
             dt = dt.replace(tzinfo=self.timezone)
 
-            # Reject times in the past when today is selected (compare in UTC)
-            from datetime import timezone as tz
-
-            if dt.astimezone(tz.utc) < datetime.now(tz.utc):
+            if dt.astimezone(timezone.utc) < datetime.now(timezone.utc):
                 await interaction.response.send_message(
                     "⚠️ That time has already passed. Please choose a future time.", ephemeral=True
                 )
@@ -1244,7 +1195,6 @@ class KeyRequestSubmitButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction) -> None:
         """Handle key request submission with validation and stop the view."""
         view = self.view
-        # Validate selections
         if not (view.selected_day and view.run_type and view.selected_level and view.selected_start_time):
             logger.info(
                 f"Selected Day: {view.selected_day} Run Type: {view.run_type} Level: {view.selected_level} Time: {view.selected_start_time}"
@@ -1252,25 +1202,15 @@ class KeyRequestSubmitButton(discord.ui.Button):
             await interaction.response.send_message("Please select all options before submitting.", ephemeral=True)
             return
 
-        # Reject submissions where the chosen date/time is in the past
-        from datetime import timezone as tz
-
-        if view.selected_start_time.astimezone(tz.utc) < datetime.now(tz.utc):
+        if view.selected_start_time.astimezone(timezone.utc) < datetime.now(timezone.utc):
             await interaction.response.send_message(
                 "⚠️ The selected date and time are in the past. Please choose a future time.", ephemeral=True
             )
             return
 
-        # If valid, ask if they want to add a note
         await interaction.response.send_message(
             "✅ Selections confirmed! Would you like to add a note to the schedule?", view=ConfirmNoteView(view)
         )
-
-    @staticmethod
-    def time_to_minutes(time_str: str) -> int:
-        """Convert time string to minutes since midnight."""
-        hours, minutes = map(int, time_str.split(":"))
-        return hours * 60 + minutes
 
 
 class NoteModal(discord.ui.Modal, title="Add a Note"):
@@ -1317,12 +1257,11 @@ class ConfirmNoteView(discord.ui.View):
 class KeyRequestView(discord.ui.View):
     """View containing dropdowns for WoW key request submission."""
 
-    def __init__(self, timezone_str: str = "US/Eastern", timeout: int = 300) -> None:  # 5 minutes timeout
+    def __init__(self, timezone_str: str = "US/Eastern", timeout: int = 300) -> None:
         super().__init__(timeout=timeout)
-        # attributes to hold the user's choices
         self.selected_level: Optional[str] = None
         self.selected_day: Optional[datetime] = None
-        self.selected_start_time: Optional[datetime] = None  # now datetime
+        self.selected_start_time: Optional[datetime] = None
         self.run_type: Optional[str] = None
         self.timezone_str = timezone_str
         self.note: Optional[str] = None
@@ -1410,11 +1349,9 @@ async def _apply_manual_add(
 
     remaining = 4 - add_view.added_count
     if remaining <= 0:
-        if getattr(add_view, "auto_stop_on_max", True):
+        if add_view.auto_stop_on_max:
             add_view.stop()
-        suffix = (
-            "" if getattr(add_view, "auto_stop_on_max", True) else "\n\nClick **Post Schedule** to publish the run."
-        )
+        suffix = "" if add_view.auto_stop_on_max else "\n\nClick **Post Schedule** to publish the run."
         await interaction.response.send_message(
             f"✅ **{raider.name}** added as **{role_display}**!\n\n✅ Maximum of 4 raiders added.{suffix}"
         )

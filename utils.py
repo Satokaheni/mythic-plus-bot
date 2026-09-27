@@ -99,15 +99,14 @@ def _deserialize(data: dict):
 
     # Pass 1 — create all Raider objects (runs wired up in pass 3)
     raiders: Dict[int, Any] = {}
-    for uid_str, r_data in data.get("raiders", {}).items():
+    for r_data in data.get("raiders", {}).values():
         raider = Raider.from_dict(r_data)
         raiders[raider.user_id] = raider
 
     # Pass 2 — create all Schedule objects, resolving Raider references
     schedules: Dict[int, Any] = {}
     for mid_str, s_data in data.get("schedules", {}).items():
-        mid = int(mid_str)
-        schedules[mid] = Schedule.from_dict(s_data, raiders)
+        schedules[int(mid_str)] = Schedule.from_dict(s_data, raiders)
 
     # Pass 3 — wire up Raider.current_runs / denied_runs now that schedules exist
     for uid_str, r_data in data.get("raiders", {}).items():
