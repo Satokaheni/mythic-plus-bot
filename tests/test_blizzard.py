@@ -103,11 +103,11 @@ def test_parse_equipment_tolerates_missing_and_malformed_entries():
 
 
 def test_parse_item_info_reads_quality():
-    data = {"name": "Flawless Deadly Peridot", "item_class": {"id": 3}, "quality": {"type": "EPIC"}}
+    data = {"name": "Flawless Deadly Peridot", "item_class": {"id": 3}, "quality": {"type": "RARE"}}
     info = _parse_item_info(data)
     assert info.name == "Flawless Deadly Peridot"
     assert info.is_recipe is False
-    assert info.quality == "EPIC"
+    assert info.quality == "RARE"
 
 
 def test_parse_item_info_quality_defaults_to_empty():

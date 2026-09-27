@@ -181,7 +181,7 @@ a thin command in `bot.py`.
 
 ### `gearaudit.py` (new, pure — no I/O, no discord imports)
 
-- `ENCHANTABLE_SLOTS`, `WEAPON_ITEM_CLASS_ID = 2`, `GEM_MIN_QUALITY = "EPIC"`.
+- `ENCHANTABLE_SLOTS`, `WEAPON_ITEM_CLASS_ID = 2`, `GEM_MIN_QUALITY = "RARE"`.
 - `parse_enchant_tier(display_string: str) -> Optional[int]` — regex
   `Quality-\d+-Tier(\d)`; `None` when the enchant carries no quality marker
   (runes and old-style enchants do not).

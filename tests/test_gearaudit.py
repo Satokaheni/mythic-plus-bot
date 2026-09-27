@@ -108,14 +108,12 @@ def test_audit_character_counts_empty_sockets():
 
 
 def test_audit_character_flags_rank_one_gems():
-    """Rank 1 gems are UNCOMMON (e.g. "Deadly Peridot"); rank 2 is RARE ("Flawless Deadly Peridot")."""
     items = full_kit() + [item("NECK", sockets=(111,))]
     findings = audit_character("Rank One", "Mal'Ganis", items, {111: "UNCOMMON"})
     assert findings.low_gems == [("NECK", "UNCOMMON")]
 
 
 def test_audit_character_accepts_rank_two_and_meta_gems():
-    """RARE is the max-rank stat gem and EPIC is the meta diamond — neither is a finding."""
     items = full_kit() + [item("NECK", sockets=(240890,)), item("WRIST", sockets=(240983,))]
     findings = audit_character("Geared", "Mal'Ganis", items, {240890: "RARE", 240983: "EPIC"})
     assert findings.low_gems == []
