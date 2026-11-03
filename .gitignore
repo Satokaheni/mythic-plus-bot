@@ -50,3 +50,6 @@ Thumbs.db
 
 # Claude Code local settings (machine-specific)
 .claude/settings.local.json
+
+# Verify harness scratch runs and evidence (.claude/skills/verify-mythic-plus-bot)
+.verify/
