@@ -29,15 +29,15 @@ def test_run_deleted_during_dms_is_not_resurrected(bot_module, monkeypatch, make
     healer = make_raider(user_id=2, roles=["healer"])
 
     client = bot_module.MyClient.__new__(bot_module.MyClient)
-    client.schedules = {schedule_id: schedule}
-    client.availability = {bot_module.GREEN: [healer], bot_module.YELLOW: [], bot_module.RED: []}
-    client.raiders = {}
-    client.availability_message_id = None
-    client.dm_map = {}
-    client.dm_timestamps = {}
+    from state import BotState
+
+    client.state = BotState(raiders={}, schedules={schedule_id: schedule},
+                            availability={bot_module.GREEN: [healer], bot_module.YELLOW: [], bot_module.RED: []},
+                            availability_message_id=None, dm_map={}, dm_timestamps={})
+    client.state.save = lambda: None
 
     def delete_run():
-        client.schedules.pop(schedule_id, None)
+        client.state.schedules.pop(schedule_id, None)
 
     async def create_dm():
         return _FakeDM(delete_run)
@@ -49,11 +49,10 @@ def test_run_deleted_during_dms_is_not_resurrected(bot_module, monkeypatch, make
         pass
 
     monkeypatch.setattr(bot_module.asyncio, "sleep", no_sleep)
-    monkeypatch.setattr(bot_module, "save_state", lambda *args, **kwargs: None)
 
     asyncio.run(client.fill_remaining_spots(schedule_id))
 
-    assert schedule_id not in client.schedules
+    assert schedule_id not in client.state.schedules
 
 
 def test_notify_promoted_dms_new_slot(bot_module, make_raider, make_full_schedule):

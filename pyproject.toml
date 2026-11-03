@@ -30,7 +30,7 @@ dev = [
 # them explicitly — otherwise setuptools' flat-layout auto-discovery refuses to
 # build with "Multiple top-level modules discovered".
 [tool.setuptools]
-py-modules = ["bot", "raider", "schedule", "utils", "views", "undermine", "watchlist", "eventlog", "raiderio", "forecast", "loot", "config", "messages"]
+py-modules = ["bot", "raider", "schedule", "utils", "views", "undermine", "watchlist", "eventlog", "raiderio", "forecast", "loot", "config", "messages", "state"]
 packages = ["lootcouncil"]
 
 [tool.black]
@@ -46,7 +46,7 @@ select = ["E", "F", "W", "I"]
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["bot", "raider", "schedule", "views", "utils", "undermine", "watchlist", "lootcouncil", "config", "messages"]
+known-first-party = ["bot", "raider", "schedule", "views", "utils", "undermine", "watchlist", "lootcouncil", "config", "messages", "state"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

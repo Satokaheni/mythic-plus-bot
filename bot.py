@@ -53,7 +53,8 @@ from messages import (  # noqa: F401
 )
 from raider import Raider
 from schedule import Schedule
-from utils import GREEN, RED, YELLOW, load_state, save_state
+from state import BotState
+from utils import GREEN, RED, YELLOW
 from views import (
     KeyRequestButtonView,
     KeyRequestView,
@@ -75,15 +76,6 @@ logger = logging.getLogger("discord")
 # ---------------------------
 class MyClient(discord.Client):
     """Discord bot client for managing WoW Mythic+ raid scheduling and availability."""
-
-    raiders: Dict[discord.Member, Raider] = {}
-    schedules: Dict[int, Schedule] = {}
-    availability: Dict[str, Raider] = {GREEN: [], YELLOW: [], RED: []}
-    dm_map: Dict[int, Dict[int, int]] = {}
-    dm_timestamps: Dict[int, Dict[int, datetime]] = {}
-    reminder_messages: Dict[int, List[int]] = {}  # schedule_id -> [channel_message_id, ...]
-    availability_message_id: int = None
-    role_mentions = {}
 
     # ---------------------------
     # User Defined Functions
@@ -127,7 +119,7 @@ class MyClient(discord.Client):
         except (discord.NotFound, discord.Forbidden):
             pass
 
-        embed, view, content = schedule.send_message(self.role_mentions, self)
+        embed, view, content = schedule.send_message(self.state.role_mentions, self)
         schedule.posted = datetime.now(timezone.utc)
 
         new_message = await self.get_channel(KEY_CHANNEL_ID).send(
@@ -145,13 +137,13 @@ class MyClient(discord.Client):
         or skip caching the rest.
         """
         avail_channel = self.get_channel(AVAIL_CHANNEL_ID)
-        if avail_channel and self.availability_message_id:
+        if avail_channel and self.state.availability_message_id:
             try:
-                await avail_channel.fetch_message(self.availability_message_id)
+                await avail_channel.fetch_message(self.state.availability_message_id)
             except (discord.NotFound, discord.Forbidden):
                 pass
 
-        for cid, mid in self.dm_map.items():
+        for cid, mid in self.state.dm_map.items():
             channel = self.get_channel(cid)
             if channel:
                 try:
@@ -167,14 +159,14 @@ class MyClient(discord.Client):
         dms_to_retry = []
         dms_to_delete = []
 
-        for dm_channel_id, dm_messages in list(self.dm_map.items()):
+        for dm_channel_id, dm_messages in list(self.state.dm_map.items()):
             for dm_message_id, schedule_id in list(dm_messages.items()):
-                if dm_channel_id in self.dm_timestamps and dm_message_id in self.dm_timestamps[dm_channel_id]:
-                    sent_time = self.dm_timestamps[dm_channel_id][dm_message_id]
+                if dm_channel_id in self.state.dm_timestamps and dm_message_id in self.state.dm_timestamps[dm_channel_id]:
+                    sent_time = self.state.dm_timestamps[dm_channel_id][dm_message_id]
                     time_elapsed = (now - sent_time).total_seconds()
 
                     if time_elapsed >= retry_threshold:
-                        schedule = self.schedules.get(schedule_id)
+                        schedule = self.state.schedules.get(schedule_id)
                         if schedule and not schedule.is_filled() and not schedule.is_past():
                             dms_to_retry.append((dm_channel_id, dm_message_id, schedule_id, schedule))
                             dms_to_delete.append((dm_channel_id, dm_message_id))
@@ -191,7 +183,7 @@ class MyClient(discord.Client):
 
                 # Find the raider who received this DM
                 raider = None
-                for uid, r in self.raiders.items():
+                for uid, r in self.state.raiders.items():
                     user = self.get_user(uid)
                     if user:
                         r_dm = await user.create_dm()
@@ -220,13 +212,13 @@ class MyClient(discord.Client):
                         await new_dm.add_reaction("✅")
                         await new_dm.add_reaction("❌")
 
-                        if dm_channel.id not in self.dm_map:
-                            self.dm_map[dm_channel.id] = {}
-                        self.dm_map[dm_channel.id][new_dm.id] = schedule_id
+                        if dm_channel.id not in self.state.dm_map:
+                            self.state.dm_map[dm_channel.id] = {}
+                        self.state.dm_map[dm_channel.id][new_dm.id] = schedule_id
 
-                        if dm_channel.id not in self.dm_timestamps:
-                            self.dm_timestamps[dm_channel.id] = {}
-                        self.dm_timestamps[dm_channel.id][new_dm.id] = now
+                        if dm_channel.id not in self.state.dm_timestamps:
+                            self.state.dm_timestamps[dm_channel.id] = {}
+                        self.state.dm_timestamps[dm_channel.id][new_dm.id] = now
 
                         logger.info(f"Retried DM for {raider.name} for schedule {schedule_id}")
 
@@ -236,20 +228,13 @@ class MyClient(discord.Client):
                 logger.error(f"Error retrying DM: {e}")
 
         for dm_channel_id, dm_message_id in dms_to_delete:
-            if dm_channel_id in self.dm_map and dm_message_id in self.dm_map[dm_channel_id]:
-                del self.dm_map[dm_channel_id][dm_message_id]
-            if dm_channel_id in self.dm_timestamps and dm_message_id in self.dm_timestamps[dm_channel_id]:
-                del self.dm_timestamps[dm_channel_id][dm_message_id]
+            if dm_channel_id in self.state.dm_map and dm_message_id in self.state.dm_map[dm_channel_id]:
+                del self.state.dm_map[dm_channel_id][dm_message_id]
+            if dm_channel_id in self.state.dm_timestamps and dm_message_id in self.state.dm_timestamps[dm_channel_id]:
+                del self.state.dm_timestamps[dm_channel_id][dm_message_id]
 
         if dms_to_retry:
-            save_state(
-                self.raiders,
-                self.schedules,
-                self.availability,
-                self.availability_message_id,
-                self.dm_map,
-                self.dm_timestamps,
-            )
+            self.state.save()
 
     async def check_schedule_conflicts(self):
         """Check for multiple unfilled schedules at the same time and notify coordinator."""
@@ -257,7 +242,7 @@ class MyClient(discord.Client):
         time_slots = {}
 
         # Group unfilled schedules by their start time
-        for schedule_id, schedule in self.schedules.items():
+        for schedule_id, schedule in self.state.schedules.items():
             if not schedule.is_filled():
                 time_key = (schedule.date_scheduled.date(), schedule.start_time.hour)
                 if time_key not in time_slots:
@@ -321,7 +306,7 @@ class MyClient(discord.Client):
         if tier is None or tier == RED:
             return
 
-        for schedule_id, schedule in self.schedules.items():
+        for schedule_id, schedule in self.state.schedules.items():
             if schedule.is_filled():
                 continue
 
@@ -354,13 +339,13 @@ class MyClient(discord.Client):
                         await dm.add_reaction("✅")
                         await dm.add_reaction("❌")
 
-                        if dm_channel.id not in self.dm_timestamps:
-                            self.dm_timestamps[dm_channel.id] = {}
-                        self.dm_timestamps[dm_channel.id][dm.id] = datetime.now(timezone.utc)
+                        if dm_channel.id not in self.state.dm_timestamps:
+                            self.state.dm_timestamps[dm_channel.id] = {}
+                        self.state.dm_timestamps[dm_channel.id][dm.id] = datetime.now(timezone.utc)
 
-                        if dm_channel.id not in self.dm_map:
-                            self.dm_map[dm_channel.id] = {}
-                        self.dm_map[dm_channel.id][dm.id] = schedule_id
+                        if dm_channel.id not in self.state.dm_map:
+                            self.state.dm_map[dm_channel.id] = {}
+                        self.state.dm_map[dm_channel.id][dm.id] = schedule_id
                     except discord.Forbidden:
                         logger.warning(f"Could not DM {raider.name} for schedule {schedule_id}")
             elif not schedule.primary and len(raider.roles) > 1:
@@ -388,13 +373,13 @@ class MyClient(discord.Client):
                         await dm.add_reaction("✅")
                         await dm.add_reaction("❌")
 
-                        if dm_channel.id not in self.dm_timestamps:
-                            self.dm_timestamps[dm_channel.id] = {}
-                        self.dm_timestamps[dm_channel.id][dm.id] = datetime.now(timezone.utc)
+                        if dm_channel.id not in self.state.dm_timestamps:
+                            self.state.dm_timestamps[dm_channel.id] = {}
+                        self.state.dm_timestamps[dm_channel.id][dm.id] = datetime.now(timezone.utc)
 
-                        if dm_channel.id not in self.dm_map:
-                            self.dm_map[dm_channel.id] = {}
-                        self.dm_map[dm_channel.id][dm.id] = schedule_id
+                        if dm_channel.id not in self.state.dm_map:
+                            self.state.dm_map[dm_channel.id] = {}
+                        self.state.dm_map[dm_channel.id][dm.id] = schedule_id
                     except discord.Forbidden:
                         logger.warning(f"Could not DM {raider.name} for schedule {schedule_id}")
 
@@ -402,7 +387,7 @@ class MyClient(discord.Client):
         """Background task to fill remaining schedule spots from available raiders, asking all eligible in a tier in parallel."""
         await asyncio.sleep(3600)  # Wait 1 hour before DMing to allow manual signups first
 
-        schedule = self.schedules.get(schedule_id)
+        schedule = self.state.schedules.get(schedule_id)
 
         if not schedule:
             return
@@ -421,7 +406,7 @@ class MyClient(discord.Client):
             return
 
         # For each user in the tier if their role fits an open spot, DM them to ask if they want to join
-        for raider in self.availability[tier]:
+        for raider in self.state.availability[tier]:
             if not raider.check_availability(schedule):
                 continue
 
@@ -441,13 +426,13 @@ class MyClient(discord.Client):
                         await dm.add_reaction("✅")
                         await dm.add_reaction("❌")
 
-                        if dm_channel.id not in self.dm_timestamps:
-                            self.dm_timestamps[dm_channel.id] = {}
-                        self.dm_timestamps[dm_channel.id][dm.id] = datetime.now(timezone.utc)
+                        if dm_channel.id not in self.state.dm_timestamps:
+                            self.state.dm_timestamps[dm_channel.id] = {}
+                        self.state.dm_timestamps[dm_channel.id][dm.id] = datetime.now(timezone.utc)
 
-                        if dm_channel.id not in self.dm_map:
-                            self.dm_map[dm_channel.id] = {}
-                        self.dm_map[dm_channel.id][dm.id] = schedule_id
+                        if dm_channel.id not in self.state.dm_map:
+                            self.state.dm_map[dm_channel.id] = {}
+                        self.state.dm_map[dm_channel.id][dm.id] = schedule_id
                     except discord.Forbidden:
                         logger.warning(f"Could not DM {raider.name} for schedule {schedule_id}")
             else:
@@ -468,13 +453,13 @@ class MyClient(discord.Client):
                         await dm.add_reaction("✅")
                         await dm.add_reaction("❌")
 
-                        if dm_channel.id not in self.dm_timestamps:
-                            self.dm_timestamps[dm_channel.id] = {}
-                        self.dm_timestamps[dm_channel.id][dm.id] = datetime.now(timezone.utc)
+                        if dm_channel.id not in self.state.dm_timestamps:
+                            self.state.dm_timestamps[dm_channel.id] = {}
+                        self.state.dm_timestamps[dm_channel.id][dm.id] = datetime.now(timezone.utc)
 
-                        if dm_channel.id not in self.dm_map:
-                            self.dm_map[dm_channel.id] = {}
-                        self.dm_map[dm_channel.id][dm.id] = schedule_id
+                        if dm_channel.id not in self.state.dm_map:
+                            self.state.dm_map[dm_channel.id] = {}
+                        self.state.dm_map[dm_channel.id][dm.id] = schedule_id
                     except discord.Forbidden:
                         logger.warning(f"Could not DM {raider.name} for schedule {schedule_id}")
 
@@ -489,14 +474,7 @@ class MyClient(discord.Client):
         else:
             schedule.tier_reached = RED
 
-        save_state(
-            self.raiders,
-            self.schedules,
-            self.availability,
-            self.availability_message_id,
-            self.dm_map,
-            self.dm_timestamps,
-        )
+        self.state.save()
 
     async def _notify_schedule_changed(self, schedule: Schedule, message: str, organizer_id: int):
         """DM all schedule members except the organizer about a change or cancellation."""
@@ -603,7 +581,7 @@ class MyClient(discord.Client):
                 )
             )
         )
-        self.availability_message_id = msg.id
+        self.state.availability_message_id = msg.id
         await msg.add_reaction(GREEN)
         await msg.add_reaction(YELLOW)
         await msg.add_reaction(RED)
@@ -622,11 +600,11 @@ class MyClient(discord.Client):
 
         # Clean up past schedules and their associated DMs
         now = datetime.now(timezone.utc)
-        past_schedule_ids = {sid for sid, s in self.schedules.items() if s.start_time.astimezone(timezone.utc) < now}
+        past_schedule_ids = {sid for sid, s in self.state.schedules.items() if s.start_time.astimezone(timezone.utc) < now}
 
         # Record completed runs to the event log before their schedules are removed
         for sid in past_schedule_ids:
-            sched = self.schedules[sid]
+            sched = self.state.schedules[sid]
             roster = []
             if sched.team["tank"]:
                 roster.append(sched.team["tank"].user_id)
@@ -653,17 +631,17 @@ class MyClient(discord.Client):
                     except (discord.NotFound, discord.Forbidden):
                         pass
                 for sid in past_schedule_ids:
-                    for msg_id in self.reminder_messages.pop(sid, []):
+                    for msg_id in self.state.reminder_messages.pop(sid, []):
                         try:
                             msg = await channel.fetch_message(msg_id)
                             await msg.delete()
                         except (discord.NotFound, discord.Forbidden):
                             pass
 
-        self.schedules = {sid: s for sid, s in self.schedules.items() if sid not in past_schedule_ids}
+        self.state.schedules = {sid: s for sid, s in self.state.schedules.items() if sid not in past_schedule_ids}
 
         # Delete DM messages for past schedules
-        for dm_channel_id, dm_messages in list(self.dm_map.items()):
+        for dm_channel_id, dm_messages in list(self.state.dm_map.items()):
             dm_channel = self.get_channel(dm_channel_id)
             if not dm_channel:
                 try:
@@ -679,50 +657,43 @@ class MyClient(discord.Client):
                         except (discord.NotFound, discord.Forbidden):
                             pass
 
-        for dm_channel_id in list(self.dm_map.keys()):
-            self.dm_map[dm_channel_id] = {
-                mid: sid for mid, sid in self.dm_map[dm_channel_id].items() if sid not in past_schedule_ids
+        for dm_channel_id in list(self.state.dm_map.keys()):
+            self.state.dm_map[dm_channel_id] = {
+                mid: sid for mid, sid in self.state.dm_map[dm_channel_id].items() if sid not in past_schedule_ids
             }
-            if dm_channel_id in self.dm_timestamps:
-                self.dm_timestamps[dm_channel_id] = {
+            if dm_channel_id in self.state.dm_timestamps:
+                self.state.dm_timestamps[dm_channel_id] = {
                     mid: ts
-                    for mid, ts in self.dm_timestamps[dm_channel_id].items()
-                    if mid in self.dm_map[dm_channel_id]
+                    for mid, ts in self.state.dm_timestamps[dm_channel_id].items()
+                    if mid in self.state.dm_map[dm_channel_id]
                 }
 
-            if not self.dm_map[dm_channel_id]:
-                del self.dm_map[dm_channel_id]
-            if dm_channel_id in self.dm_timestamps and not self.dm_timestamps[dm_channel_id]:
-                del self.dm_timestamps[dm_channel_id]
+            if not self.state.dm_map[dm_channel_id]:
+                del self.state.dm_map[dm_channel_id]
+            if dm_channel_id in self.state.dm_timestamps and not self.state.dm_timestamps[dm_channel_id]:
+                del self.state.dm_timestamps[dm_channel_id]
 
         await self.retry_unanswered_dms()
         await self.check_schedule_conflicts()
 
-        save_state(
-            self.raiders,
-            self.schedules,
-            self.availability,
-            self.availability_message_id,
-            self.dm_map,
-            self.dm_timestamps,
-        )
+        self.state.save()
 
-        for schedule_id, schedule in list(self.schedules.items()):
+        for schedule_id, schedule in list(self.state.schedules.items()):
             if not schedule.is_filled():
                 # Check if schedule needs to be reposted after 24 hours of not being filled
                 time_passed = (datetime.now(timezone.utc) - schedule.posted).total_seconds()
                 if time_passed >= 86400:  # 24 hours
                     new_schedule_id, new_schedule = await self.repost_schedule(schedule, schedule_id)
-                    del self.schedules[schedule_id]
-                    self.schedules[new_schedule_id] = new_schedule
+                    del self.state.schedules[schedule_id]
+                    self.state.schedules[new_schedule_id] = new_schedule
                     schedule_id = new_schedule_id
                     schedule = new_schedule
-                if schedule_id in self.schedules:
+                if schedule_id in self.state.schedules:
                     if schedule.asks >= 5 and schedule.tier_reached != RED:
                         schedule.asks = 0
                         await self.fill_remaining_spots(schedule_id)
                     elif schedule.asks < 5:
-                        self.schedules[schedule_id].asks += 1
+                        self.state.schedules[schedule_id].asks += 1
 
             if schedule.is_filled():
                 now = datetime.now(timezone.utc)
@@ -732,7 +703,7 @@ class MyClient(discord.Client):
                     reminder_msg = await channel.send(
                         f"{schedule.send_reminder()} in {difference // 3600} hours and {(difference % 3600) // 60} minutes."
                     )
-                    self.reminder_messages.setdefault(schedule_id, []).append(reminder_msg.id)
+                    self.state.reminder_messages.setdefault(schedule_id, []).append(reminder_msg.id)
 
     @tasks.loop(hours=1)
     async def price_watch_check(self):
@@ -902,7 +873,7 @@ class MyClient(discord.Client):
             return
         try:
             async with aiohttp.ClientSession() as session:
-                added = await raiderio.harvest(self.raiders, session, self._char_mappings)
+                added = await raiderio.harvest(self.state.raiders, session, self._char_mappings)
             logger.info("raiderio_harvest: appended %d new run events", added)
         except Exception as exc:  # noqa: BLE001 - harvest must never kill the loop
             logger.warning("raiderio_harvest failed: %s", exc)
@@ -924,27 +895,20 @@ class MyClient(discord.Client):
         avail_channel = self.get_channel(AVAIL_CHANNEL_ID)
 
         # Delete the old availability message
-        if avail_channel and self.availability_message_id:
+        if avail_channel and self.state.availability_message_id:
             try:
-                old_msg = await avail_channel.fetch_message(self.availability_message_id)
+                old_msg = await avail_channel.fetch_message(self.state.availability_message_id)
                 await old_msg.delete()
             except (discord.NotFound, discord.Forbidden):
                 pass
 
         # Reset availability state and post fresh message
-        self.availability = {GREEN: [], YELLOW: [], RED: []}
-        self.availability_message_id = None
+        self.state.availability = {GREEN: [], YELLOW: [], RED: []}
+        self.state.availability_message_id = None
         await self._post_avail_message()
         logger.info("weekly_avail_reset: availability reset and new message posted")
 
-        save_state(
-            self.raiders,
-            self.schedules,
-            self.availability,
-            self.availability_message_id,
-            self.dm_map,
-            self.dm_timestamps,
-        )
+        self.state.save()
 
     # ---------------------------
     # Weekly Forecast Dry-Run Preview
@@ -958,7 +922,7 @@ class MyClient(discord.Client):
         if not self.is_ready():
             return
 
-        green = list(self.availability.get(GREEN, []))
+        green = list(self.state.availability.get(GREEN, []))
         if not forecast.can_field_team(green):
             logger.info("forecast_preview: green pool cannot field a role-valid team; skipping")
             return
@@ -966,7 +930,7 @@ class MyClient(discord.Client):
         try:
             now = datetime.now(timezone.utc)
             events = eventlog.read_events()
-            obs = forecast.observations(events, self.raiders, now)
+            obs = forecast.observations(events, self.state.raiders, now)
             obs_by_user = {}
             for o in obs:
                 obs_by_user.setdefault(o.user_id, []).append(o)
@@ -999,7 +963,7 @@ class MyClient(discord.Client):
 
     async def _do_key_request_flow(self, user: discord.User):
         """Run the full key request flow via DM for the given user."""
-        if user.id not in self.raiders:
+        if user.id not in self.state.raiders:
             try:
                 selection_view = WoWSelectionView(timeout=300)
                 await user.send(
@@ -1018,20 +982,13 @@ class MyClient(discord.Client):
                     roles.append(selection_view.selected_secondary)
 
                 if selection_view.selected_class and roles:
-                    self.raiders[user.id] = Raider(
+                    self.state.raiders[user.id] = Raider(
                         user, selection_view.selected_class, roles, selection_view.selected_timezone
                     )
                     logger.info(
                         f"New raider from key request: {user}: class={selection_view.selected_class} roles={roles} timezone={selection_view.selected_timezone}"
                     )
-                    save_state(
-                        self.raiders,
-                        self.schedules,
-                        self.availability,
-                        self.availability_message_id,
-                        self.dm_map,
-                        self.dm_timestamps,
-                    )
+                    self.state.save()
                 else:
                     await user.send("Registration cancelled or incomplete. Please try again.")
                     logger.info(f"No valid selection from {user} (timed out or incomplete)")
@@ -1041,7 +998,7 @@ class MyClient(discord.Client):
                 return
 
         try:
-            raider = self.raiders[user.id]
+            raider = self.state.raiders[user.id]
             view = KeyRequestView(timezone_str=str(raider.timezone), timeout=300)
             await user.send(
                 "Request a key: Select Level, Date, Time and How many Keys you are wanting to do.", view=view
@@ -1069,7 +1026,7 @@ class MyClient(discord.Client):
                     return
 
                 existing_schedule, existing_schedule_id = None, None
-                for sched_id, sched in self.schedules.items():
+                for sched_id, sched in self.state.schedules.items():
                     if (
                         sched.date_scheduled == view.selected_day
                         and sched.start_time.time() == view.selected_start_time.time()
@@ -1078,7 +1035,7 @@ class MyClient(discord.Client):
                         existing_schedule_id = sched_id
                         break
 
-                if existing_schedule and sum(role in existing_schedule.missing for role in self.raiders[user.id].roles):
+                if existing_schedule and sum(role in existing_schedule.missing for role in self.state.raiders[user.id].roles):
                     dm = await user.send(
                         f"A run already exists at this time (Level {existing_schedule.level}). Would you like to join that run instead?\nReact with ✅ to join, or ❌ to list your key request."
                     )
@@ -1091,35 +1048,28 @@ class MyClient(discord.Client):
                     try:
                         reaction, _ = await self.wait_for("reaction_add", timeout=120.0, check=check)
                         if str(reaction.emoji) == "✅":
-                            if not self.raiders[user.id].check_availability(existing_schedule):
-                                conflict_reason = self.raiders[user.id].get_schedule_conflict_reason(existing_schedule)
+                            if not self.state.raiders[user.id].check_availability(existing_schedule):
+                                conflict_reason = self.state.raiders[user.id].get_schedule_conflict_reason(existing_schedule)
                                 await user.send(f"⚠️ **Cannot join this run**\n\n{conflict_reason}")
                                 return
 
-                            existing_schedule.raider_signup(self.raiders[user.id])
-                            self.raiders[user.id].add_run(existing_schedule)
+                            existing_schedule.raider_signup(self.state.raiders[user.id])
+                            self.state.raiders[user.id].add_run(existing_schedule)
                             await user.send(
                                 f"✅ You have been added to the existing run on {existing_schedule.date_scheduled} at {existing_schedule.start_time.strftime('%I:%M %p')}."
                             )
                             if existing_schedule.is_filled():
                                 await self.notify_schedule(existing_schedule)
                             msg = await self.get_channel(KEY_CHANNEL_ID).fetch_message(existing_schedule_id)
-                            embed, view_buttons, content = existing_schedule.send_message(self.role_mentions, self)
+                            embed, view_buttons, content = existing_schedule.send_message(self.state.role_mentions, self)
                             await msg.edit(content=content if content else None, embed=embed, view=view_buttons)
-                            save_state(
-                                self.raiders,
-                                self.schedules,
-                                self.availability,
-                                self.availability_message_id,
-                                self.dm_map,
-                                self.dm_timestamps,
-                            )
+                            self.state.save()
                         else:
-                            organizer_role = await self._ask_organizer_role(user, self.raiders[user.id])
-                            if len(self.raiders[user.id].roles) > 1 and not organizer_role:
+                            organizer_role = await self._ask_organizer_role(user, self.state.raiders[user.id])
+                            if len(self.state.raiders[user.id].roles) > 1 and not organizer_role:
                                 return
                             schedule = Schedule(
-                                raider_scheduled=self.raiders[user.id],
+                                raider_scheduled=self.state.raiders[user.id],
                                 level=view.selected_level,
                                 date_scheduled=view.selected_day,
                                 start_time=view.selected_start_time,
@@ -1137,15 +1087,8 @@ class MyClient(discord.Client):
                             )
                             await pre_post_view.wait()
                             if pre_post_view.message_id:
-                                self.raiders[user.id].add_run(schedule)
-                                save_state(
-                                    self.raiders,
-                                    self.schedules,
-                                    self.availability,
-                                    self.availability_message_id,
-                                    self.dm_map,
-                                    self.dm_timestamps,
-                                )
+                                self.state.raiders[user.id].add_run(schedule)
+                                self.state.save()
                                 self.loop.create_task(self.fill_remaining_spots(pre_post_view.message_id))
                             else:
                                 for raider in list(schedule.members):
@@ -1158,11 +1101,11 @@ class MyClient(discord.Client):
                     return
 
                 # No existing schedule, create new
-                organizer_role = await self._ask_organizer_role(user, self.raiders[user.id])
-                if len(self.raiders[user.id].roles) > 1 and not organizer_role:
+                organizer_role = await self._ask_organizer_role(user, self.state.raiders[user.id])
+                if len(self.state.raiders[user.id].roles) > 1 and not organizer_role:
                     return
                 schedule = Schedule(
-                    raider_scheduled=self.raiders[user.id],
+                    raider_scheduled=self.state.raiders[user.id],
                     level=view.selected_level,
                     date_scheduled=view.selected_day,
                     start_time=view.selected_start_time,
@@ -1178,15 +1121,8 @@ class MyClient(discord.Client):
                 )
                 await pre_post_view.wait()
                 if pre_post_view.message_id:
-                    self.raiders[user.id].add_run(schedule)
-                    save_state(
-                        self.raiders,
-                        self.schedules,
-                        self.availability,
-                        self.availability_message_id,
-                        self.dm_map,
-                        self.dm_timestamps,
-                    )
+                    self.state.raiders[user.id].add_run(schedule)
+                    self.state.save()
                     self.loop.create_task(self.fill_remaining_spots(pre_post_view.message_id))
                 else:
                     for raider in list(schedule.members):
@@ -1202,14 +1138,7 @@ class MyClient(discord.Client):
     # ---------------------------
     async def setup_hook(self) -> None:
         """Calls before on ready to set up all environmental variables"""
-        (
-            self.raiders,
-            self.schedules,
-            self.availability,
-            self.availability_message_id,
-            self.dm_map,
-            self.dm_timestamps,
-        ) = load_state()
+        self.state = BotState.load()
         self.coordinator_id = COORDINATOR_ID
         self.elevated_ids = ELEVATED_IDS
         self.watchlist = Watchlist.load()
@@ -1228,9 +1157,9 @@ class MyClient(discord.Client):
 
         # Re-register each existing schedule's button view so interactions
         # still work after a restart (discord.py routes by message_id)
-        for schedule_id, schedule in self.schedules.items():
+        for schedule_id, schedule in self.state.schedules.items():
             self.add_view(ScheduleButtonView(schedule, self), message_id=schedule_id)
-        logger.info("Re-registered %d schedule views", len(self.schedules))
+        logger.info("Re-registered %d schedule views", len(self.state.schedules))
 
         if not self.hourly_check.is_running():
             self.hourly_check.start()
@@ -1257,13 +1186,13 @@ class MyClient(discord.Client):
         """Called when the bot is ready."""
         logger.info("Logged in as %s", self.user)
 
-        if not self.role_mentions:
-            self.role_mentions["healer"] = self.get_guild(GUILD_ID).get_role(HEALER_ID)
-            self.role_mentions["tank"] = self.get_guild(GUILD_ID).get_role(TANK_ID)
-            self.role_mentions["dps"] = self.get_guild(GUILD_ID).get_role(DPS_ID)
+        if not self.state.role_mentions:
+            self.state.role_mentions["healer"] = self.get_guild(GUILD_ID).get_role(HEALER_ID)
+            self.state.role_mentions["tank"] = self.get_guild(GUILD_ID).get_role(TANK_ID)
+            self.state.role_mentions["dps"] = self.get_guild(GUILD_ID).get_role(DPS_ID)
 
         # Fetch message history now that channels are cached
-        if self.availability_message_id:
+        if self.state.availability_message_id:
             await self.get_message_history()
 
         # Post changelog if the bot version has changed since last run
@@ -1694,9 +1623,9 @@ class MyClient(discord.Client):
             return
 
         if message.content == "!keys":
-            if message.author.id in self.raiders:
+            if message.author.id in self.state.raiders:
                 try:
-                    await message.author.send(self.raiders[message.author.id].get_current_runs())
+                    await message.author.send(self.state.raiders[message.author.id].get_current_runs())
                 except discord.Forbidden:
                     logger.warning(f"Could not DM {message.author} for current runs")
 
@@ -1719,7 +1648,7 @@ class MyClient(discord.Client):
                 except (discord.Forbidden, discord.NotFound):
                     logger.warning(f"Could not delete !modify message from {message.author}")
 
-            if message.author.id not in self.raiders:
+            if message.author.id not in self.state.raiders:
                 try:
                     await message.author.send(
                         "❌ You are not registered. Please sign up first via the availability reaction or `!key`."
@@ -1729,7 +1658,7 @@ class MyClient(discord.Client):
                 return
 
             try:
-                raider = self.raiders[message.author.id]
+                raider = self.state.raiders[message.author.id]
                 selection_view = WoWSelectionView(timeout=180)
                 await message.author.send(
                     "✏️ **Modify your registration**\n"
@@ -1758,7 +1687,7 @@ class MyClient(discord.Client):
                 # Remove raider from all their current schedules
                 schedules_to_delete = []
                 key_channel = self.get_channel(KEY_CHANNEL_ID)
-                for schedule_id, schedule in list(self.schedules.items()):
+                for schedule_id, schedule in list(self.state.schedules.items()):
                     if schedule in raider.current_runs:
                         fill_status = schedule.is_filled()
                         promoted = schedule.raider_remove(raider)
@@ -1773,7 +1702,7 @@ class MyClient(discord.Client):
                         else:
                             try:
                                 key_msg = await key_channel.fetch_message(schedule_id)
-                                embed, view_buttons, content = schedule.send_message(self.role_mentions, self)
+                                embed, view_buttons, content = schedule.send_message(self.state.role_mentions, self)
                                 await key_msg.edit(content=content if content else None, embed=embed, view=view_buttons)
                             except (discord.NotFound, discord.Forbidden):
                                 pass
@@ -1784,7 +1713,7 @@ class MyClient(discord.Client):
                                 await self._notify_promoted(promoted, schedule)
 
                 for schedule_id in schedules_to_delete:
-                    del self.schedules[schedule_id]
+                    del self.state.schedules[schedule_id]
 
                 # Reset run tracking and update profile
                 raider.current_runs = set()
@@ -1793,14 +1722,7 @@ class MyClient(discord.Client):
                 raider.roles = roles
                 raider.timezone = ZoneInfo(selection_view.selected_timezone)
 
-                save_state(
-                    self.raiders,
-                    self.schedules,
-                    self.availability,
-                    self.availability_message_id,
-                    self.dm_map,
-                    self.dm_timestamps,
-                )
+                self.state.save()
                 logger.info(
                     f"Raider {raider.name} modified: class={raider.class_play} roles={raider.roles} timezone={raider.timezone}"
                 )
@@ -1833,24 +1755,17 @@ class MyClient(discord.Client):
                     )
 
                     # Reset all state except raiders
-                    self.schedules = {}
-                    self.availability = {GREEN: [], YELLOW: [], RED: []}
-                    self.availability_message_id = None
-                    self.dm_map = {}
-                    self.dm_timestamps = {}
-                    for raider in self.raiders:
-                        self.raiders[raider].current_runs = set()
-                        self.raiders[raider].denied_runs = set()
+                    self.state.schedules = {}
+                    self.state.availability = {GREEN: [], YELLOW: [], RED: []}
+                    self.state.availability_message_id = None
+                    self.state.dm_map = {}
+                    self.state.dm_timestamps = {}
+                    for raider in self.state.raiders:
+                        self.state.raiders[raider].current_runs = set()
+                        self.state.raiders[raider].denied_runs = set()
 
-                    save_state(
-                        self.raiders,
-                        self.schedules,
-                        self.availability,
-                        self.availability_message_id,
-                        self.dm_map,
-                        self.dm_timestamps,
-                    )
-                    logger.info("Cleanup: state reset complete. Raiders preserved: %d", len(self.raiders))
+                    self.state.save()
+                    logger.info("Cleanup: state reset complete. Raiders preserved: %d", len(self.state.raiders))
 
                     await message.author.send(
                         "✅ Cleanup complete. Both channels have been purged and all state (except raiders) has been reset."
@@ -1936,28 +1851,28 @@ class MyClient(discord.Client):
             return
 
         logger.info(
-            f"Reaction added: {user.display_name}, {reaction.emoji} Raider: {user.id in self.raiders} ID in schedules: {reaction.message.id in self.schedules}"
+            f"Reaction added: {user.display_name}, {reaction.emoji} Raider: {user.id in self.state.raiders} ID in schedules: {reaction.message.id in self.state.schedules}"
         )
 
         if (
             reaction.message.channel.id == AVAIL_CHANNEL_ID
-            and reaction.message.id == self.availability_message_id
+            and reaction.message.id == self.state.availability_message_id
             and reaction.emoji in [GREEN, YELLOW, RED]
         ):
-            if user.id in self.raiders:
+            if user.id in self.state.raiders:
                 # Check if they're already in any availability list and remove them
-                if self.raiders[user.id] in self.availability[GREEN]:
-                    self.availability[GREEN].remove(self.raiders[user.id])
-                if self.raiders[user.id] in self.availability[YELLOW]:
-                    self.availability[YELLOW].remove(self.raiders[user.id])
-                if self.raiders[user.id] in self.availability[RED]:
-                    self.availability[RED].remove(self.raiders[user.id])
+                if self.state.raiders[user.id] in self.state.availability[GREEN]:
+                    self.state.availability[GREEN].remove(self.state.raiders[user.id])
+                if self.state.raiders[user.id] in self.state.availability[YELLOW]:
+                    self.state.availability[YELLOW].remove(self.state.raiders[user.id])
+                if self.state.raiders[user.id] in self.state.availability[RED]:
+                    self.state.availability[RED].remove(self.state.raiders[user.id])
 
-                if self.raiders[user.id] not in self.availability[reaction.emoji]:
-                    self.availability[reaction.emoji].append(self.raiders[user.id])
-                    await self.new_availability_signup_fill_schedule(self.raiders[user.id], reaction.emoji)
+                if self.state.raiders[user.id] not in self.state.availability[reaction.emoji]:
+                    self.state.availability[reaction.emoji].append(self.state.raiders[user.id])
+                    await self.new_availability_signup_fill_schedule(self.state.raiders[user.id], reaction.emoji)
 
-                    self._log_avail_reaction(self.raiders[user.id], reaction.emoji)
+                    self._log_avail_reaction(self.state.raiders[user.id], reaction.emoji)
             else:
                 try:
                     view = WoWSelectionView(timeout=180)
@@ -1975,24 +1890,17 @@ class MyClient(discord.Client):
                         roles.append(view.selected_secondary)
 
                     if view.selected_class and roles:
-                        self.raiders[user.id] = Raider(user, view.selected_class, roles, view.selected_timezone)
-                        self.availability[reaction.emoji].append(self.raiders[user.id])
+                        self.state.raiders[user.id] = Raider(user, view.selected_class, roles, view.selected_timezone)
+                        self.state.availability[reaction.emoji].append(self.state.raiders[user.id])
                         logger.info(
                             f"Signup from {user}: class={view.selected_class} roles={roles} timezone={view.selected_timezone}"
                         )
 
-                        await self.new_availability_signup_fill_schedule(self.raiders[user.id], reaction.emoji)
+                        await self.new_availability_signup_fill_schedule(self.state.raiders[user.id], reaction.emoji)
 
-                        self._log_avail_reaction(self.raiders[user.id], reaction.emoji)
+                        self._log_avail_reaction(self.state.raiders[user.id], reaction.emoji)
 
-                        save_state(
-                            self.raiders,
-                            self.schedules,
-                            self.availability,
-                            self.availability_message_id,
-                            self.dm_map,
-                            self.dm_timestamps,
-                        )
+                        self.state.save()
                     else:
                         logger.info(f"No valid selection from {user} (timed out or incomplete)")
                 except discord.Forbidden:
@@ -2000,16 +1908,16 @@ class MyClient(discord.Client):
 
         # DM reactions for schedule signup/removal
         # Note: Main channel uses buttons (handled in on_interaction), not reactions
-        elif reaction.message.channel.id in self.dm_map and user.id in self.raiders:
+        elif reaction.message.channel.id in self.state.dm_map and user.id in self.state.raiders:
             if reaction.emoji not in ["✅", "❌"]:
                 return
 
             if reaction.emoji == "✅":
-                schedule_id = self.dm_map.get(reaction.message.channel.id, {}).get(reaction.message.id)
+                schedule_id = self.state.dm_map.get(reaction.message.channel.id, {}).get(reaction.message.id)
                 if schedule_id is None:
                     return
-                raider = self.raiders[user.id]
-                schedule = self.schedules.get(schedule_id)
+                raider = self.state.raiders[user.id]
+                schedule = self.state.schedules.get(schedule_id)
                 if schedule is None:
                     return
                 eventlog.log_event(
@@ -2057,7 +1965,7 @@ class MyClient(discord.Client):
                                     f"<t:{ts}:F>. You'll be notified if a spot opens up!"
                                 )
                                 key_msg = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_id)
-                                embed, view, content = schedule.send_message(self.role_mentions, self)
+                                embed, view, content = schedule.send_message(self.state.role_mentions, self)
                                 await key_msg.edit(content=content if content else None, embed=embed, view=view)
                                 logger.info("%s added as fill for schedule %s via DM", user, schedule)
                             else:
@@ -2071,15 +1979,15 @@ class MyClient(discord.Client):
                             await self.notify_schedule(schedule)
                         await self.message_user(raider, reaction.emoji, schedule)
                         message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_id)
-                        embed, view, content = schedule.send_message(self.role_mentions, self)
+                        embed, view, content = schedule.send_message(self.state.role_mentions, self)
                         await message.edit(content=content if content else None, embed=embed, view=view)
                         logger.info("%s signed up for schedule %s via DM", user, schedule)
             elif reaction.emoji == "❌":
-                schedule_id = self.dm_map.get(reaction.message.channel.id, {}).get(reaction.message.id)
+                schedule_id = self.state.dm_map.get(reaction.message.channel.id, {}).get(reaction.message.id)
                 if schedule_id is None:
                     return
-                raider = self.raiders[user.id]
-                schedule = self.schedules.get(schedule_id)
+                raider = self.state.raiders[user.id]
+                schedule = self.state.schedules.get(schedule_id)
                 if schedule is None:
                     return
                 eventlog.log_event(
@@ -2096,11 +2004,11 @@ class MyClient(discord.Client):
                     if schedule.signup == 0:
                         message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_id)
                         await message.delete()
-                        del self.schedules[schedule_id]
+                        del self.state.schedules[schedule_id]
                         logger.info("Deleted empty schedule %s", schedule_id)
                     else:
                         message = await self.get_channel(KEY_CHANNEL_ID).fetch_message(schedule_id)
-                        embed, view, content = schedule.send_message(self.role_mentions, self)
+                        embed, view, content = schedule.send_message(self.state.role_mentions, self)
                         await message.edit(content=content if content else None, embed=embed, view=view)
                         if schedule.is_filled() != fill_status:
                             await self.notify_schedule(schedule)
@@ -2109,17 +2017,10 @@ class MyClient(discord.Client):
 
                 await self.message_user(raider, reaction.emoji, schedule)
                 logger.info("%s denied schedule %s via DM", user, schedule)
-                del self.dm_map[reaction.message.channel.id][reaction.message.id]
-                self.dm_timestamps.get(reaction.message.channel.id, {}).pop(reaction.message.id, None)
+                del self.state.dm_map[reaction.message.channel.id][reaction.message.id]
+                self.state.dm_timestamps.get(reaction.message.channel.id, {}).pop(reaction.message.id, None)
 
-            save_state(
-                self.raiders,
-                self.schedules,
-                self.availability,
-                self.availability_message_id,
-                self.dm_map,
-                self.dm_timestamps,
-            )
+            self.state.save()
 
     # ---------------------------
     # Error Handling

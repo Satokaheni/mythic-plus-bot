@@ -7,8 +7,6 @@ from zoneinfo import ZoneInfo
 
 import discord
 
-from utils import save_state
-
 if TYPE_CHECKING:
     from bot import MyClient
     from raider import Raider
@@ -38,11 +36,11 @@ class ScheduleButtonView(discord.ui.View):
         schedule = self.schedule
         bot = self.bot_client
 
-        if interaction.message.id not in bot.schedules:
+        if interaction.message.id not in bot.state.schedules:
             await interaction.response.send_message("❌ This is not a valid schedule.", ephemeral=True)
             return
 
-        if user.id not in bot.raiders:
+        if user.id not in bot.state.raiders:
             await interaction.response.send_message(
                 "📝 You're not registered yet! Please check your DMs to select your class and roles.", ephemeral=True
             )
@@ -71,7 +69,7 @@ class ScheduleButtonView(discord.ui.View):
                     )
                     return
 
-                bot.raiders[user.id] = Raider(
+                bot.state.raiders[user.id] = Raider(
                     user, selection_view.selected_class, roles, selection_view.selected_timezone
                 )
 
@@ -79,7 +77,7 @@ class ScheduleButtonView(discord.ui.View):
                     f"New raider registered via button: {user.display_name}: class={selection_view.selected_class} roles={roles} timezone={selection_view.selected_timezone}"
                 )
 
-                raider = bot.raiders[user.id]
+                raider = bot.state.raiders[user.id]
                 logger.info(f"Raider: {raider} current runs: {raider.current_runs} sign up: {schedule}")
                 if raider.check_availability(schedule) and schedule not in raider.current_runs:
                     displaced = schedule.try_displace_off_roler(raider, raider.roles[0])
@@ -88,7 +86,7 @@ class ScheduleButtonView(discord.ui.View):
                     schedule.raider_signup(raider)
                     raider.add_run(schedule)
 
-                    embed, view, content = schedule.send_message(bot.role_mentions, bot)
+                    embed, view, content = schedule.send_message(bot.state.role_mentions, bot)
                     await interaction.message.edit(content=content if content else None, embed=embed, view=view)
 
                     await bot.message_user(raider, "✅", schedule)
@@ -96,14 +94,7 @@ class ScheduleButtonView(discord.ui.View):
                     if schedule.is_filled():
                         await bot.notify_schedule(schedule)
 
-                    save_state(
-                        bot.raiders,
-                        bot.schedules,
-                        bot.availability,
-                        bot.availability_message_id,
-                        bot.dm_map,
-                        bot.dm_timestamps,
-                    )
+                    bot.state.save()
                     logger.info("%s signed up for schedule %s", user, interaction.message.id)
 
                     await user.send("✅ Registration complete! You've been signed up for the run.")
@@ -130,7 +121,7 @@ class ScheduleButtonView(discord.ui.View):
 
             return
 
-        raider = bot.raiders[user.id]
+        raider = bot.state.raiders[user.id]
         logger.info(f"Raider: {raider} current runs: {raider.current_runs} sign up: {schedule}")
 
         if not raider.check_availability(schedule) or schedule in raider.current_runs:
@@ -165,7 +156,7 @@ class ScheduleButtonView(discord.ui.View):
         schedule.raider_signup(raider, selected_role)
         raider.add_run(schedule)
 
-        embed, view, content = schedule.send_message(bot.role_mentions, bot)
+        embed, view, content = schedule.send_message(bot.state.role_mentions, bot)
         await interaction.message.edit(content=content if content else None, embed=embed, view=view)
 
         await bot.message_user(raider, "✅", schedule)
@@ -173,9 +164,7 @@ class ScheduleButtonView(discord.ui.View):
         if schedule.is_filled():
             await bot.notify_schedule(schedule)
 
-        save_state(
-            bot.raiders, bot.schedules, bot.availability, bot.availability_message_id, bot.dm_map, bot.dm_timestamps
-        )
+        bot.state.save()
         logger.info("%s signed up for schedule %s", user, interaction.message.id)
 
         if selected_role:
@@ -192,17 +181,17 @@ class ScheduleButtonView(discord.ui.View):
         schedule = self.schedule
         bot = self.bot_client
 
-        if interaction.message.id not in bot.schedules:
+        if interaction.message.id not in bot.state.schedules:
             await interaction.response.send_message("❌ This is not a valid schedule.", ephemeral=True)
             return
 
-        if user.id not in bot.raiders:
+        if user.id not in bot.state.raiders:
             await interaction.response.send_message(
                 "📝 You're not registered yet, so you can't be signed up for this run.", ephemeral=True
             )
             return
 
-        raider = bot.raiders[user.id]
+        raider = bot.state.raiders[user.id]
 
         await interaction.response.defer(ephemeral=True)
 
@@ -212,7 +201,7 @@ class ScheduleButtonView(discord.ui.View):
 
             if schedule.signup == 0:
                 await interaction.message.delete()
-                del bot.schedules[interaction.message.id]
+                del bot.state.schedules[interaction.message.id]
                 logger.info(
                     "%s removed from schedule %s - schedule now empty and deleted", user, interaction.message.id
                 )
@@ -220,7 +209,7 @@ class ScheduleButtonView(discord.ui.View):
                     "❌ You've been removed. Schedule deleted (no remaining signups).", ephemeral=True
                 )
             else:
-                embed, view, content = schedule.send_message(bot.role_mentions, bot)
+                embed, view, content = schedule.send_message(bot.state.role_mentions, bot)
                 await interaction.message.edit(content=content if content else None, embed=embed, view=view)
                 await interaction.followup.send("❌ You've been removed from this run.", ephemeral=True)
 
@@ -232,9 +221,7 @@ class ScheduleButtonView(discord.ui.View):
 
             await bot.message_user(raider, "❌", schedule)
 
-            save_state(
-                bot.raiders, bot.schedules, bot.availability, bot.availability_message_id, bot.dm_map, bot.dm_timestamps
-            )
+            bot.state.save()
             logger.info("%s removed from schedule %s", user, interaction.message.id)
         else:
             await interaction.followup.send("❌ You're not signed up for this run.", ephemeral=True)
@@ -245,7 +232,7 @@ class ScheduleButtonView(discord.ui.View):
         bot = self.bot_client
         schedule = self.schedule
 
-        if interaction.message.id not in bot.schedules:
+        if interaction.message.id not in bot.state.schedules:
             await interaction.response.send_message("❌ This is not a valid schedule.", ephemeral=True)
             return
 
@@ -325,12 +312,10 @@ class ConfirmDeleteView(discord.ui.View):
         except discord.NotFound:
             pass
 
-        if self.message.id in bot.schedules:
-            del bot.schedules[self.message.id]
+        if self.message.id in bot.state.schedules:
+            del bot.state.schedules[self.message.id]
 
-        save_state(
-            bot.raiders, bot.schedules, bot.availability, bot.availability_message_id, bot.dm_map, bot.dm_timestamps
-        )
+        bot.state.save()
         logger.info("Schedule %s deleted by organizer", self.message.id)
 
         await interaction.followup.send("✅ Run deleted. All members have been notified.", ephemeral=True)
@@ -445,7 +430,7 @@ class ModifyScheduleModal(discord.ui.Modal, title="Modify Schedule"):
         schedule.start_time = new_start_time
         schedule.date_scheduled = new_start_time.replace(hour=0, minute=0, second=0, microsecond=0)
 
-        embed, view, content = schedule.send_message(bot.role_mentions, bot)
+        embed, view, content = schedule.send_message(bot.state.role_mentions, bot)
         try:
             await self.message.edit(content=content if content else None, embed=embed, view=view)
         except discord.NotFound:
@@ -459,9 +444,7 @@ class ModifyScheduleModal(discord.ui.Modal, title="Modify Schedule"):
             schedule.organizer_id,
         )
 
-        save_state(
-            bot.raiders, bot.schedules, bot.availability, bot.availability_message_id, bot.dm_map, bot.dm_timestamps
-        )
+        bot.state.save()
         logger.info("Schedule %s modified by organizer", self.message.id)
 
         await interaction.response.send_message(f"✅ Run updated!\n{changes_text}", ephemeral=True)
@@ -499,7 +482,7 @@ async def _apply_manage_add(
     else:
         role_display = "Fill"
 
-    embed, view, content = schedule.send_message(bot_client.role_mentions, bot_client)
+    embed, view, content = schedule.send_message(bot_client.state.role_mentions, bot_client)
     try:
         await key_msg.edit(content=content if content else None, embed=embed, view=view)
     except discord.NotFound:
@@ -509,14 +492,7 @@ async def _apply_manage_add(
         await bot_client.notify_schedule(schedule)
 
     await bot_client.message_user(raider, "✅", schedule)
-    save_state(
-        bot_client.raiders,
-        bot_client.schedules,
-        bot_client.availability,
-        bot_client.availability_message_id,
-        bot_client.dm_map,
-        bot_client.dm_timestamps,
-    )
+    bot_client.state.save()
     await interaction.response.send_message(f"✅ **{raider.name}** added as **{role_display}**!", ephemeral=True)
 
 
@@ -632,7 +608,7 @@ class ManageAddRaiderModal(discord.ui.Modal, title="Add Raider to Run"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         query = self.name_input.value.strip().lower()
         matches = [
-            r for r in self.bot_client.raiders.values() if query in r.name.lower() and not self.schedule.has_raider(r)
+            r for r in self.bot_client.state.raiders.values() if query in r.name.lower() and not self.schedule.has_raider(r)
         ]
         if not matches:
             await interaction.response.send_message(
@@ -693,7 +669,7 @@ class RemoveRaiderSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         user_id = int(self.values[0])
-        raider = self.bot_client.raiders.get(user_id)
+        raider = self.bot_client.state.raiders.get(user_id)
         schedule = self.schedule
         bot = self.bot_client
 
@@ -704,15 +680,13 @@ class RemoveRaiderSelect(discord.ui.Select):
         fill_status = schedule.is_filled()
         promoted = schedule.raider_remove(raider)
 
-        embed, view, content = schedule.send_message(bot.role_mentions, bot)
+        embed, view, content = schedule.send_message(bot.state.role_mentions, bot)
         try:
             await self.key_msg.edit(content=content if content else None, embed=embed, view=view)
         except discord.NotFound:
             pass
 
-        save_state(
-            bot.raiders, bot.schedules, bot.availability, bot.availability_message_id, bot.dm_map, bot.dm_timestamps
-        )
+        bot.state.save()
         await interaction.response.send_message(f"✅ **{raider.name}** has been removed from the run.", ephemeral=True)
         if schedule.is_filled() != fill_status:
             await bot.notify_schedule(schedule)
@@ -761,7 +735,7 @@ class ChangeRaiderRoleSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         user_id = int(self.values[0])
-        raider = self.bot_client.raiders.get(user_id)
+        raider = self.bot_client.state.raiders.get(user_id)
         if not raider or not self.schedule.has_raider(raider):
             await interaction.response.send_message("❌ Raider not found in this run.", ephemeral=True)
             return
@@ -816,14 +790,12 @@ class ChangeRoleTargetSelect(discord.ui.Select):
         else:
             role_display = "Fill"
 
-        embed, view, content = schedule.send_message(bot.role_mentions, bot)
+        embed, view, content = schedule.send_message(bot.state.role_mentions, bot)
         try:
             await self.key_msg.edit(content=content if content else None, embed=embed, view=view)
         except discord.NotFound:
             pass
-        save_state(
-            bot.raiders, bot.schedules, bot.availability, bot.availability_message_id, bot.dm_map, bot.dm_timestamps
-        )
+        bot.state.save()
         await interaction.response.send_message(
             f"✅ **{raider.name}** has been moved to **{role_display}**.", ephemeral=True
         )
@@ -1330,7 +1302,7 @@ async def _apply_manual_add(
         role_display = "Fill"
 
     if key_msg is not None:
-        embed, view, content = schedule.send_message(bot_client.role_mentions, bot_client)
+        embed, view, content = schedule.send_message(bot_client.state.role_mentions, bot_client)
         try:
             await key_msg.edit(content=content if content else None, embed=embed, view=view)
         except discord.NotFound:
@@ -1338,14 +1310,7 @@ async def _apply_manual_add(
         if schedule.is_filled():
             await bot_client.notify_schedule(schedule)
         await bot_client.message_user(raider, "✅", schedule)
-        save_state(
-            bot_client.raiders,
-            bot_client.schedules,
-            bot_client.availability,
-            bot_client.availability_message_id,
-            bot_client.dm_map,
-            bot_client.dm_timestamps,
-        )
+        bot_client.state.save()
 
     remaining = 4 - add_view.added_count
     if remaining <= 0:
@@ -1523,7 +1488,7 @@ class AddRaiderModal(discord.ui.Modal, title="Add Raider to Run"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         query = self.name_input.value.strip().lower()
         matches = [
-            r for r in self.bot_client.raiders.values() if query in r.name.lower() and not self.schedule.has_raider(r)
+            r for r in self.bot_client.state.raiders.values() if query in r.name.lower() and not self.schedule.has_raider(r)
         ]
         if not matches:
             await interaction.response.send_message(
@@ -1609,26 +1574,19 @@ class PrePostAddRaiderView(discord.ui.View):
 
     @discord.ui.button(label="Post Schedule", style=discord.ButtonStyle.success, emoji="📢")
     async def post_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        embed, view_buttons, content = self.schedule.send_message(self.bot_client.role_mentions, self.bot_client)
+        embed, view_buttons, content = self.schedule.send_message(self.bot_client.state.role_mentions, self.bot_client)
         msg = await self.key_channel.send(
             content=content if content else None,
             embed=embed,
             view=view_buttons,
         )
-        self.bot_client.schedules[msg.id] = self.schedule
+        self.bot_client.state.schedules[msg.id] = self.schedule
         self.message_id = msg.id
         # Register the view by message_id so button routing works immediately and after restarts
         self.bot_client.add_view(ScheduleButtonView(self.schedule, self.bot_client), message_id=msg.id)
         # Persist state now so the schedule survives a bot restart regardless of
         # whether the interaction response below succeeds (it can raise NotFound if
         # the 3-second window expired while waiting for key_channel.send).
-        save_state(
-            self.bot_client.raiders,
-            self.bot_client.schedules,
-            self.bot_client.availability,
-            self.bot_client.availability_message_id,
-            self.bot_client.dm_map,
-            self.bot_client.dm_timestamps,
-        )
+        self.bot_client.state.save()
         await interaction.response.edit_message(content="✅ Schedule posted to the key channel!", view=None)
         self.stop()
