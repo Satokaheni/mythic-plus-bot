@@ -7,8 +7,15 @@ import utils
 
 
 class BotState:
-    def __init__(self, raiders=None, schedules=None, availability=None, availability_message_id=None,
-                 dm_map=None, dm_timestamps=None) -> None:
+    def __init__(
+        self,
+        raiders=None,
+        schedules=None,
+        availability=None,
+        availability_message_id=None,
+        dm_map=None,
+        dm_timestamps=None,
+    ) -> None:
         self.raiders: Dict[int, Any] = raiders if raiders is not None else {}
         self.schedules: Dict[int, Any] = schedules if schedules is not None else {}
         self.availability: Dict[str, List[Any]] = availability if availability is not None else {}
@@ -23,5 +30,11 @@ class BotState:
         return cls(*utils.load_state())
 
     def save(self) -> None:
-        utils.save_state(self.raiders, self.schedules, self.availability, self.availability_message_id,
-                         self.dm_map, self.dm_timestamps)
+        utils.save_state(
+            self.raiders,
+            self.schedules,
+            self.availability,
+            self.availability_message_id,
+            self.dm_map,
+            self.dm_timestamps,
+        )

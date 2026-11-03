@@ -125,7 +125,6 @@ class PriceWatch(commands.Cog):
         self.watchlist.save()
         qty_note = f" — bulk target **{target_qty:,}**" if target_qty else ""
         await message.author.send(f"👁️ Now watching **{label}** (item {item_id}){qty_note}.")
-        return
 
     @commands.command(name="unwatch")
     @is_banker()
@@ -152,7 +151,6 @@ class PriceWatch(commands.Cog):
         if missing:
             reply.append(f"Not being watched: {', '.join(str(i) for i in missing)}.")
         await message.author.send("\n".join(reply))
-        return
 
     @commands.command(name="watches")
     @is_banker()
@@ -176,8 +174,12 @@ class PriceWatch(commands.Cog):
                     target = watch.target_qty or config.BANKER_BULK_QTY
                     sig = (
                         watchlist.evaluate(
-                            now_result.price, now_result.quantity, daily, watch,
-                            now_result.auctions, target,
+                            now_result.price,
+                            now_result.quantity,
+                            daily,
+                            watch,
+                            now_result.auctions,
+                            target,
                         )
                         if now_result
                         else None
@@ -186,7 +188,6 @@ class PriceWatch(commands.Cog):
                     sig = None
                 lines.append(watchlist.format_watch_line(watch, sig))
         await message.author.send("**Watched items:**\n" + "\n".join(lines))
-        return
 
 
 async def setup(bot) -> None:

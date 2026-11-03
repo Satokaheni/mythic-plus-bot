@@ -79,7 +79,6 @@ class Scheduling(commands.Cog):
 
         return new_message.id, schedule
 
-
     async def retry_unanswered_dms(self):
         """Retry sending DMs for schedule requests that haven't been answered."""
         now = datetime.now(timezone.utc)
@@ -90,7 +89,10 @@ class Scheduling(commands.Cog):
 
         for dm_channel_id, dm_messages in list(self.bot.state.dm_map.items()):
             for dm_message_id, schedule_id in list(dm_messages.items()):
-                if dm_channel_id in self.bot.state.dm_timestamps and dm_message_id in self.bot.state.dm_timestamps[dm_channel_id]:
+                if (
+                    dm_channel_id in self.bot.state.dm_timestamps
+                    and dm_message_id in self.bot.state.dm_timestamps[dm_channel_id]
+                ):
                     sent_time = self.bot.state.dm_timestamps[dm_channel_id][dm_message_id]
                     time_elapsed = (now - sent_time).total_seconds()
 
@@ -159,7 +161,10 @@ class Scheduling(commands.Cog):
         for dm_channel_id, dm_message_id in dms_to_delete:
             if dm_channel_id in self.bot.state.dm_map and dm_message_id in self.bot.state.dm_map[dm_channel_id]:
                 del self.bot.state.dm_map[dm_channel_id][dm_message_id]
-            if dm_channel_id in self.bot.state.dm_timestamps and dm_message_id in self.bot.state.dm_timestamps[dm_channel_id]:
+            if (
+                dm_channel_id in self.bot.state.dm_timestamps
+                and dm_message_id in self.bot.state.dm_timestamps[dm_channel_id]
+            ):
                 del self.bot.state.dm_timestamps[dm_channel_id][dm_message_id]
 
         if dms_to_retry:
@@ -583,7 +588,9 @@ class Scheduling(commands.Cog):
                         existing_schedule_id = sched_id
                         break
 
-                if existing_schedule and sum(role in existing_schedule.missing for role in self.bot.state.raiders[user.id].roles):
+                if existing_schedule and sum(
+                    role in existing_schedule.missing for role in self.bot.state.raiders[user.id].roles
+                ):
                     dm = await user.send(
                         f"A run already exists at this time (Level {existing_schedule.level}). Would you like to join that run instead?\nReact with ✅ to join, or ❌ to list your key request."
                     )
@@ -597,7 +604,9 @@ class Scheduling(commands.Cog):
                         reaction, _ = await self.bot.wait_for("reaction_add", timeout=120.0, check=check)
                         if str(reaction.emoji) == "✅":
                             if not self.bot.state.raiders[user.id].check_availability(existing_schedule):
-                                conflict_reason = self.bot.state.raiders[user.id].get_schedule_conflict_reason(existing_schedule)
+                                conflict_reason = self.bot.state.raiders[user.id].get_schedule_conflict_reason(
+                                    existing_schedule
+                                )
                                 await user.send(f"⚠️ **Cannot join this run**\n\n{conflict_reason}")
                                 return
 
@@ -609,7 +618,9 @@ class Scheduling(commands.Cog):
                             if existing_schedule.is_filled():
                                 await self.notify_schedule(existing_schedule)
                             msg = await self.bot.get_channel(config.KEY_CHANNEL_ID).fetch_message(existing_schedule_id)
-                            embed, view_buttons, content = existing_schedule.send_message(self.bot.state.role_mentions, self.bot)
+                            embed, view_buttons, content = existing_schedule.send_message(
+                                self.bot.state.role_mentions, self.bot
+                            )
                             await msg.edit(content=content if content else None, embed=embed, view=view_buttons)
                             self.bot.state.save()
                         else:
@@ -661,7 +672,9 @@ class Scheduling(commands.Cog):
                     organizer_role=organizer_role,
                 )
                 schedule.note = view.note
-                pre_post_view = PrePostAddRaiderView(schedule, self.bot, self.bot.get_channel(config.KEY_CHANNEL_ID), timeout=300)
+                pre_post_view = PrePostAddRaiderView(
+                    schedule, self.bot, self.bot.get_channel(config.KEY_CHANNEL_ID), timeout=300
+                )
                 await user.send(
                     "➕ Would you like to add any registered raiders before posting? "
                     "Click **Add Raider** to search by display name (up to 4), then click **Post Schedule** to publish.",
@@ -691,7 +704,9 @@ class Scheduling(commands.Cog):
 
         # Clean up past schedules and their associated DMs
         now = datetime.now(timezone.utc)
-        past_schedule_ids = {sid for sid, s in self.bot.state.schedules.items() if s.start_time.astimezone(timezone.utc) < now}
+        past_schedule_ids = {
+            sid for sid, s in self.bot.state.schedules.items() if s.start_time.astimezone(timezone.utc) < now
+        }
 
         # Record completed runs to the event log before their schedules are removed
         for sid in past_schedule_ids:
@@ -729,7 +744,9 @@ class Scheduling(commands.Cog):
                         except (discord.NotFound, discord.Forbidden):
                             pass
 
-        self.bot.state.schedules = {sid: s for sid, s in self.bot.state.schedules.items() if sid not in past_schedule_ids}
+        self.bot.state.schedules = {
+            sid: s for sid, s in self.bot.state.schedules.items() if sid not in past_schedule_ids
+        }
 
         # Delete DM messages for past schedules
         for dm_channel_id, dm_messages in list(self.bot.state.dm_map.items()):

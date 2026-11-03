@@ -123,7 +123,6 @@ class Admin(commands.Cog):
                 await message.author.send("❌ An unexpected error occurred during cleanup.")
         else:
             await message.author.send("❌ `!cleanup` must be used in the availability or key channel.")
-        return
 
     @commands.command(name="setup")
     @is_elevated()
@@ -217,7 +216,6 @@ class Admin(commands.Cog):
             inline=False,
         )
         await message.channel.send(embed=embed)
-        return
 
 
 async def setup(bot) -> None:

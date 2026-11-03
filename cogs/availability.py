@@ -38,7 +38,9 @@ class Availability(commands.Cog):
         msg = await channel.send(
             dedent(
                 AVAILABILITY_MESSAGE(
-                    date_start.timestamp(), date_end, self.bot.get_guild(config.GUILD_ID).get_role(config.MYTHIC_PLUS_ID).mention
+                    date_start.timestamp(),
+                    date_end,
+                    self.bot.get_guild(config.GUILD_ID).get_role(config.MYTHIC_PLUS_ID).mention,
                 )
             )
         )
@@ -149,7 +151,9 @@ class Availability(commands.Cog):
                         f"Signup from {user}: class={view.selected_class} roles={roles} timezone={view.selected_timezone}"
                     )
 
-                    await self.bot.new_availability_signup_fill_schedule(self.bot.state.raiders[user.id], reaction.emoji)
+                    await self.bot.new_availability_signup_fill_schedule(
+                        self.bot.state.raiders[user.id], reaction.emoji
+                    )
 
                     self._log_avail_reaction(self.bot.state.raiders[user.id], reaction.emoji)
 

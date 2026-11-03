@@ -29,7 +29,6 @@ class Forecasting(commands.Cog):
         self.raiderio_harvest.cancel()
         self.forecast_preview.cancel()
 
-
     @tasks.loop(hours=24)
     async def raiderio_harvest(self):
         """Daily Raider.io backfill/harvest: append new raiderio_run events (idempotent)."""

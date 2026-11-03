@@ -208,7 +208,20 @@ The bot learns **when your raiders actually play** and predicts the best time fo
 
 ```
 mythic-plus-bot/
-├── bot.py              # Main Discord bot client and event handlers
+├── bot.py              # Thin entry point: MyClient(commands.Bot), startup, cog loading
+├── config.py           # Env-derived constants, logging setup
+├── messages.py         # Message builders, changelog/version helpers
+├── state.py            # BotState — persisted bot state
+├── cogs/               # Feature cogs (each owns its commands, listeners, and loops)
+│   ├── _checks.py      #   command gates (banker, elevated, channel)
+│   ├── scheduling.py   #   !key !keys !modify, DM offers, fill/notify, hourly_check
+│   ├── availability.py #   !avail, reaction signups, weekly_avail_reset
+│   ├── admin.py        #   !cleanup !setup !help, on_ready work
+│   ├── forecasting.py  #   raiderio_harvest, forecast_preview
+│   ├── pricewatch.py   #   !watch !unwatch !watches
+│   ├── wowtoken.py     #   !token !tokenalert
+│   ├── sniper.py       #   !snipe !snipepet !unsnipe !snipes
+│   └── gear.py         #   !gearaudit
 ├── raider.py           # Raider class representing a player
 ├── schedule.py         # Schedule class for raid team composition
 ├── utils.py            # Utility functions and constants
@@ -221,6 +234,7 @@ mythic-plus-bot/
 ├── eventlog.py         # Append-only availability/attendance event log (forecasting data)
 ├── raiderio.py         # Raider.io client + daily harvester seeding raiderio_run events
 ├── forecast.py         # Availability predictor + roster/slot optimizer + dry-run preview
+├── .claude/skills/verify-mythic-plus-bot/  # Offline harness for end-to-end verification
 ├── state.json          # Persisted bot state (auto-generated)
 ├── watches.json        # Persisted price-watch state (auto-generated)
 ├── snipes.json         # Persisted auction-snipe state (auto-generated)

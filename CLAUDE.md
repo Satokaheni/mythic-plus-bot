@@ -9,7 +9,7 @@ This file reflects the **current state** of the codebase. Rewrite relevant secti
 A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Mythic+ runs. Manages team assembly, availability tracking, DM outreach, and schedule lifecycle.
 
 **Version:** 1.10.0
-**Entry point:** `bot.py` (`MyClient` class)
+**Entry point:** `bot.py` (`MyClient(commands.Bot)`; features live in `cogs/`)
 
 ---
 
@@ -17,7 +17,21 @@ A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Myt
 
 | File | Purpose |
 |------|---------|
-| `bot.py` | Main bot client, event handlers, commands, background tasks, DM flows |
+| `bot.py` | Thin entry point: `MyClient(commands.Bot)` — state load, persistent views, cog loading, `on_ready` log line, facade delegators to the Scheduling cog, `on_command_error`/`on_error` |
+| `config.py` | Env-derived constants (IDs, channels, `BOT_VERSION`, intervals), `_CST`, and `_configure_logging()` |
+| `messages.py` | User-facing message builders and changelog/version file helpers |
+| `state.py` | `BotState` — persisted bot state (raiders, schedules, availability, dm_map, ...); `load()`/`save()` wrap `utils` |
+| `cogs/__init__.py` | `EXTENSIONS` — the list of cog modules `setup_hook` loads |
+| `cogs/_checks.py` | `commands.check` gates: `is_banker`, `is_elevated`, `in_channels`, `dm_or_channels` |
+| `cogs/scheduling.py` | `Scheduling` — `!key`, `!keys`, `!modify`, key-request/DM-offer flows, fill/notify logic, spot-offer reactions, `hourly_check` loop |
+| `cogs/availability.py` | `Availability` — `!avail`, availability posting, 🟢🟡🔴 reaction handling, `weekly_avail_reset` loop |
+| `cogs/admin.py` | `Admin` — `!cleanup`, `!setup`, `!help`/`!tools`, `on_ready` work (role mentions, message cache warm-up, changelog, pinned key button) |
+| `cogs/forecasting.py` | `Forecasting` — `raiderio_harvest` and `forecast_preview` loops |
+| `cogs/pricewatch.py` | `PriceWatch` — `!watch`/`!unwatch`/`!watches`, `price_watch_check` loop (banker) |
+| `cogs/wowtoken.py` | `WowToken` — `!token`/`!tokenalert`, `token_watch_check` loop (banker) |
+| `cogs/sniper.py` | `Sniper` — `!snipe`/`!snipepet`/`!unsnipe`/`!snipes`, `auction_snipe_check` loop |
+| `cogs/gear.py` | `Gear` — `!gearaudit` (elevated) |
+| `.claude/skills/verify-mythic-plus-bot/` | Offline harness that drives the real bot against a fake Discord world. Never run `bot.py` with the production `.env`; use the harness |
 | `schedule.py` | `Schedule` class — team slots, signup/removal, embed generation |
 | `raider.py` | `Raider` class — player profile, availability checks, run tracking |
 | `views.py` | All Discord UI: buttons, dropdowns, modals, ephemeral/persistent views |
@@ -56,17 +70,29 @@ A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Myt
 - `note` — optional run note
 - `try_displace_off_roler(raider, role)` — bumps off-role fillers for main-role players (>8 hrs before run)
 - `_check_fill()` — promotes the first fill-queue raider who fits an open tank/healer/dps slot (one slot per raider), updating `missing`
-- `raider_remove(raider)` — frees the slot and returns the fill raider promoted into it (or `None`); callers DM them via `MyClient._notify_promoted`
+- `raider_remove(raider)` — frees the slot and returns the fill raider promoted into it (or `None`); callers DM them via the Scheduling cog's `_notify_promoted` (`MyClient._notify_promoted` delegates)
 - `send_message(role_mentions, bot)` — returns `(embed, view, content)` for posting/editing
 
-### `MyClient` (bot.py)
-- `raiders` — `Dict[user_id, Raider]`
-- `schedules` — `Dict[message_id, Schedule]` (keyed by Discord message ID)
-- `availability` — `Dict[emoji, List[Raider]]` — 🟢/🟡/🔴 weekly availability
-- `dm_map` / `dm_timestamps` — track outstanding DM offers and retry timing
-- `coordinator_id` — used only for conflict DMs
-- `elevated_ids` — `{COORDINATOR_ID} | set(ADMINS)`, used for all permission checks
-- `_post_avail_message()` — shared helper that posts the availability message, adds reactions, sets `availability_message_id`. Called by `!avail` and `weekly_avail_reset`.
+### `MyClient(commands.Bot)` + `BotState` + cogs
+`MyClient` (bot.py) owns startup and shared handles; features are cogs loaded from `cogs.EXTENSIONS` in `setup_hook`.
+- `client.state` — a `BotState` (state.py), the persisted data: `raiders` (`Dict[user_id, Raider]`), `schedules` (`Dict[message_id, Schedule]`), `availability` (`Dict[emoji, List[Raider]]`), `availability_message_id`, `dm_map` / `dm_timestamps` (outstanding DM offers and retry timing), plus runtime-only `role_mentions`. `state.save()` writes `state.json`.
+- `coordinator_id` — used only for conflict DMs; `elevated_ids` — `{COORDINATOR_ID} | set(ADMINS)`, used for all permission checks
+- `client.blizzard` — shared Blizzard client (used by Sniper, WowToken, Gear)
+- Facade delegators on `MyClient` (so `views.py` stays decoupled from cog layout), all forwarding to the Scheduling cog: `notify_schedule`, `message_user`, `_do_key_request_flow`, `_notify_promoted`, `_notify_displaced`, `new_availability_signup_fill_schedule`, `_notify_schedule_changed`
+- Cross-cog calls go through `bot.get_cog("Scheduling")` (e.g. Availability → `new_availability_signup_fill_schedule`)
+
+| Cog | Commands | Listeners / flows | Loop |
+|-----|----------|-------------------|------|
+| Scheduling | `!key` (KEY channel), `!keys`, `!modify` | key-request flow, `message_user`, `repost_schedule`, `fill_remaining_spots`, `new_availability_signup_fill_schedule`, `notify_schedule`, `_notify_*`, `retry_unanswered_dms`, `check_schedule_conflicts`; DM spot-offer ✅/❌ reactions | `hourly_check` |
+| Availability | `!avail` | `_post_avail_message`, `_log_avail_reaction`, 🟢🟡🔴 reactions incl. first-time registration | `weekly_avail_reset` |
+| Admin | `!cleanup`, `!setup`, `!help`/`!tools` | `on_ready` work: role mentions, `get_message_history`, changelog post+pin, pinned key-request button | — |
+| Forecasting | — | — | `raiderio_harvest`, `forecast_preview` |
+| PriceWatch | `!watch`, `!unwatch`, `!watches` | — | `price_watch_check` |
+| WowToken | `!token`, `!tokenalert` | — | `token_watch_check` |
+| Sniper | `!snipe`, `!snipepet`, `!unsnipe`, `!snipes` | `_send_snipe_dm`, realm/price caches | `auction_snipe_check` |
+| Gear | `!gearaudit` | `_run_gear_audit` | — |
+
+Each cog starts its loops in `cog_load` and cancels them in `cog_unload`. Cog-owned stores (`watchlist`, `snipelist`, `token_watch`, `_char_mappings`) live on their cog, not on the client.
 
 ---
 
@@ -96,13 +122,13 @@ Uses `_CST = ZoneInfo("America/Chicago")` constant for DST-aware scheduling. The
 - Unanswered DMs retried after 2 hours (`retry_unanswered_dms()`)
 - Raiders respond ✅/❌ via reaction
 
-### Full Run — Fill Offer DM (bot.py)
+### Full Run — Fill Offer DM (cogs/scheduling.py)
 When a user tries to sign up but the run is already full, they receive a DM with:
 - Warning that the run is full
 - **Current roster** (Tank / Healer / DPS names) via inline roster string
 - Prompt to join as fill (✅/❌ reaction)
 
-### notify_schedule (bot.py)
+### notify_schedule (cogs/scheduling.py)
 Called when fill status changes (run becomes full or drops below full). DMs all current roster members. Also includes `schedule.format_dm_roster()` in the "now filled" message. Catches `discord.HTTPException` broadly. **Called AFTER the embed edit** in `remove_button` to ensure the embed always updates even if a DM fails.
 
 ### Off-Role Displacement
@@ -110,8 +136,8 @@ If a main-role player signs up and an off-role filler holds the slot (>8 hrs bef
 
 ### Event Logging (forecasting data)
 `eventlog.py` appends best-effort records to `events.jsonl` to build a dataset for a future automatic scheduler (Phase 2). Four event types are logged from the bot's flow layer:
-- `avail_reaction` — 🟢/🟡/🔴 weekly availability reactions (`on_reaction_add`)
-- `offer_accepted` / `offer_declined` — DM ✅/❌ responses to run offers (`on_reaction_add`)
+- `avail_reaction` — 🟢/🟡/🔴 weekly availability reactions (cog `on_reaction_add` listeners)
+- `offer_accepted` / `offer_declined` — DM ✅/❌ responses to run offers (cog `on_reaction_add` listeners)
 - `run_completed` — final roster of a run whose scheduled time has passed (`hourly_check`)
 
 `hourly_check` now writes the `run_completed` event **before** deleting a passed run's Discord message, so completed-run history is preserved instead of discarded. Logging never raises and never blocks a bot flow — failures are caught and logged, not surfaced to users.
@@ -135,7 +161,7 @@ Owner-only feature gated to `BANKER_ID` — tracks region-wide commodity prices 
 - **Anti-spam** — only one DM is sent per genuine dip; the watch re-arms only after the price recovers back above the item's median.
 - **Quiet hours** — alerts only sent when `watchlist.in_alert_window(now_cst)` is true (10 AM–11:59 PM CST, `ALERT_START_HOUR`/`ALERT_END_HOUR`). Outside the window `process_signal` is skipped entirely, so a still-good dip re-fires on the next in-window hourly check (deferred, not dropped).
 - **Budget buy suggestion** — `NowResult`/`Signal` carry the auction `auctions` ladder; `format_alert(watch, signal, budget_copper)` adds a "buy up to N for M" line via `watchlist.suggest_buy(auctions, low_band, budget_copper)`, which walks the ladder cheapest-first up to the low band. Budget from `BANKER_BUDGET_GOLD` env (default 100,000 gold → `BANKER_BUDGET_COPPER`). Independent of the bulk target — this line is budget-bound, not target-bound.
-- **Command grammar** — `watchlist.parse_watch_command(args)` (pure/tested) parses `!watch` into `{"kind": "single"|"multi"|"error", ...}`. The `-x<qty>` flag (quantity **glued**, never spaced) binds to the item id immediately before it. One id → `single` (`item_id`, `label`, `target_qty`), may carry a trailing label. Two or more ids → `multi` (`items`: list of `(item_id, target_qty|None)`), each with its own optional `-x` target, no custom labels. Ids without a `-x` resolve to `BANKER_BULK_QTY` at the call site. Error dicts carry a `reason` (`bad_flag` / `multi_label` / `no_item`) that `bot.py` maps to an actionable message. Glued-only is deliberate: a spaced `-x 100` in the multi run would silently swallow the next item id as the quantity (a real reported bug). Single-item re-watch with `-x` updates the target in place; multi skips already-watched ids.
+- **Command grammar** — `watchlist.parse_watch_command(args)` (pure/tested) parses `!watch` into `{"kind": "single"|"multi"|"error", ...}`. The `-x<qty>` flag (quantity **glued**, never spaced) binds to the item id immediately before it. One id → `single` (`item_id`, `label`, `target_qty`), may carry a trailing label. Two or more ids → `multi` (`items`: list of `(item_id, target_qty|None)`), each with its own optional `-x` target, no custom labels. Ids without a `-x` resolve to `BANKER_BULK_QTY` at the call site. Error dicts carry a `reason` (`bad_flag` / `multi_label` / `no_item`) that `cogs/pricewatch.py` maps to an actionable message. Glued-only is deliberate: a spaced `-x 100` in the multi run would silently swallow the next item id as the quantity (a real reported bug). Single-item re-watch with `-x` updates the target in place; multi skips already-watched ids.
 - State persisted to `watches.json` (`Watch.target_qty` round-trips; legacy entries load as `None` → global default).
 - Commands: `!watch <itemId> [-x<qty>] [label]` or `!watch <id1> -x<qty> <id2> -x<qty> ...` (multi, per-item targets), `!unwatch <itemId> [itemId ...]` (multi), `!watches` — DM or key-channel, banker-only.
 
@@ -218,7 +244,7 @@ ADMIN_ID          — comma-separated admin user IDs (env var)
 ELEVATED_IDS      — set built at startup: {COORDINATOR_ID} | set(ADMINS)
 ```
 
-All permission gates (`!cleanup`, `!avail`, `!setup`, manage button) use `ELEVATED_IDS` — coordinator and admins are treated identically.
+All permission gates (`!cleanup`, `!avail`, `!setup`, `!gearaudit`, manage button) use `ELEVATED_IDS` — coordinator and admins are treated identically.
 
 **Exception:** schedule conflict notifications are sent **only to `COORDINATOR_ID`**, never to admins.
 
@@ -296,7 +322,7 @@ RAIDERIO_REGION       Raider.io region (default: us)
 ## Notable Conventions
 
 - **Circular imports** avoided via `TYPE_CHECKING` guards in raider.py/schedule.py
-- **Logging** — `_configure_logging()` (called after `load_dotenv`) attaches a `RotatingFileHandler` (`LOG_FILE`, default `bot.log`, ~5 MB × 3 backups) plus a console handler to the root logger; `client.run(..., log_handler=None)` so discord.py doesn't add a duplicate. `LOG_LEVEL` env sets the level (default INFO). `bot.log*` is gitignored.
+- **Logging** — `config._configure_logging()` (called after `load_dotenv`) attaches a `RotatingFileHandler` (`LOG_FILE`, default `bot.log`, ~5 MB × 3 backups) plus a console handler to the root logger; `client.run(..., log_handler=None)` so discord.py doesn't add a duplicate. `LOG_LEVEL` env sets the level (default INFO). `bot.log*` is gitignored.
 - **Schedules keyed by message ID** — not UUIDs
 - **Timezones:** US only (Eastern/Central/Mountain/Pacific/Alaska/Hawaii), stored as string, loaded as ZoneInfo
 - **Persistent views** (`ScheduleButtonView`, `KeyRequestButtonView`) re-registered on `on_ready` so buttons survive restarts
@@ -305,4 +331,6 @@ RAIDERIO_REGION       Raider.io region (default: us)
 - **Changelog bullet prefix** uses `•` not `- ` — Discord renders `- ` as markdown list syntax, stripping the dash and adding commas when copied
 - **Changelog sections** — each version entry uses `### Improvements` and `### Bug Fixes` subsections; `_read_changelog` converts `###` headers to `**bold**` in the Discord post so sections are visible there too
 - **version.txt** is written by the bot after posting the changelog; never edit it manually to the new version or the post will be skipped
-- **BOT_VERSION coupling** — adding a new `## [x.y.z]` section to `CHANGELOG.md` also requires bumping `BOT_VERSION` in `bot.py`, because that constant is what `on_ready` compares against `version.txt` to decide whether to post. A new section with a stale `BOT_VERSION` is never announced to the guild
+- **BOT_VERSION coupling** — adding a new `## [x.y.z]` section to `CHANGELOG.md` also requires bumping `BOT_VERSION` in `config.py`, because that constant is what the Admin cog's `on_ready` compares against `version.txt` to decide whether to post. A new section with a stale `BOT_VERSION` is never announced to the guild
+- **Commands are cogs** — every `!command` is a `commands.Bot` prefix command in a cog under `cogs/` (prefix `!`, `help_command=None`, `case_insensitive=False`). Author/channel rules are `commands.check` gates in `cogs/_checks.py`. Unknown commands and failed gates are silent via `MyClient.on_command_error`; anything else is logged. `MyClient` has no `on_message`: `commands.Bot`'s default runs `process_commands`
+- **Deliberate behavior deltas of the cog split** — (1) trailing text after an exact command is tolerated (`!keys foo` runs `!keys`); the converse also holds: former `startswith` matches such as `!gearauditX` / `!tokenalertX` no longer trigger, and argument-taking commands (`!watch`, `!snipe`, ...) with no arguments now answer with their usage text; (2) messages from other bots are ignored (`commands.Bot` default; previously only the bot's own); (3) discord.py's built-in help is disabled so `!help` keeps the bot's embed

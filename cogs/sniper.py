@@ -41,9 +41,8 @@ class Sniper(commands.Cog):
         async with aiohttp.ClientSession() as session:
             try:
                 now = datetime.now(timezone.utc)
-                stale = (
-                    self._snipe_realm_ids_fetched is None
-                    or (now - self._snipe_realm_ids_fetched) >= timedelta(hours=24)
+                stale = self._snipe_realm_ids_fetched is None or (now - self._snipe_realm_ids_fetched) >= timedelta(
+                    hours=24
                 )
                 if not self._snipe_realm_ids or stale:
                     self._snipe_realm_ids = await self.bot.blizzard.list_connected_realms(session)
@@ -129,7 +128,6 @@ class Sniper(commands.Cog):
         await message.channel.send(
             f"🎯 Sniping **{label}** (item {item_id}) under {snipelist_mod.format_gold(target)}{note}."
         )
-        return
 
     @commands.command(name="snipepet")
     async def cmd_snipepet(self, ctx: commands.Context) -> None:
@@ -155,7 +153,6 @@ class Sniper(commands.Cog):
         await message.channel.send(
             f"🎯 Sniping pet **{label}** (species {species_id}) under {snipelist_mod.format_gold(target)}."
         )
-        return
 
     @commands.command(name="unsnipe")
     async def cmd_unsnipe(self, ctx: commands.Context) -> None:
@@ -177,7 +174,6 @@ class Sniper(commands.Cog):
             await message.channel.send(f"🚫 Stopped sniping: {', '.join(str(i) for i in removed)}.")
         else:
             await message.channel.send("You weren't sniping any of those.")
-        return
 
     @commands.command(name="snipes")
     async def cmd_snipes(self, ctx: commands.Context) -> None:
@@ -188,7 +184,6 @@ class Sniper(commands.Cog):
             return
         lines = [snipelist_mod.format_snipe_line(s, s.subscribers[message.author.id]) for s in snipes]
         await message.author.send("**Your snipes:**\n" + "\n".join(lines))
-        return
 
 
 async def setup(bot) -> None:

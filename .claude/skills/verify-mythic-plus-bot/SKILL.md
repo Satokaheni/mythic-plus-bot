@@ -1,12 +1,12 @@
 ---
 name: verify-mythic-plus-bot
-description: Drive the Mythic+ Discord bot (bot.py MyClient) offline the way a Discord user does — type commands, react, click buttons, pick selects, fill modals — and capture proof of what the bot posted, DMed, edited, and persisted. Use to prove a change to scheduling, availability, signup, key requests, sniping, token alerts, or any command/view works end to end, beyond unit tests.
+description: Drive the Mythic+ Discord bot (bot.py MyClient and its cogs) offline the way a Discord user does — type commands, react, click buttons, pick selects, fill modals — and capture proof of what the bot posted, DMed, edited, and persisted. Use to prove a change to scheduling, availability, signup, key requests, sniping, token alerts, or any command/view works end to end, beyond unit tests.
 ---
 
 # Verify the Mythic+ bot
 
 The bot's only user surface is Discord. This skill drives it through an **offline harness**:
-the real `MyClient` boots (real `setup_hook`, `on_ready`, handlers, views, `save_state`) in a
+the real `MyClient` boots (real `setup_hook`, cog loading, `on_ready`, commands, views, `state.save()`) in a
 scratch data dir, and a fake Discord world stands in for the gateway. User actions go in through
 the same entry points Discord uses — `client.dispatch("message" | "reaction_add")` and discord.py's
 own `ViewStore.dispatch_view` / `dispatch_modal` routing for buttons, selects and modals — so a
@@ -37,7 +37,7 @@ There is no long-running server: each journey boots its own bot in-process and t
   which the bot's own fallbacks handle (e.g. `!snipe` uses the typed label).
 - Background loops (`hourly_check`, `weekly_avail_reset`, `price_watch_check`, `raiderio_harvest`,
   `forecast_preview`, `auction_snipe_check`, `token_watch_check`) are **intercepted, not started**.
-  Run one iteration on demand with `await h.tick("hourly_check")`.
+  Run one iteration on demand with `await h.tick("hourly_check")`; `h.tick` finds each loop on the cog that owns it (or on the client).
 
 Fake IDs (in `IDS` in harness.py): coordinator `h.coordinator`, banker `h.banker`, admin `h.admin`,
 channels `h.avail` (#availability) and `h.key` (#keys). New users: `h.user("Name")`.
@@ -106,7 +106,7 @@ Every run writes `.verify/evidence/<run-id>/` (gitignored, survives cleanup):
 
 Proof standards:
 - Drive the real user path (message, reaction, click, select, modal). Never call handler methods or
-  mutate `client.schedules` / `client.raiders` to set up a journey — register people the way users do.
+  mutate `client.state` (schedules, raiders, availability) or a cog's state to set up a journey — register people the way users do.
 - Prove the action and the resulting state: what the user saw (channel/DM/ephemeral) **and** the side
   effect (`state.json`, `events.jsonl`, the feature's JSON file). A posted embed without the persisted
   schedule is half a proof.

@@ -41,9 +41,7 @@ class Gear(commands.Cog):
                 if not character or not realm_slug:
                     # Report it rather than dropping it silently — a half-filled mapping entry is
                     # exactly the kind of drift this command is meant to surface.
-                    failures.append(
-                        (character or "(unnamed entry)", realm_name or "?", "incomplete mapping entry")
-                    )
+                    failures.append((character or "(unnamed entry)", realm_name or "?", "incomplete mapping entry"))
                     return
                 # The semaphore wraps the whole body, not just the equipment fetch: the per-gem
                 # item_info lookups are Blizzard calls too, and bounding only the first request
@@ -56,9 +54,7 @@ class Gear(commands.Cog):
                         failures.append((character, realm_name, "fetch failed"))
                         return
                     if items is None:
-                        failures.append(
-                            (character, realm_name, "not found — renamed, transferred, or a stale mapping")
-                        )
+                        failures.append((character, realm_name, "not found — renamed, transferred, or a stale mapping"))
                         return
                     gem_quality: Dict[int, str] = {}
                     for gem_id in gearaudit.gem_ids(items):
@@ -81,7 +77,7 @@ class Gear(commands.Cog):
                 await message.delete()
             except (discord.Forbidden, discord.NotFound):
                 pass
-        wanted = message.content[len("!gearaudit"):].strip()
+        wanted = message.content[len("!gearaudit") :].strip()
         mappings = raiderio.load_character_mappings()
         if wanted:
             mappings = [m for m in mappings if (m.get("character") or "").lower() == wanted.lower()]
@@ -93,13 +89,12 @@ class Gear(commands.Cog):
             return
         try:
             findings, failures = await self._run_gear_audit(mappings)
-        except Exception as exc:  # noqa: BLE001 - a failed audit must not kill on_message
+        except Exception as exc:  # noqa: BLE001 - a failed audit must not kill the command
             logger.warning("gearaudit failed: %s", exc)
             await message.author.send("The gear audit failed. Check the logs.")
             return
         for chunk in gearaudit.format_report(findings, failures):
             await message.author.send(chunk)
-        return
 
 
 async def setup(bot) -> None:

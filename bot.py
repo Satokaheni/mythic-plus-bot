@@ -41,6 +41,7 @@ from messages import (  # noqa: F401
 from raider import Raider
 from schedule import Schedule
 from state import BotState
+from utils import GREEN, RED, YELLOW  # noqa: F401  (re-exported for tests)
 from views import (
     KeyRequestButtonView,
     ScheduleButtonView,

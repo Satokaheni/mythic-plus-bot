@@ -81,9 +81,7 @@ class WowToken(commands.Cog):
                 pass
         parts = message.content.split(maxsplit=1)
         if len(parts) < 2:
-            await message.author.send(
-                "Usage: `!tokenalert <gold>` (e.g. `!tokenalert 300000`) or `!tokenalert off`."
-            )
+            await message.author.send("Usage: `!tokenalert <gold>` (e.g. `!tokenalert 300000`) or `!tokenalert off`.")
             return
         try:
             threshold = tokenwatch.parse_threshold(parts[1])
@@ -105,7 +103,6 @@ class WowToken(commands.Cog):
                 f"💰 WoW Token alert set: I'll DM you when the price rises above "
                 f"**{watchlist.format_gold(threshold)}**."
             )
-        return
 
     @commands.command(name="token")
     @is_banker()
@@ -125,7 +122,6 @@ class WowToken(commands.Cog):
         except Exception as exc:  # noqa: BLE001 - report state even if the API is down
             logger.warning("!token: could not fetch token price: %s", exc)
         await message.author.send(tokenwatch.format_status(self.token_watch, price))
-        return
 
 
 async def setup(bot) -> None:

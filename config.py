@@ -27,11 +27,8 @@ def _configure_logging() -> None:
         root.addHandler(handler)
 
 
-
-
 load_dotenv(".env")
 _configure_logging()
-
 
 
 def _require_env(name: str) -> str:
