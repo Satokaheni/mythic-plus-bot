@@ -25,6 +25,7 @@ import importlib
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 import time
@@ -72,6 +73,13 @@ FAKE_ENV = {
     "UNDERMINE_API_KEY": "offline",
     "RAIDERIO_API_KEY": "offline",
     "LOG_LEVEL": "INFO",
+    "ASSISTANT_ENABLED": "1",
+    "ASSISTANT_USER_IDS": f"{IDS['banker']},{IDS['coordinator']}",
+    "CLAUDE_BIN": json.dumps([sys.executable, str(Path(__file__).resolve().parent / "fake_claude.py")]),
+    "ASSISTANT_CONFIG_DIR": "assistant-config",
+    "ASSISTANT_WORK_DIR": "assistant-work",
+    "ASSISTANT_TIMEOUT": "3",
+    "CLAUDE_CODE_OAUTH_TOKEN": "offline-fake-token",
 }
 # Only these are copied from the repo .env under --network. CLIENT_KEY never is.
 NETWORK_ENV_ALLOWLIST = (
@@ -294,6 +302,13 @@ class FakeMessage:
         self.interaction = None
         self.created_at = discord.utils.snowflake_time(self.id)
         self.flags = SimpleNamespace(ephemeral=ephemeral_to is not None)
+        ids = [int(m) for m in re.findall(r"<@!?(\d+)>", self.content)]
+        self.raw_mentions = list(dict.fromkeys(ids))
+        self.mentions = [world.users[i] for i in self.raw_mentions if i in world.users]
+        self.mention_everyone = "@everyone" in self.content or "@here" in self.content
+        self.role_mentions = []
+        self.type = discord.MessageType.default
+        self.webhook_id = None
 
     def __eq__(self, other):
         return getattr(other, "id", None) == self.id
@@ -396,6 +411,18 @@ class _Messageable:
     def __init__(self, world, id):
         self._world, self.id = world, id
         self._messages: Dict[int, FakeMessage] = {}
+
+    def typing(self):
+        world, channel = self._world, self
+
+        class _Typing:
+            async def __aenter__(self_inner):
+                world.record("typing", channel=channel)
+
+            async def __aexit__(self_inner, *exc):
+                return False
+
+        return _Typing()
 
     def _post(self, author, content=None, *, embed=None, embeds=None, view=None, ephemeral_to=None,
               reference=None, kind="send"):
@@ -804,6 +831,9 @@ class Harness:
             await asyncio.sleep(0)
 
     # ---- people and places -------------------------------------------------
+
+    def mention(self) -> str:
+        return f"<@{IDS['bot']}>"
 
     def user(self, name: str, *, id: Optional[int] = None, dms_open: bool = True) -> FakeUser:
         return self.world.add_user(name, id, dms_open)
