@@ -293,6 +293,7 @@ class FakeMessage:
         self.interaction = None
         self.created_at = discord.utils.snowflake_time(self.id)
         self.flags = SimpleNamespace(ephemeral=ephemeral_to is not None)
+        self.attachments = []
 
     def __eq__(self, other):
         return getattr(other, "id", None) == self.id

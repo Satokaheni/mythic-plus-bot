@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from textwrap import dedent
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -14,7 +14,6 @@ from discord.ext import commands, tasks
 import blizzard
 import cogs
 import eventlog
-import forecast
 import gearaudit
 import raiderio
 import snipelist as snipelist_mod
@@ -131,29 +130,6 @@ class MyClient(commands.Bot):
         )
 
         return new_message.id, schedule
-
-    async def get_message_history(self):
-        """Warm the message cache so reactions on old messages fire after a restart.
-
-        Each fetch is best-effort: a message may have been deleted since last run
-        (e.g. the availability message), which fetch_message reports as NotFound.
-        Skip missing/inaccessible messages so one gone message can't abort on_ready
-        or skip caching the rest.
-        """
-        avail_channel = self.get_channel(AVAIL_CHANNEL_ID)
-        if avail_channel and self.state.availability_message_id:
-            try:
-                await avail_channel.fetch_message(self.state.availability_message_id)
-            except (discord.NotFound, discord.Forbidden):
-                pass
-
-        for cid, mid in self.state.dm_map.items():
-            channel = self.get_channel(cid)
-            if channel:
-                try:
-                    await channel.fetch_message(mid[1])
-                except (discord.NotFound, discord.Forbidden):
-                    pass
 
     async def retry_unanswered_dms(self):
         """Retry sending DMs for schedule requests that haven't been answered."""
@@ -570,26 +546,6 @@ class MyClient(commands.Bot):
             except discord.HTTPException as e:
                 logger.warning(f"Could not DM {raider.name} for filled schedule: {e}")
 
-    async def _post_avail_message(self) -> None:
-        """Post a fresh availability message and add emoji reactions. Sets availability_message_id."""
-        channel = self.get_channel(AVAIL_CHANNEL_ID)
-        if not channel:
-            logger.warning("_post_avail_message: AVAIL_CHANNEL not found")
-            return
-        date_start = datetime.now(timezone.utc)
-        date_end = (date_start + timedelta(days=7)).timestamp()
-        msg = await channel.send(
-            dedent(
-                AVAILABILITY_MESSAGE(
-                    date_start.timestamp(), date_end, self.get_guild(GUILD_ID).get_role(MYTHIC_PLUS_ID).mention
-                )
-            )
-        )
-        self.state.availability_message_id = msg.id
-        await msg.add_reaction(GREEN)
-        await msg.add_reaction(YELLOW)
-        await msg.add_reaction(RED)
-
     # ---------------------------
     # Hourly Task
     # ---------------------------
@@ -867,87 +823,6 @@ class MyClient(commands.Bot):
         except Exception as exc:  # noqa: BLE001 - one bad DM must not abort the fan-out
             logger.warning("auction_snipe_check: could not DM %s: %s", plan.recipient_id, exc)
 
-    @tasks.loop(hours=24)
-    async def raiderio_harvest(self):
-        """Daily Raider.io backfill/harvest: append new raiderio_run events (idempotent)."""
-        if not self.is_ready():
-            logger.warning("raiderio_harvest: Bot not ready yet, skipping this iteration")
-            return
-        if not self._char_mappings:
-            return
-        try:
-            async with aiohttp.ClientSession() as session:
-                added = await raiderio.harvest(self.state.raiders, session, self._char_mappings)
-            logger.info("raiderio_harvest: appended %d new run events", added)
-        except Exception as exc:  # noqa: BLE001 - harvest must never kill the loop
-            logger.warning("raiderio_harvest failed: %s", exc)
-
-    @raiderio_harvest.before_loop
-    async def before_raiderio_harvest(self):
-        await self.wait_until_ready()
-
-    # ---------------------------
-    # Weekly Availability Reset
-    # ---------------------------
-
-    @tasks.loop(time=time(hour=12, minute=0, tzinfo=_CST))
-    async def weekly_avail_reset(self):
-        """Reset the availability message every Tuesday at noon CST."""
-        if datetime.now(_CST).weekday() != 1:  # 1 = Tuesday
-            return
-
-        avail_channel = self.get_channel(AVAIL_CHANNEL_ID)
-
-        # Delete the old availability message
-        if avail_channel and self.state.availability_message_id:
-            try:
-                old_msg = await avail_channel.fetch_message(self.state.availability_message_id)
-                await old_msg.delete()
-            except (discord.NotFound, discord.Forbidden):
-                pass
-
-        # Reset availability state and post fresh message
-        self.state.availability = {GREEN: [], YELLOW: [], RED: []}
-        self.state.availability_message_id = None
-        await self._post_avail_message()
-        logger.info("weekly_avail_reset: availability reset and new message posted")
-
-        self.state.save()
-
-    # ---------------------------
-    # Weekly Forecast Dry-Run Preview
-    # ---------------------------
-
-    @tasks.loop(time=time(hour=12, minute=0, tzinfo=_CST))
-    async def forecast_preview(self):
-        """Wednesday-noon-CST dry-run: predict the best run from the green pool, DM BANKER_ID."""
-        if datetime.now(_CST).weekday() != 2:  # 2 = Wednesday (day after the Tuesday availability post)
-            return
-        if not self.is_ready():
-            return
-
-        green = list(self.state.availability.get(GREEN, []))
-        if not forecast.can_field_team(green):
-            logger.info("forecast_preview: green pool cannot field a role-valid team; skipping")
-            return
-
-        try:
-            now = datetime.now(timezone.utc)
-            events = eventlog.read_events()
-            obs = forecast.observations(events, self.state.raiders, now)
-            obs_by_user = {}
-            for o in obs:
-                obs_by_user.setdefault(o.user_id, []).append(o)
-            ranked = forecast.rank_slots(green, obs_by_user, datetime.now(_CST))
-            text = forecast.format_preview(ranked)
-            banker = await self.fetch_user(BANKER_ID)
-            await banker.send(text)
-            logger.info("forecast_preview: sent dry-run preview to banker")
-        except discord.HTTPException as exc:
-            logger.warning("forecast_preview: could not DM banker: %s", exc)
-        except Exception as exc:  # noqa: BLE001 - preview must never kill the loop
-            logger.warning("forecast_preview failed: %s", exc)
-
     # ---------------------------
     # Key Request Flow
     # ---------------------------
@@ -1153,7 +1028,6 @@ class MyClient(commands.Bot):
         self._snipe_price_cache: dict = {}  # realm_id -> {(kind,key_id): (price, qty)}
         self._snipe_realm_modified: dict = {}  # realm_id -> Last-Modified str
         self._snipe_realm_ids_fetched = None
-        self._char_mappings = raiderio.load_character_mappings()
         logger.info("Loaded state from file.")
 
         # Register persistent views so buttons work after bot restarts
@@ -1171,17 +1045,8 @@ class MyClient(commands.Bot):
         if not self.hourly_check.is_running():
             self.hourly_check.start()
 
-        if not self.weekly_avail_reset.is_running():
-            self.weekly_avail_reset.start()
-
         if not self.price_watch_check.is_running():
             self.price_watch_check.start()
-
-        if not self.raiderio_harvest.is_running():
-            self.raiderio_harvest.start()
-
-        if not self.forecast_preview.is_running():
-            self.forecast_preview.start()
 
         if not self.auction_snipe_check.is_running():
             self.auction_snipe_check.start()
@@ -1192,42 +1057,6 @@ class MyClient(commands.Bot):
     async def on_ready(self):
         """Called when the bot is ready."""
         logger.info("Logged in as %s", self.user)
-
-        if not self.state.role_mentions:
-            self.state.role_mentions["healer"] = self.get_guild(GUILD_ID).get_role(HEALER_ID)
-            self.state.role_mentions["tank"] = self.get_guild(GUILD_ID).get_role(TANK_ID)
-            self.state.role_mentions["dps"] = self.get_guild(GUILD_ID).get_role(DPS_ID)
-
-        # Fetch message history now that channels are cached
-        if self.state.availability_message_id:
-            await self.get_message_history()
-
-        # Post changelog if the bot version has changed since last run
-        last_version = _read_last_version()
-        if last_version != BOT_VERSION:
-            changelog_channel = self.get_channel(AVAIL_CHANNEL_ID)
-            entries = _read_changelog(BOT_VERSION)
-            if changelog_channel and entries:
-                changes = "\n".join(f"• {line}" for line in entries)
-                changelog_msg = await changelog_channel.send(
-                    f"🤖 **Bot updated to v{BOT_VERSION}**\n\n**What's new:**\n{changes}"
-                )
-                await changelog_msg.pin()
-                logger.info("Posted and pinned changelog for v%s", BOT_VERSION)
-            _write_version(BOT_VERSION)
-
-        # Ensure the persistent key request button is pinned in KEY_CHANNEL
-        key_channel = self.get_channel(KEY_CHANNEL_ID)
-        if key_channel:
-            pins = await key_channel.pins()
-            button_exists = any(p.author.id == self.user.id and p.components for p in pins)
-            if not button_exists:
-                button_msg = await key_channel.send(
-                    "⚔️ **Schedule a Mythic+ Run**\nClick the button below to create a key request.",
-                    view=KeyRequestButtonView(self),
-                )
-                await button_msg.pin()
-                logger.info("on_ready: posted and pinned missing key request button in KEY_CHANNEL")
 
     async def _run_gear_audit(
         self, mappings: List[dict]
@@ -1561,76 +1390,6 @@ class MyClient(commands.Bot):
             await message.author.send("**Your snipes:**\n" + "\n".join(lines))
             return
 
-        if message.content in ("!help", "!tools"):
-            embed = discord.Embed(
-                title="🤖 Mythic+ Bot — Commands",
-                description="Here's everything I can do. Most commands work in a DM or the relevant channel.",
-                color=discord.Color.blurple(),
-            )
-            embed.add_field(
-                name="📅 Mythic+ Scheduling (anyone)",
-                value=(
-                    "`!key` — start a key request (in the key channel)\n"
-                    "`!keys` — show your scheduled runs\n"
-                    "`!modify` — update your class, roles, or timezone"
-                ),
-                inline=False,
-            )
-            embed.add_field(
-                name="🗓️ Availability & Setup (coordinator/admin)",
-                value=(
-                    "`!avail` — post the weekly availability message\n"
-                    "`!setup` — re-post the key-request button\n"
-                    "`!cleanup` — purge the channel and reset state"
-                ),
-                inline=False,
-            )
-            embed.add_field(
-                name="🔍 Gear Audit (coordinator/admin)",
-                value=(
-                    "`!gearaudit` — check every mapped character for missing enchants, "
-                    "empty sockets, and low-quality enchants/gems\n"
-                    "`!gearaudit <character>` — check one character"
-                ),
-                inline=False,
-            )
-            embed.add_field(
-                name="💰 Price Watch — region commodities (banker)",
-                value=(
-                    "`!watch <itemId> [-x<qty>] [label]` — watch a commodity; `-x` sets a bulk target\n"
-                    "`!watch <id1> <id2> …` — watch several at once\n"
-                    "`!unwatch <itemId …>` — stop watching\n"
-                    "`!watches` — list your watches"
-                ),
-                inline=False,
-            )
-            embed.add_field(
-                name="🪙 WoW Token — sell signal (banker)",
-                value=(
-                    "`!token` — current token price and your alert state\n"
-                    "`!tokenalert <gold>` — DM me when the price rises above this\n"
-                    "`!tokenalert off` — disable token alerts"
-                ),
-                inline=False,
-            )
-            embed.add_field(
-                name="🎯 Auction Sniper — per-realm items (anyone)",
-                value=(
-                    "`!snipe <itemId> <maxGold> [label]` — alert when an item is under your price on any realm\n"
-                    "`!snipepet <speciesId> <maxGold> [label]` — same, for a battle pet\n"
-                    "`!unsnipe <id …>` — stop sniping\n"
-                    "`!snipes` — list your snipes"
-                ),
-                inline=False,
-            )
-            embed.add_field(
-                name="ℹ️ Help",
-                value="`!help` or `!tools` — show this message",
-                inline=False,
-            )
-            await message.channel.send(embed=embed)
-            return
-
         if message.content == "!keys":
             if message.author.id in self.state.raiders:
                 try:
@@ -1747,108 +1506,13 @@ class MyClient(commands.Bot):
             except discord.Forbidden:
                 logger.warning(f"Could not DM {message.author} for !modify")
 
-        if message.content == "!cleanup" and message.author.id in ELEVATED_IDS:
-            if message.channel.id == AVAIL_CHANNEL_ID or message.channel.id == KEY_CHANNEL_ID:
-                try:
-                    # Purge both channels, skipping pinned messages
-                    avail_channel = self.get_channel(AVAIL_CHANNEL_ID)
-                    key_channel = self.get_channel(KEY_CHANNEL_ID)
-                    avail_pins = {m.id for m in await avail_channel.pins()}
-                    key_pins = {m.id for m in await key_channel.pins()}
-                    avail_deleted = await avail_channel.purge(check=lambda m: m.id not in avail_pins)
-                    key_deleted = await key_channel.purge(check=lambda m: m.id not in key_pins)
-                    logger.info(
-                        "Cleanup: purged %d messages from AVAIL and %d from KEY channel.",
-                        len(avail_deleted),
-                        len(key_deleted),
-                    )
-
-                    # Reset all state except raiders
-                    self.state.schedules = {}
-                    self.state.availability = {GREEN: [], YELLOW: [], RED: []}
-                    self.state.availability_message_id = None
-                    self.state.dm_map = {}
-                    self.state.dm_timestamps = {}
-                    for raider in self.state.raiders:
-                        self.state.raiders[raider].current_runs = set()
-                        self.state.raiders[raider].denied_runs = set()
-
-                    self.state.save()
-                    logger.info("Cleanup: state reset complete. Raiders preserved: %d", len(self.state.raiders))
-
-                    await message.author.send(
-                        "✅ Cleanup complete. Both channels have been purged and all state (except raiders) has been reset."
-                    )
-                except discord.Forbidden:
-                    logger.warning("Cleanup: missing permissions to purge one or both channels.")
-                    await message.author.send("❌ Missing permissions to purge one or both channels.")
-                except Exception as exc:
-                    logger.exception("Cleanup: unexpected error: %s", exc)
-                    await message.author.send("❌ An unexpected error occurred during cleanup.")
-            else:
-                await message.author.send("❌ `!cleanup` must be used in the availability or key channel.")
-            return
-
         if message.channel.id == AVAIL_CHANNEL_ID or message.channel.id == KEY_CHANNEL_ID:
-            if (
-                message.content == "!avail"
-                and message.author.id in ELEVATED_IDS
-                and message.channel.id == AVAIL_CHANNEL_ID
-            ):
-                await self._post_avail_message()
-
-                try:
-                    await message.delete()
-                except discord.Forbidden:
-                    logger.warning(f"Could not delete !avail commands from {message.author}")
-
-            elif (
-                message.content == "!setup"
-                and message.author.id in ELEVATED_IDS
-                and message.channel.id == KEY_CHANNEL_ID
-            ):
-                try:
-                    await message.delete()
-                except (discord.Forbidden, discord.NotFound):
-                    pass
-                channel = self.get_channel(KEY_CHANNEL_ID)
-                # Unpin and delete any previous bot button messages to keep channel clean
-                for pinned in await channel.pins():
-                    if pinned.author.id == self.user.id and pinned.components:
-                        await pinned.unpin()
-                        await pinned.delete()
-                button_msg = await channel.send(
-                    "⚔️ **Schedule a Mythic+ Run**\nClick the button below to create a key request.",
-                    view=KeyRequestButtonView(self),
-                )
-                await button_msg.pin()
-                logger.info("Setup: posted and pinned key request button in KEY_CHANNEL")
-
-            elif message.content == "!key" and message.channel.id == KEY_CHANNEL_ID:
+            if message.content == "!key" and message.channel.id == KEY_CHANNEL_ID:
                 try:
                     await message.delete()
                 except (discord.Forbidden, discord.NotFound):
                     logger.warning(f"Could not delete !key message from {message.author}")
                 await self._do_key_request_flow(message.author)
-
-            # Delete !key and !avail commands from KEY_CHANNEL
-            elif message.content in ["!key", "!avail"] and message.channel.id == KEY_CHANNEL_ID:
-                try:
-                    await message.delete()
-                except (discord.Forbidden, discord.NotFound):
-                    logger.warning(f"Could not delete command from {message.author} (message not found or forbidden)")
-
-    def _log_avail_reaction(self, raider, emoji) -> None:
-        """Log an availability-reaction event (best-effort)."""
-        now = datetime.now(timezone.utc)
-        eventlog.log_event(
-            "avail_reaction",
-            ts_utc=now,
-            user_id=raider.user_id,
-            tz=raider.timezone,
-            emoji=str(emoji),
-            week_of=eventlog.week_of(now),
-        )
 
     # ---------------------------
     # Reaction Listener
@@ -1863,61 +1527,9 @@ class MyClient(commands.Bot):
             f"Reaction added: {user.display_name}, {reaction.emoji} Raider: {user.id in self.state.raiders} ID in schedules: {reaction.message.id in self.state.schedules}"
         )
 
-        if (
-            reaction.message.channel.id == AVAIL_CHANNEL_ID
-            and reaction.message.id == self.state.availability_message_id
-            and reaction.emoji in [GREEN, YELLOW, RED]
-        ):
-            if user.id in self.state.raiders:
-                # Check if they're already in any availability list and remove them
-                if self.state.raiders[user.id] in self.state.availability[GREEN]:
-                    self.state.availability[GREEN].remove(self.state.raiders[user.id])
-                if self.state.raiders[user.id] in self.state.availability[YELLOW]:
-                    self.state.availability[YELLOW].remove(self.state.raiders[user.id])
-                if self.state.raiders[user.id] in self.state.availability[RED]:
-                    self.state.availability[RED].remove(self.state.raiders[user.id])
-
-                if self.state.raiders[user.id] not in self.state.availability[reaction.emoji]:
-                    self.state.availability[reaction.emoji].append(self.state.raiders[user.id])
-                    await self.new_availability_signup_fill_schedule(self.state.raiders[user.id], reaction.emoji)
-
-                    self._log_avail_reaction(self.state.raiders[user.id], reaction.emoji)
-            else:
-                try:
-                    view = WoWSelectionView(timeout=180)
-                    await user.send(
-                        "Choose your **World of Warcraft class** and **roles** if you have only one role please ignore the secondary selection:",
-                        view=view,
-                    )
-
-                    await view.wait()
-
-                    roles = []
-                    if view.selected_primary:
-                        roles.append(view.selected_primary)
-                    if view.selected_secondary and view.selected_secondary != view.selected_primary:
-                        roles.append(view.selected_secondary)
-
-                    if view.selected_class and roles:
-                        self.state.raiders[user.id] = Raider(user, view.selected_class, roles, view.selected_timezone)
-                        self.state.availability[reaction.emoji].append(self.state.raiders[user.id])
-                        logger.info(
-                            f"Signup from {user}: class={view.selected_class} roles={roles} timezone={view.selected_timezone}"
-                        )
-
-                        await self.new_availability_signup_fill_schedule(self.state.raiders[user.id], reaction.emoji)
-
-                        self._log_avail_reaction(self.state.raiders[user.id], reaction.emoji)
-
-                        self.state.save()
-                    else:
-                        logger.info(f"No valid selection from {user} (timed out or incomplete)")
-                except discord.Forbidden:
-                    logger.warning(f"Could not DM {user}")
-
         # DM reactions for schedule signup/removal
         # Note: Main channel uses buttons (handled in on_interaction), not reactions
-        elif reaction.message.channel.id in self.state.dm_map and user.id in self.state.raiders:
+        if reaction.message.channel.id in self.state.dm_map and user.id in self.state.raiders:
             if reaction.emoji not in ["✅", "❌"]:
                 return
 
