@@ -8,6 +8,8 @@ import time
 
 
 def _route(low: str, prompt: str) -> dict:
+    if "fake:long" in low:
+        return {"kind": "answer", "text": ("long answer " * 700)[:7000]}
     if "unsnipe" in low:
         return {"kind": "command", "command": "unsnipe", "args": ["215147"], "summary": "stop sniping 215147"}
     if "my snipes" in low:

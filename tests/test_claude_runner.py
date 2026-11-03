@@ -3,6 +3,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from assistant import claude_runner as cr
 
 FAKE = [sys.executable, str(Path(__file__).resolve().parents[1] / ".claude/skills/verify-mythic-plus-bot/scripts/fake_claude.py")]
@@ -100,3 +102,42 @@ def test_run_claude_cancel_kills_child(tmp_path, monkeypatch):
     cancelled, alive = asyncio.run(scenario())
     assert cancelled
     assert not alive, "child process still running after the task was cancelled"
+
+
+def _kill_then_vanish(monkeypatch):
+    """The child exits on its own just before kill(): kill() raises ProcessLookupError (we still really kill it)."""
+    real_exec = asyncio.create_subprocess_exec
+
+    async def spy(*args, **kwargs):
+        proc = await real_exec(*args, **kwargs)
+        real_kill = proc.kill
+
+        def kill():
+            real_kill()
+            raise ProcessLookupError
+
+        proc.kill = kill
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spy)
+
+
+def test_timeout_survives_a_child_that_already_exited(tmp_path, monkeypatch):
+    _kill_then_vanish(monkeypatch)
+    r = _run("fake:timeout", tmp_path, timeout=1)
+    assert not r.ok and r.error == "timeout"
+
+
+def test_cancel_survives_a_child_that_already_exited(tmp_path, monkeypatch):
+    _kill_then_vanish(monkeypatch)
+
+    async def scenario():
+        task = asyncio.create_task(cr.run_claude(
+            "fake:timeout", cmd=FAKE, schema=SCHEMA, model="haiku", system_prompt_file=tmp_path / "p.md",
+            work_dir=tmp_path / "w", config_dir=tmp_path / "c", token="tok", timeout=30))
+        await asyncio.sleep(0.5)
+        task.cancel()
+        await task
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(scenario())

@@ -1,6 +1,7 @@
 """Run one isolated headless `claude -p` call and parse its JSON result."""
 
 import asyncio
+import contextlib
 import json
 import os
 import time
@@ -90,11 +91,13 @@ async def run_claude(prompt, *, cmd, schema, model, system_prompt_file, work_dir
     try:
         stdout, _stderr = await asyncio.wait_for(proc.communicate(prompt.encode("utf-8")), timeout)
     except asyncio.TimeoutError:
-        proc.kill()
+        with contextlib.suppress(ProcessLookupError):  # it may have exited on its own just now
+            proc.kill()
         await proc.wait()
         return RunResult(ok=False, error="timeout", duration_s=time.monotonic() - start)
     except asyncio.CancelledError:  # bot shutdown: don't orphan the child
-        proc.kill()
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
         await proc.wait()
         raise
     result = parse_result(stdout)

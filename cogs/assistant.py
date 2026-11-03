@@ -18,6 +18,7 @@ from assistant.usage import DailyUsage
 logger = logging.getLogger("discord")
 FAILURE = "I couldn't work that out — try `!help`."
 NO_MENTIONS = discord.AllowedMentions.none()
+MAX_ANSWER_CHUNKS = 3
 
 _HANDLED_TYPES = (discord.MessageType.default, discord.MessageType.reply)
 
@@ -48,7 +49,9 @@ def should_handle(message, *, bot_user_id: int, allowed_ids, enabled: bool) -> O
     return cleaned
 
 
-def _chunks(text: str, size: int = 2000):
+def _chunks(text: str, size: int = 2000, limit: int = MAX_ANSWER_CHUNKS):
+    if len(text) > size * limit:
+        text = text[:size * limit - 1] + "…"
     return [text[i:i + size] for i in range(0, len(text), size)] or [""]
 
 
@@ -130,6 +133,7 @@ class Assistant(commands.Cog):
             logger.warning("assistant: rejected intent: %s", exc)
             await message.channel.send(FAILURE)
             return
+        logger.info("assistant: intent=%s", f"command:{parsed.command}" if parsed.kind == "command" else "answer")
         await self._act(message, parsed)
 
     async def _act(self, message: discord.Message, parsed: "intent.Intent") -> None:

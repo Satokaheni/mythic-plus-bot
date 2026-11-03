@@ -27,6 +27,7 @@ USAGE = {
 
 MAX_ARGS = 20
 MAX_ARG_LEN = 100
+MAX_COMMAND_LEN = 1900  # leaves room for the confirm prompt under Discord's 2000
 _FORBIDDEN = ("\n", "\r", "<@", "@everyone", "@here", "`")
 _FORBIDDEN_CATEGORIES = ("Cc", "Cf", "Zl", "Zp")  # control, format (zero-width, bidi), line/paragraph separators
 
@@ -88,6 +89,8 @@ def validate(obj) -> Intent:
                     or any(unicodedata.category(ch) in _FORBIDDEN_CATEGORIES for ch in arg)):
                 raise IntentError(f"unsafe arg: {arg[:40]!r}")
             clean.append(arg)
+        if len(" ".join(["!" + command, *clean])) > MAX_COMMAND_LEN:
+            raise IntentError("command too long")
         summary = obj.get("summary") or ""
         if not isinstance(summary, str):
             raise IntentError("summary must be a string")

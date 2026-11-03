@@ -49,3 +49,11 @@ def test_sets_are_disjoint_and_usage_covers_all():
 def test_system_prompt_lists_every_command():
     text = it.render_system_prompt(it.TEMPLATE_PATH)
     assert "{{COMMANDS}}" not in text and all(f"!{name}" in text for name in it.ALL_COMMANDS)
+
+
+def test_rejects_command_too_long_for_the_confirm_prompt():
+    # worst case: 20 args of 100 chars would push "I'll run `...` — confirm?" past Discord's 2000-char limit
+    with pytest.raises(it.IntentError):
+        it.validate({"kind": "command", "command": "tokenalert", "args": ["a" * 100] * 20})
+    ok = it.validate({"kind": "command", "command": "tokenalert", "args": ["a" * 100] * 18})
+    assert len(it.build_command(ok)) <= it.MAX_COMMAND_LEN

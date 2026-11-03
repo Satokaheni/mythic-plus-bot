@@ -290,8 +290,12 @@ async def command_gates(h):
 
 
 def _acts(h, before):
-    kinds = ("send", "edit", "delete", "interaction_response", "followup", "log_error")
+    kinds = ("send", "edit", "delete", "typing", "interaction_response", "followup", "log_error")
     return [e for e in h.world.events[before:] if e["kind"] in kinds]
+
+
+def _usage_count(h):
+    return (h.state_file("assistant.json") or {}).get("count", 0)
 
 
 def _claude_calls(h):
@@ -302,8 +306,10 @@ def _claude_calls(h):
 async def assistant(h):
     owner, other, stranger, bot = h.banker, h.coordinator, h.user("Stranger"), h.mention()
 
+    used = _usage_count(h)
     await h.say(owner, "what is the best mage spec?", "dm")
     h.check("1:1 DM without a mention is answered", bool(await h.wait_for(owner, "fake answer: what is the best mage spec?")))
+    h.check("a successful call is counted in assistant.json", _usage_count(h) == used + 1, _usage_count(h))
 
     before, calls = len(h.world.events), len(_claude_calls(h))
     await h.say(owner, "what is the best mage spec?", "key")
@@ -318,10 +324,18 @@ async def assistant(h):
     await h.say(owner, bot, "key")
     h.check("empty mention asks what to do", bool(await h.wait_for("key", "What can I help with?")))
 
-    before = len(h.world.events)
+    before, calls = len(h.world.events), len(_claude_calls(h))
     await h.say(owner, "!snipes", "dm")
-    h.check("typed !command gets exactly one reply (assistant stays out)",
-            len([e for e in h.world.events[before:] if e["kind"] == "send"]) == 1)
+    h.check("typed !command gets exactly one reply and no claude call (assistant stays out)",
+            len([e for e in h.world.events[before:] if e["kind"] == "send"]) == 1 and len(_claude_calls(h)) == calls)
+
+    before = len(h.world.events)
+    await h.say(owner, "fake:long", "dm")
+    await h.wait_for(owner, "…")
+    await h.settle()
+    sent = [e.get("content") or "" for e in h.world.events[before:] if e["kind"] == "send"]
+    h.check("a long answer is capped at 3 messages of <=2000 chars, ending in …",
+            len(sent) == 3 and all(len(c) <= 2000 for c in sent) and sent[-1].endswith("…"), [len(c) for c in sent])
 
     await h.say(owner, "please snipe 215147 for me under 5000", "dm")
     ask = await h.wait_for(owner, "I'll run `!snipe 215147 5000 Vibrant Shard`")
@@ -351,9 +365,20 @@ async def assistant(h):
     await h.say(owner, "make a run thursday", "dm")
     h.check("key request opens the DM flow", bool(await h.wait_for(owner, "Before scheduling a key")))
 
-    for text in ("evil", "inject", "fake:badjson", "fake:error", "fake:crash", "fake:timeout"):
+    used = _usage_count(h)
+    failures = ("evil", "inject", "fake:badjson", "fake:error", "fake:crash")
+    for text in failures:
         await h.say(other, text, "dm")
         h.check(f"{text}: one failure reply", bool(await h.wait_for(other, "couldn't work that out", timeout=15)))
+    h.check("rejected and failed calls (incl. fake:error) are still counted in assistant.json",
+            _usage_count(h) == used + len(failures), (used, _usage_count(h)))
+
+    await h.say(other, "fake:timeout", "dm")  # say() returns once the bot is quiet; the call is still in flight
+    await h.say(other, "are you there?", "dm")
+    h.check("a second message during a call gets the busy reply",
+            bool(await h.wait_for(other, "One moment — still working on the last one.", timeout=2)))
+    h.check("fake:timeout: one failure reply", bool(await h.wait_for(other, "couldn't work that out", timeout=15)))
+    h.check("the busy message never reached claude", all("are you there" not in c["prompt"] for c in _claude_calls(h)))
 
     calls = _claude_calls(h)
     secrets = {"CLIENT_KEY", "BLIZZ_CLIENT_SECRET", "BLIZZ_CLIENT_ID", "UNDERMINE_API_KEY", "RAIDERIO_API_KEY"}
@@ -363,7 +388,7 @@ async def assistant(h):
     prompt_files = [c["argv"][c["argv"].index("--system-prompt-file") + 1] for c in calls]
     h.check("--system-prompt-file is an absolute path that exists (claude runs with cwd=work dir)",
             all(Path(f).is_absolute() and Path(f).is_file() for f in prompt_files), sorted(set(prompt_files)))
-    h.check("mentions never reach the prompt", all("<@" not in c["prompt"] for c in calls))
+    h.check("the bot mention never reaches the prompt", all(bot not in c["prompt"] for c in calls))
     h.check("no errors logged", not [e for e in h.world.events if e["kind"] == "log_error"])
 
 
