@@ -14,3 +14,10 @@ def test_missing_required_env_raises(fresh_import, monkeypatch):
     monkeypatch.delenv("BANKER_ID")
     with pytest.raises(RuntimeError, match="BANKER_ID"):
         fresh_import("config")
+
+
+def test_assistant_defaults_off_and_parses_ids(fresh_import, monkeypatch):
+    monkeypatch.delenv("ASSISTANT_ENABLED", raising=False)
+    monkeypatch.setenv("ASSISTANT_USER_IDS", "5, x,6")
+    cfg = fresh_import("config")
+    assert cfg.ASSISTANT_ENABLED is False and cfg.ASSISTANT_USER_IDS == frozenset({5, 6})

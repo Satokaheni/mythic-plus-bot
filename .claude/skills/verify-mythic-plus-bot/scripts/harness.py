@@ -1189,7 +1189,9 @@ def doctor() -> int:
         try:
             await h.launch()
             pinned = [m for m in h.key.messages() if m.pinned and m.components]
-            return h.bot.CLIENT_ID == SENTINEL_TOKEN, bool(pinned), h.started_loops, sorted(h.client.cogs)
+            import config as _c
+
+            return h.bot.CLIENT_ID == SENTINEL_TOKEN, bool(pinned), h.started_loops, sorted(h.client.cogs), _c.CLAUDE_CMD
         finally:
             await h.close()
             _close_file_logs()
@@ -1197,12 +1199,13 @@ def doctor() -> int:
             shutil.rmtree(h.run_dir, ignore_errors=True)
 
     try:
-        token_ok, pinned, loops, cog_names = asyncio.run(boot_probe())
+        token_ok, pinned, loops, cog_names, claude_cmd = asyncio.run(boot_probe())
         line(token_ok, "bot booted offline with the sentinel token (no production token loaded)")
         line(pinned, "on_ready pinned the key-request button in #keys")
         line(set(loops) == set(LOOP_NAMES), f"background loops intercepted, not started: {sorted(loops)}")
         cogs_ok = len(cog_names) == 8
         line(cogs_ok, f"cogs loaded: {cog_names}")
+        line(claude_cmd[-1].endswith("fake_claude.py"), f"assistant uses the fake claude: {claude_cmd}")
     except Exception as exc:  # noqa: BLE001
         line(False, f"offline boot failed: {exc!r}")
     stale = list(RUNS_DIR.glob("*")) if RUNS_DIR.exists() else []

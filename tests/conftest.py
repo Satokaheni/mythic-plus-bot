@@ -95,7 +95,7 @@ _FRESH = ("bot", "config", "messages", "state")
 
 def _forget_bot_modules():
     for name in list(sys.modules):
-        if name in _FRESH or name == "cogs" or name.startswith("cogs."):
+        if name in _FRESH or name in ("cogs", "assistant") or name.startswith(("cogs.", "assistant.")):
             sys.modules.pop(name, None)
 
 

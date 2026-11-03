@@ -7,6 +7,8 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
+from assistant.claude_runner import parse_command
+
 
 def _configure_logging() -> None:
     """Log to a rotating file (for headless deploys) and the console.
@@ -64,3 +66,14 @@ ADMINS = [int(id_str) for id_str in _require_env("ADMIN_ID").split(",") if id_st
 ELEVATED_IDS = {COORDINATOR_ID} | set(ADMINS)
 _CST = ZoneInfo("America/Chicago")
 BOT_VERSION = "1.10.1"
+ASSISTANT_ENABLED = os.getenv("ASSISTANT_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
+ASSISTANT_USER_IDS = frozenset(
+    int(x) for x in os.getenv("ASSISTANT_USER_IDS", "").split(",") if x.strip().isdigit()
+)
+CLAUDE_CMD = parse_command(os.getenv("CLAUDE_BIN", "claude"))
+ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", "haiku")
+ASSISTANT_TIMEOUT = float(os.getenv("ASSISTANT_TIMEOUT", "60"))
+ASSISTANT_DAILY_CAP = int(os.getenv("ASSISTANT_DAILY_CAP", "100"))
+ASSISTANT_WORK_DIR = os.getenv("ASSISTANT_WORK_DIR", os.path.expanduser("~/.mpb-assistant/work"))
+ASSISTANT_CONFIG_DIR = os.getenv("ASSISTANT_CONFIG_DIR", os.path.expanduser("~/.mpb-assistant/config"))
+CLAUDE_CODE_OAUTH_TOKEN = os.getenv("CLAUDE_CODE_OAUTH_TOKEN", "")
