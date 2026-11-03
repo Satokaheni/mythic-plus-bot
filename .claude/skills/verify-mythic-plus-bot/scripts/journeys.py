@@ -7,6 +7,7 @@ pick from a select, fill a modal. They check what the user would see AND the sid
 
 import json
 from datetime import datetime, timedelta
+from pathlib import Path
 
 GREEN, YELLOW, RED = "🟢", "🟡", "🔴"
 
@@ -359,6 +360,9 @@ async def assistant(h):
     h.check("no claude call saw a bot secret", all(not (secrets & set(c["env_keys"])) for c in calls), len(calls))
     h.check("every call is locked down",
             all("--strict-mcp-config" in c["argv"] and c["argv"][c["argv"].index("--tools") + 1] == "" for c in calls))
+    prompt_files = [c["argv"][c["argv"].index("--system-prompt-file") + 1] for c in calls]
+    h.check("--system-prompt-file is an absolute path that exists (claude runs with cwd=work dir)",
+            all(Path(f).is_absolute() and Path(f).is_file() for f in prompt_files), sorted(set(prompt_files)))
     h.check("mentions never reach the prompt", all("<@" not in c["prompt"] for c in calls))
     h.check("no errors logged", not [e for e in h.world.events if e["kind"] == "log_error"])
 

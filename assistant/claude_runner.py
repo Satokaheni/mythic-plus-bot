@@ -93,6 +93,10 @@ async def run_claude(prompt, *, cmd, schema, model, system_prompt_file, work_dir
         proc.kill()
         await proc.wait()
         return RunResult(ok=False, error="timeout", duration_s=time.monotonic() - start)
+    except asyncio.CancelledError:  # bot shutdown: don't orphan the child
+        proc.kill()
+        await proc.wait()
+        raise
     result = parse_result(stdout)
     result.duration_s = time.monotonic() - start
     if proc.returncode != 0 and result.ok:

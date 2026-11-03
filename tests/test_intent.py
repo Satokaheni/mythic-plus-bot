@@ -28,6 +28,19 @@ def test_rejects(obj):
         it.validate(obj)
 
 
+# Mid-arg so .strip() can't remove them: Cc (NUL, VT, FF, FS-RS, NEL, DEL, tab), Cf (zero-width, BOM, bidi), Zl, Zp.
+@pytest.mark.parametrize("ch", ["\x00", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", "\x7f", "\t",
+                                "\u200b", "\u200d", "\ufeff", "\u202e", "\u2028", "\u2029"])
+def test_rejects_control_and_separator_chars(ch):
+    with pytest.raises(it.IntentError):
+        it.validate({"kind": "command", "command": "snipe", "args": ["215147", "5000", f"Vibrant{ch}Shard"]})
+
+
+def test_accepts_non_ascii_label():
+    c = it.validate({"kind": "command", "command": "snipe", "args": ["215147", "5000", "Écaille d'Ombre"]})
+    assert c.args[-1] == "Écaille d'Ombre"
+
+
 def test_sets_are_disjoint_and_usage_covers_all():
     assert not (it.READ_COMMANDS & it.WRITE_COMMANDS) and set(it.USAGE) == set(it.ALL_COMMANDS)
     assert set(it.SCHEMA["properties"]["command"]["enum"]) == set(it.ALL_COMMANDS)

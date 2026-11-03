@@ -1,5 +1,6 @@
 """Validate Claude's structured output (untrusted) and turn it into a bot command string."""
 
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +28,7 @@ USAGE = {
 MAX_ARGS = 20
 MAX_ARG_LEN = 100
 _FORBIDDEN = ("\n", "\r", "<@", "@everyone", "@here", "`")
+_FORBIDDEN_CATEGORIES = ("Cc", "Cf", "Zl", "Zp")  # control, format (zero-width, bidi), line/paragraph separators
 
 SCHEMA = {
     "type": "object",
@@ -82,7 +84,8 @@ def validate(obj) -> Intent:
             arg = arg.strip()
             if not arg:
                 continue
-            if len(arg) > MAX_ARG_LEN or arg.startswith("!") or any(bad in arg for bad in _FORBIDDEN):
+            if (len(arg) > MAX_ARG_LEN or arg.startswith("!") or any(bad in arg for bad in _FORBIDDEN)
+                    or any(unicodedata.category(ch) in _FORBIDDEN_CATEGORIES for ch in arg)):
                 raise IntentError(f"unsafe arg: {arg[:40]!r}")
             clean.append(arg)
         summary = obj.get("summary") or ""

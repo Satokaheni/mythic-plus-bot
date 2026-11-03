@@ -78,7 +78,10 @@ class Assistant(commands.Cog):
         self.bot = bot
         self._busy = asyncio.Semaphore(1)
         self.usage = DailyUsage.load()
-        self.system_prompt_file = Path(config.ASSISTANT_CONFIG_DIR) / "system_prompt.md"
+        # Absolute: claude runs with cwd=work_dir, so a relative path would resolve against the wrong dir.
+        self.work_dir = Path(config.ASSISTANT_WORK_DIR).resolve()
+        self.config_dir = Path(config.ASSISTANT_CONFIG_DIR).resolve()
+        self.system_prompt_file = self.config_dir / "system_prompt.md"
 
     async def cog_load(self) -> None:
         unknown = [name for name in intent.USAGE if self.bot.get_command(name) is None]
@@ -108,8 +111,8 @@ class Assistant(commands.Cog):
             async with message.channel.typing():
                 result = await claude_runner.run_claude(
                     prompt, cmd=config.CLAUDE_CMD, schema=intent.SCHEMA, model=config.ASSISTANT_MODEL,
-                    system_prompt_file=self.system_prompt_file, work_dir=config.ASSISTANT_WORK_DIR,
-                    config_dir=config.ASSISTANT_CONFIG_DIR, token=config.CLAUDE_CODE_OAUTH_TOKEN,
+                    system_prompt_file=self.system_prompt_file, work_dir=self.work_dir,
+                    config_dir=self.config_dir, token=config.CLAUDE_CODE_OAUTH_TOKEN,
                     timeout=config.ASSISTANT_TIMEOUT,
                 )
             self.usage.record(today, result.cost_usd)

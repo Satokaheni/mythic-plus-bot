@@ -62,3 +62,41 @@ def test_run_claude_crash_and_badjson(tmp_path):
 def test_run_claude_timeout_kills(tmp_path):
     r = _run("fake:timeout", tmp_path, timeout=1)
     assert not r.ok and r.error == "timeout"
+
+
+def test_run_claude_cancel_kills_child(tmp_path, monkeypatch):
+    """Bot shutdown cancels the awaiting task; the claude child must not outlive it."""
+    procs = []
+    real_exec = asyncio.create_subprocess_exec
+
+    async def spy(*args, **kwargs):
+        proc = await real_exec(*args, **kwargs)
+        procs.append(proc)
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spy)
+
+    async def scenario():
+        task = asyncio.create_task(cr.run_claude(
+            "fake:timeout", cmd=FAKE, schema=SCHEMA, model="haiku", system_prompt_file=tmp_path / "p.md",
+            work_dir=tmp_path / "w", config_dir=tmp_path / "c", token="tok", timeout=30))
+        for _ in range(100):
+            if procs:
+                break
+            await asyncio.sleep(0.05)
+        await asyncio.sleep(0.5)
+        task.cancel()
+        try:
+            await task
+            cancelled = False
+        except asyncio.CancelledError:
+            cancelled = True
+        alive = procs[0].returncode is None
+        if alive:  # don't leak the 600 s sleeper when the runner fails to kill it
+            procs[0].kill()
+            await procs[0].wait()
+        return cancelled, alive
+
+    cancelled, alive = asyncio.run(scenario())
+    assert cancelled
+    assert not alive, "child process still running after the task was cancelled"

@@ -8,12 +8,12 @@ BOT, OWNER = 99, 5
 
 
 def msg(content, *, dm=False, author=OWNER, bot=False, webhook=None, mtype=discord.MessageType.default,
-        group=False, raw=None, mentions=()):
+        group=False, raw=None, mentions=(), mention_everyone=False):
     ctype = discord.ChannelType.group if group else (discord.ChannelType.private if dm else discord.ChannelType.text)
     raw = raw if raw is not None else [int(x) for x in re.findall(r"<@!?(\d+)>", content)]
     return SimpleNamespace(content=content, author=SimpleNamespace(id=author, bot=bot), webhook_id=webhook,
                            type=mtype, channel=SimpleNamespace(type=ctype), raw_mentions=raw,
-                           mentions=[SimpleNamespace(id=i) for i in mentions])
+                           mentions=[SimpleNamespace(id=i) for i in mentions], mention_everyone=mention_everyone)
 
 
 @pytest.fixture
@@ -44,6 +44,10 @@ def run(fresh_import):
     (msg("hi", group=True), None),                          # group DM needs a mention
     (msg("<@99> hi", group=True), "hi"),
     (msg("<@99>"), ""),
+    (msg("hi <@&99>", raw=[]), None),                       # role mention (even one sharing the bot's id)
+    (msg("@everyone hi", raw=[], mention_everyone=True), None),  # @everyone never counts as a bot mention
+    (msg("<@99> ask <@7> about it"), "ask <@7> about it"),  # other users' mentions are kept
+    (msg("hi", mentions=[]), None),                         # reply without ping
 ])
 def test_should_handle(run, m, expected):
     assert run(m) == expected
