@@ -63,4 +63,4 @@ MYTHIC_PLUS_ID = int(_require_env("MYTHIC_PLUS_ID"))
 ADMINS = [int(id_str) for id_str in _require_env("ADMIN_ID").split(",") if id_str.strip().isdigit()]
 ELEVATED_IDS = {COORDINATOR_ID} | set(ADMINS)
 _CST = ZoneInfo("America/Chicago")
-BOT_VERSION = "1.10.0"
+BOT_VERSION = "1.10.1"

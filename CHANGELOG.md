@@ -1,3 +1,12 @@
+## [1.10.1] - 2026-11-03
+
+### Bug Fixes
+- Availability reactions no longer fail after a fresh install or a damaged state file — the 🟢/🟡/🔴 pools now exist from the start.
+- Changing your weekly availability reaction is now remembered after the bot restarts.
+
+### Improvements
+- Internal restructure: each feature now lives in its own module. No change to commands or behavior.
+
 ## [1.10.0]
 
 ### Improvements

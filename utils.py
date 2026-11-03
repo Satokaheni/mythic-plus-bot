@@ -80,7 +80,7 @@ def load_state() -> Tuple[
     if not os.path.exists("state.json"):
         if os.path.exists("state.pkl"):
             return _migrate_from_pickle()
-        return {}, {}, {}, 0, {}, {}
+        return {}, {}, {GREEN: [], YELLOW: [], RED: []}, 0, {}, {}
 
     try:
         with open("state.json", "r", encoding="utf-8") as f:
@@ -89,7 +89,7 @@ def load_state() -> Tuple[
         return _deserialize(data)
     except (json.JSONDecodeError, KeyError, ValueError) as exc:
         logger.warning("Error loading state.json: %s. Using default state.", exc)
-        return {}, {}, {}, 0, {}, {}
+        return {}, {}, {GREEN: [], YELLOW: [], RED: []}, 0, {}, {}
 
 
 def _deserialize(data: dict):
@@ -160,4 +160,4 @@ def _migrate_from_pickle():
         return raiders, schedules, availability, availability_message_id, dm_map, dm_timestamps
     except Exception as exc:
         logger.warning("Error migrating from state.pkl: %s. Using default state.", exc)
-        return {}, {}, {}, 0, {}, {}
+        return {}, {}, {GREEN: [], YELLOW: [], RED: []}, 0, {}, {}

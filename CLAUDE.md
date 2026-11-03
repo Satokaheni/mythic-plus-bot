@@ -8,7 +8,7 @@ This file reflects the **current state** of the codebase. Rewrite relevant secti
 
 A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Mythic+ runs. Manages team assembly, availability tracking, DM outreach, and schedule lifecycle.
 
-**Version:** 1.10.0
+**Version:** 1.10.1
 **Entry point:** `bot.py` (`MyClient(commands.Bot)`; features live in `cogs/`)
 
 ---
@@ -123,7 +123,7 @@ Uses `_CST = ZoneInfo("America/Chicago")` constant for DST-aware scheduling. The
 - Raiders respond ✅/❌ via reaction
 
 ### Full Run — Fill Offer DM (cogs/scheduling.py)
-Clicking Sign Up on a full run puts the raider straight into the fill queue (`ScheduleButtonView.signup_button`); no DM is sent. The fill-offer DM exists only on the DM spot-offer path: when a raider reacts ✅ to a spot offer (`Scheduling.on_spot_offer_reaction`) and the run is still full after off-role displacement, they receive a DM with:
+Clicking Sign Up on a full run puts the raider straight into the fill queue (`ScheduleButtonView.signup_button`); no fill-offer DM is sent. The fill-offer DM exists only on the DM spot-offer path: when a raider reacts ✅ to a spot offer (`Scheduling.on_spot_offer_reaction`) and the run is still full after off-role displacement, they receive a DM with:
 - Warning that the run is full
 - **Current roster** (Tank / Healer / DPS names) via inline roster string
 - Prompt to join as fill (✅/❌ reaction)

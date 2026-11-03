@@ -128,6 +128,8 @@ class Availability(commands.Cog):
                 await self.bot.new_availability_signup_fill_schedule(self.bot.state.raiders[user.id], reaction.emoji)
 
                 self._log_avail_reaction(self.bot.state.raiders[user.id], reaction.emoji)
+
+            self.bot.state.save()
         else:
             try:
                 view = WoWSelectionView(timeout=180)

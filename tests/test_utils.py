@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+import utils
 from raider import Raider
 from utils import GREEN, RED, YELLOW, _deserialize, load_state, save_state
 
@@ -40,14 +41,14 @@ def test_save_load_roundtrip(tmp_path, monkeypatch, make_raider, make_schedule):
 def test_load_empty_when_no_file(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     result = load_state()
-    assert result == ({}, {}, {}, 0, {}, {})
+    assert result == ({}, {}, {GREEN: [], YELLOW: [], RED: []}, 0, {}, {})
 
 
 def test_load_corrupt_json_returns_defaults(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "state.json").write_text("{ not valid json }", encoding="utf-8")
     result = load_state()
-    assert result == ({}, {}, {}, 0, {}, {})
+    assert result == ({}, {}, {GREEN: [], YELLOW: [], RED: []}, 0, {}, {})
 
 
 def test_load_key_error_returns_defaults(tmp_path, monkeypatch):
@@ -65,7 +66,7 @@ def test_load_key_error_returns_defaults(tmp_path, monkeypatch):
     }
     (tmp_path / "state.json").write_text(json.dumps(bad_data), encoding="utf-8")
     result = load_state()
-    assert result == ({}, {}, {}, 0, {}, {})
+    assert result == ({}, {}, {GREEN: [], YELLOW: [], RED: []}, 0, {}, {})
 
 
 def test_load_value_error_returns_defaults(tmp_path, monkeypatch):
@@ -81,7 +82,7 @@ def test_load_value_error_returns_defaults(tmp_path, monkeypatch):
     }
     (tmp_path / "state.json").write_text(json.dumps(bad_data), encoding="utf-8")
     result = load_state()
-    assert result == ({}, {}, {}, 0, {}, {})
+    assert result == ({}, {}, {GREEN: [], YELLOW: [], RED: []}, 0, {}, {})
 
 
 def test_availability_roundtrip(tmp_path, monkeypatch, make_raider):
@@ -221,3 +222,10 @@ def test_migrate_from_pickle(tmp_path, monkeypatch, make_raider):
     assert raider.user_id in raiders_out
     assert av_id_out == 7
     assert (tmp_path / "state.json").exists()
+
+
+def test_load_state_corrupt_file_has_availability_pools(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "state.json").write_text("{not json", encoding="utf-8")
+    _, _, availability, _, _, _ = utils.load_state()
+    assert availability == {utils.GREEN: [], utils.YELLOW: [], utils.RED: []}

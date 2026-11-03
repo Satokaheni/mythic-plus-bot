@@ -9,7 +9,7 @@ def test_fresh_state_matches_load_state_defaults(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     s = BotState.load()
     assert (s.raiders, s.schedules, s.availability, s.availability_message_id, s.dm_map, s.dm_timestamps) == (
-        {}, {}, {}, 0, {}, {})
+        {}, {}, {utils.GREEN: [], utils.YELLOW: [], utils.RED: []}, 0, {}, {})
     assert s.role_mentions == {} and s.reminder_messages == {}
 
 
