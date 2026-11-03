@@ -1,3 +1,18 @@
+## [1.11.0] - 2026-11-03
+
+### Improvements
+- Experimental: the bot owner can DM or mention the bot in plain language; it answers or offers to run a command.
+- **Gear Audit** — coordinators/admins can run `!gearaudit [character]` to see missing enchants, empty sockets, and low-rank enchants/gems, worst first.
+- Internal restructure: each feature now lives in its own module. Commands that take arguments now reply with usage help when sent with none; everything else works as before.
+
+### Bug Fixes
+- Availability reactions no longer fail after a fresh install or a damaged state file — the 🟢/🟡/🔴 pools now exist from the start.
+- Changing your weekly availability reaction is now remembered after the bot restarts.
+- When someone leaves a run, the next queued player for that role now takes the open spot.
+- Double-clicking Sign Up (or accepting an offer at the same moment) can no longer put you in a run twice.
+- A player moved into a role outside their registered roles can now leave or be removed properly.
+- Change Role only offers roles that are open, so a player can no longer be stranded in the fill queue.
+
 ## [1.10.1] - 2026-11-03
 
 ### Bug Fixes

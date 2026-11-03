@@ -8,7 +8,7 @@ This file reflects the **current state** of the codebase. Rewrite relevant secti
 
 A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Mythic+ runs. Manages team assembly, availability tracking, DM outreach, and schedule lifecycle.
 
-**Version:** 1.10.1
+**Version:** 1.11.0
 **Entry point:** `bot.py` (`MyClient(commands.Bot)`; features live in `cogs/`)
 
 ---
@@ -31,6 +31,12 @@ A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Myt
 | `cogs/wowtoken.py` | `WowToken` — `!token`/`!tokenalert`, `token_watch_check` loop (banker) |
 | `cogs/sniper.py` | `Sniper` — `!snipe`/`!snipepet`/`!unsnipe`/`!snipes`, `auction_snipe_check` loop |
 | `cogs/gear.py` | `Gear` — `!gearaudit` (elevated) |
+| `cogs/assistant.py` | `Assistant` — `on_message` listener for plain-language messages from allowlisted users; answers, or runs a validated and (for writes) confirmed command |
+| `assistant/claude_runner.py` | Runs one isolated headless `claude -p` call (flags, minimal env, timeout/kill, result parsing) |
+| `assistant/intent.py` | Command allowlist, JSON schema, arg validation, system-prompt rendering — Claude's output is validated here before anything runs |
+| `assistant/usage.py` | `DailyUsage` — per-day call counter persisted to `assistant.json` |
+| `assistant/smoke.py` | Owner-run live check of the real `claude` CLI with the exact lockdown flags |
+| `assistant/system_prompt.md` | System-prompt template (`{{COMMANDS}}` is filled from `intent.USAGE`) |
 | `.claude/skills/verify-mythic-plus-bot/` | Offline harness that drives the real bot against a fake Discord world. Never run `bot.py` with the production `.env`; use the harness |
 | `schedule.py` | `Schedule` class — team slots, signup/removal, embed generation |
 | `raider.py` | `Raider` class — player profile, availability checks, run tracking |
@@ -68,7 +74,7 @@ A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Myt
 - `missing` — list of unfilled roles
 - `organizer_id` — Discord user ID of whoever created the run
 - `note` — optional run note
-- `try_displace_off_roler(raider, role)` — bumps off-role fillers for main-role players (>8 hrs before run)
+- `try_displace_off_roler(raider, role)` — removes off-role fillers for main-role players (>8 hrs before run)
 - `raider_signup(raider, role=None)` — seats the raider in `role` (or their best open registered role), or queues them as fill when that seat is taken; returns `False` and changes nothing if the raider is already in `members`, `True` otherwise. Every caller checks the result and skips `add_run`, DMs, embed edits, and saves on `False` (answering "already signed up" where a reply is owed). The one deliberate exception is Change Role, which calls `raider_signup` right after `raider_remove` with no await between, so it cannot be refused
 - `_check_fill(freed_role)` — promotes the first fill-queue raider whose registered roles include `freed_role` into that seat (DPS only while fewer than 3), updating `missing`; never touches other open seats
 - `raider_remove(raider)` — frees the place the raider actually holds (tank, healer, a DPS seat, or fill — found with `seat_of`, regardless of registered roles), promotes into that freed seat only (removing a fill raider promotes no one), and returns the promoted raider (or `None`); callers DM them via the Scheduling cog's `_notify_promoted` (`MyClient._notify_promoted` delegates)
@@ -214,8 +220,24 @@ floor, and requiring EPIC would flag every correctly-gemmed character. Rarity do
 recency either: decade-old Mists gems are EPIC at item level 32, so an outdated gem of the right
 rarity is not caught.
 
+### Natural-language assistant (experimental)
+
+Off by default (`ASSISTANT_ENABLED`). Lets allowlisted users (`ASSISTANT_USER_IDS`, intended: the owner) talk to the bot in plain language; a headless `claude -p` call returns either an answer or a command to run. Lives in `cogs/assistant.py` + `assistant/`.
+
+- **Trigger rule** (`should_handle`) — handled only when enabled, the author is on the allowlist and is not a bot/webhook, the message is a normal message or reply, and it is either a **1:1 DM** or a guild message that **@mentions the bot**. Group DMs, guild text without a mention, `@everyone`, and anything starting with `!` (typed commands, also after stripping the mention) are ignored: no reply and no Claude call. A bare mention replies `What can I help with?`.
+- **Isolation** — `claude` runs with a private `CLAUDE_CONFIG_DIR` (`ASSISTANT_CONFIG_DIR`), an empty working dir (`ASSISTANT_WORK_DIR`), and a minimal env: only `PATH`, `SYSTEMROOT`, `HOME`, `USERPROFILE`, `TEMP`, `TMP` (each when present) plus `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_OAUTH_TOKEN`, `DISABLE_AUTOUPDATER=1`. No bot secret (`CLIENT_KEY`, `BLIZZ_*`, `UNDERMINE_*`, `RAIDERIO_*`) reaches it. The prompt goes on **stdin**, never argv; `create_subprocess_exec`, no shell. Flags: `--tools ""` (verified: only the internal `StructuredOutput` tool loads), `--strict-mcp-config`, `--json-schema`, `--max-turns 3`, `--max-budget-usd 0.05`, `--permission-mode dontAsk`, `--no-session-persistence`, `--system-prompt-file`, `--model` (`ASSISTANT_MODEL`, default `haiku`). `ASSISTANT_TIMEOUT` (default 60 s) kills a hung call.
+- **Validation** (`intent.validate`) — Claude's output is untrusted. Allowlist: read `{keys, snipes, watches, token, help}`, write `{snipe, snipepet, unsnipe, watch, unwatch, tokenalert}`, flow `{key}`; anything else (e.g. `cleanup`) is rejected. Args: strings, stripped, empty dropped, at most 20, each at most 100 chars, no leading `!`, none of newline, `<@`, `@everyone`, `@here`, backtick, or control/format/line-separator characters. A rejected or failed intent gets ``I couldn't work that out — try `!help`.`` and nothing runs.
+- **Read vs write vs flow** — a read command runs directly. A write command first posts ``I'll run `!cmd ...` — confirm?`` with **Confirm / Cancel** buttons (60 s timeout, only the asker can press); Cancel or timeout runs nothing. A flow command (`key`) calls `bot._do_key_request_flow(author)` directly. Answers go out in at most 3 chunks of 2000 chars, and every reply built from Claude output uses `AllowedMentions.none()`.
+- **Permissions follow the Discord author, not Claude** — a confirmed command is dispatched through the real command with the author's own context and its `commands.check` gates run first; a refused one replies ``You don't have access to `!<name>` here.`` (e.g. an allowlisted non-banker asking for `!watch`).
+- **`!key` gate bypass** — the flow is invoked directly rather than through the `!key` command, so `!key`'s `in_channels(KEY)` gate is skipped. That channel rule only keeps #keys tidy; the key-request button is already open to everyone and the flow itself runs in DMs, so nothing extra is exposed.
+- **Banker commands in a guild** — a banker command confirmed in a guild channel deletes the user's plain-language message (the command deletes its triggering message); replies are DMs as usual.
+- **Cost guard** — `DailyUsage` counts every Claude call per Central-time day in `assistant.json` (gitignored, atomic write; `state.json` and the other state files are untouched) and replies `Daily assistant limit reached.` past `ASSISTANT_DAILY_CAP` (default 100). The owner runs this on a Claude subscription, so `total_cost_usd` and `--max-budget-usd` are an *estimate against subscription usage*, not billing, and the cap protects the plan's allowance from runaway use. One call at a time: a message that arrives mid-call gets `One moment — still working on the last one.`
+- **Failures** — timeout (process killed), crash, non-success result, unparseable output, or a rejected intent all produce the single failure reply; the bot keeps running.
+- **Smoke check** — `python -m assistant.smoke --env-file .env` (owner-run; reads only `CLAUDE_CODE_OAUTH_TOKEN`) calls the real CLI with the exact flags and fails unless the init message shows no tools beyond `StructuredOutput` and no MCP servers. It was run on the owner's PC only (2.2–3.0 s, haiku, Claude Code 2.1.317), **not on the Raspberry Pi**; Pi latency and RAM are unmeasured.
+- **Install** — the Dockerfile installs the native Claude Code CLI as `botuser` (`curl -fsSL https://claude.ai/install.sh | bash -s 2.1.317`, `~/.local/bin` on `PATH`, `DISABLE_AUTOUPDATER=1`). On a non-Docker host (the Pi) install it manually per https://code.claude.com/docs/en/setup and run `claude setup-token` for the OAuth token.
+
 ### Help Command
-`!help` / `!tools` — list all bot commands by category (scheduling, price watch, auction sniper, account) with usage and permissions.
+`!help` / `!tools` — list all bot commands by category (scheduling, price watch, auction sniper, assistant, account) with usage and permissions.
 
 ### Schedule Management
 - **Organizer** → `ManageScheduleView`: delete or modify (level, date, time, note)
@@ -266,6 +288,7 @@ In `manage_button` (views.py):
 - Price-watch state is persisted separately to `watches.json` (see `watchlist.py`)
 - Auction-snipe state is persisted separately to `snipes.json` (see `snipelist.py`)
 - Token sell-alert state is persisted separately to `token_watch.json` (see `tokenwatch.py`)
+- Assistant daily-usage counter is persisted separately to `assistant.json` (gitignored, see `assistant/usage.py`)
 - Event log is persisted separately to `events.jsonl` (gitignored, append-only JSONL, see `eventlog.py`) — not part of `state.json` and not migrated
 
 ---
@@ -293,6 +316,15 @@ BLIZZ_CLIENT_SECRET   Blizzard Game Data API client secret
 BLIZZ_REGION          Blizzard region for auction sniping (default: us)
 RAIDERIO_API_KEY      Raider.io API key
 RAIDERIO_REGION       Raider.io region (default: us)
+ASSISTANT_ENABLED     1/true/yes/on enables the natural-language assistant (default: off)
+ASSISTANT_USER_IDS    Comma-separated user IDs allowed to use the assistant
+CLAUDE_CODE_OAUTH_TOKEN  Token from `claude setup-token`; passed only to the claude subprocess
+CLAUDE_BIN            Claude CLI path, or a JSON argv list (default: claude)
+ASSISTANT_MODEL       Model alias for the assistant (default: haiku)
+ASSISTANT_TIMEOUT     Seconds before a claude call is killed (default: 60)
+ASSISTANT_DAILY_CAP   Max assistant calls per Central-time day (default: 100)
+ASSISTANT_WORK_DIR    Empty working dir for claude (default: ~/.mpb-assistant/work)
+ASSISTANT_CONFIG_DIR  Private CLAUDE_CONFIG_DIR (default: ~/.mpb-assistant/config)
 ```
 
 ---
@@ -319,6 +351,8 @@ RAIDERIO_REGION       Raider.io region (default: us)
 | `!gearaudit [character]` | KEY/DM | Coord/Admin | Report missing enchants, empty sockets, and low-quality enchants/gems |
 | `!help`, `!tools` | Any | Anyone | List all bot commands by category |
 
+With the assistant enabled, allowlisted users can also trigger `!keys`, `!snipes`, `!watches`, `!token`, `!help`, `!snipe`, `!snipepet`, `!unsnipe`, `!watch`, `!unwatch`, `!tokenalert`, and `!key` in plain language (DM the bot or @mention it). Writes ask for confirmation, and every gate above still applies to the Discord author. Typed `!commands` are never routed through it.
+
 ---
 
 ## Notable Conventions
@@ -336,3 +370,4 @@ RAIDERIO_REGION       Raider.io region (default: us)
 - **BOT_VERSION coupling** — adding a new `## [x.y.z]` section to `CHANGELOG.md` also requires bumping `BOT_VERSION` in `config.py`, because that constant is what the Admin cog's `on_ready` compares against `version.txt` to decide whether to post. A new section with a stale `BOT_VERSION` is never announced to the guild
 - **Commands are cogs** — every `!command` is a `commands.Bot` prefix command in a cog under `cogs/` (prefix `!`, `help_command=None`, `case_insensitive=False`). Author/channel rules are `commands.check` gates in `cogs/_checks.py`. Unknown commands and failed gates are silent via `MyClient.on_command_error`; anything else is logged. `MyClient` has no `on_message`: `commands.Bot`'s default runs `process_commands`
 - **Deliberate behavior deltas of the cog split** — (1) trailing text after an exact command is tolerated (`!keys foo` runs `!keys`); the converse also holds: former `startswith` matches such as `!gearauditX` / `!tokenalertX` no longer trigger, and argument-taking commands (`!watch`, `!snipe`, ...) with no arguments now answer with their usage text; (2) messages from other bots are ignored (`commands.Bot` default; previously only the bot's own); (3) discord.py's built-in help is disabled so `!help` keeps the bot's embed
+- **Claude output is untrusted** — the assistant never runs anything Claude names without `intent.validate` (command allowlist + arg rules) and, for writes, an owner Confirm; replies built from it use `AllowedMentions.none()` and the subprocess env never contains bot secrets

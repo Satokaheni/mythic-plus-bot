@@ -104,7 +104,7 @@ async def help_command(h):
     await h.say(anyone, "!help", "key")
     msg = await h.wait_for("key", "Mythic+ Bot — Commands")
     names = [f.name for f in msg.embed.fields]
-    for category in ("Scheduling", "Availability", "Gear Audit", "Price Watch", "WoW Token", "Auction Sniper", "Help"):
+    for category in ("Scheduling", "Availability", "Gear Audit", "Price Watch", "WoW Token", "Auction Sniper", "Assistant", "Help"):
         h.check(f"help lists '{category}'", any(category in n for n in names), names)
     await h.say(anyone, "!tools", "dm")
     h.check("!tools alias answers in DM", bool(await h.wait_for(anyone, "Mythic+ Bot — Commands")))

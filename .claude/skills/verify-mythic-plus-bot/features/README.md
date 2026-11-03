@@ -52,6 +52,7 @@ Keep implementation detail out of the map except where it changes what a verifie
 | Signup, removal, fill queue | [signup.md](./signup.md) | `signup-fill-restart` | pass |
 | Auction sniper | [auction-sniper.md](./auction-sniper.md) | `snipe` | pass (offline label fallback) |
 | WoW Token sell alert | [token-alert.md](./token-alert.md) | `banker-token` | pass (offline, no price) |
+| Natural-language assistant | [assistant.md](./assistant.md) | `assistant` | pass (fake claude) |
 
 The `command-gates` journey (permission gates across commands) also passes; it has no feature file of its own.
 

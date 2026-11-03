@@ -4,7 +4,7 @@
 
 ## Sub-features
 
-- `help-embed` posts the commands embed with seven category fields: Mythic+ Scheduling, Availability & Setup, Gear Audit, Price Watch, WoW Token, Auction Sniper, Help.
+- `help-embed` posts the commands embed with eight category fields: Mythic+ Scheduling, Availability & Setup, Gear Audit, Price Watch, WoW Token, Auction Sniper, Assistant, Help.
 - `help-alias` makes `!tools` produce the same embed.
 - `help-anywhere` answers in the channel the command came from: a guild channel or a DM.
 
@@ -19,9 +19,9 @@ Preconditions:
 
 - Baseline boot (see README). No registration needed.
 
-- **Help in #keys.** An unregistered member types `!help` in `#keys`. Run `u = h.user("Curious"); await h.say(u, "!help", "key")` then `msg = await h.wait_for("key", "Mythic+ Bot — Commands")`. `msg.embed.fields` has names containing `Scheduling`, `Availability`, `Gear Audit`, `Price Watch`, `WoW Token`, `Auction Sniper`, `Help`.
+- **Help in #keys.** An unregistered member types `!help` in `#keys`. Run `u = h.user("Curious"); await h.say(u, "!help", "key")` then `msg = await h.wait_for("key", "Mythic+ Bot — Commands")`. `msg.embed.fields` has names containing `Scheduling`, `Availability`, `Gear Audit`, `Price Watch`, `WoW Token`, `Auction Sniper`, `Assistant`, `Help`.
 - **Alias in DM.** The same member types `!tools` in a DM. Run `await h.say(u, "!tools", "dm")` then `await h.wait_for(u, "Mythic+ Bot — Commands")`. The embed arrives in that member's DM.
-- **Proof.** Run `python $H run help`. `summary.json` shows 8/8 checks passing; `transcript.md` shows both embeds and their audiences.
+- **Proof.** Run `python $H run help`. `summary.json` shows 9/9 checks passing; `transcript.md` shows both embeds and their audiences.
 
 ## Gotchas
 
