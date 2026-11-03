@@ -294,3 +294,53 @@ def test_f3_raider_moved_outside_their_roles_can_leave(roster):
     assert schedule.team["healer"] is None and schedule.team["tank"] is None
     assert schedule.members == []
     assert schedule not in t.current_runs
+
+
+def test_welcome_signup_of_existing_member_displaces_nobody(make_raider, make_schedule, monkeypatch):
+    import views
+    from views import ScheduleButtonView
+
+    off_roler = make_raider(user_id=1, roles=["dps"], name="Off")
+    schedule = make_schedule(raider=off_roler)  # start_time is 24h out, beyond the 8h displacement cutoff
+    schedule.team["dps"].clear()
+    schedule.members.clear()
+    schedule.signup, schedule.missing = 0, ["tank", "healer", "dps"]
+    assert schedule.raider_signup(off_roler, role="tank")
+    off_roler.add_run(schedule)
+    old_self = make_raider(user_id=2, roles=["tank"], name="Me")
+    assert schedule.raider_signup(old_self, role="dps")  # already a member, e.g. via the first of two clicks
+    bot, _, _ = _bot(schedule, [off_roler])  # user 2 is not in state.raiders: the welcome branch runs
+    displaced = []
+
+    async def notify_displaced(*args):
+        displaced.append(args)
+
+    bot._notify_displaced = notify_displaced
+    sent = []
+
+    async def send(content=None, **_kwargs):
+        sent.append(content)
+
+    class _Selection:
+        selected_class, selected_primary, selected_secondary, selected_timezone = "warrior", "tank", None, "US/Eastern"
+
+        def __init__(self, timeout=None):
+            pass
+
+        async def wait(self):
+            return None
+
+    monkeypatch.setattr(views, "WoWSelectionView", _Selection)
+    interaction = _interaction(2)
+    interaction.user = SimpleNamespace(id=2, mention="<@2>", display_name="Me", send=send)
+
+    async def click():
+        await ScheduleButtonView(schedule, bot).signup_button.callback(interaction)
+
+    asyncio.run(click())
+
+    assert displaced == []
+    assert schedule.team["tank"] is off_roler and off_roler in schedule.members
+    assert schedule in off_roler.current_runs
+    assert _places(schedule, old_self) == 1
+    assert any("already signed up or unavailable" in (c or "") for c in sent)

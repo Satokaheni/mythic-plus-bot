@@ -5,7 +5,7 @@
 - Changing your weekly availability reaction is now remembered after the bot restarts.
 - When someone leaves a run, the next queued player for that role now takes the open spot.
 - Double-clicking Sign Up (or accepting an offer at the same moment) can no longer put you in a run twice.
-- Coordinators can now remove a player they placed in a role outside that player's registered roles.
+- A player moved into a role outside their registered roles can now leave or be removed properly.
 - Change Role only offers roles that are open, so a player can no longer be stranded in the fill queue.
 
 ### Improvements

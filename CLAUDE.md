@@ -69,7 +69,7 @@ A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Myt
 - `organizer_id` — Discord user ID of whoever created the run
 - `note` — optional run note
 - `try_displace_off_roler(raider, role)` — bumps off-role fillers for main-role players (>8 hrs before run)
-- `raider_signup(raider, role=None)` — seats the raider in `role` (or their best open registered role), or queues them as fill when that seat is taken; returns `False` and changes nothing if the raider is already in `members`, `True` otherwise. Every caller checks the result and skips `add_run`, DMs, embed edits, and saves on `False` (answering "already signed up" where a reply is owed)
+- `raider_signup(raider, role=None)` — seats the raider in `role` (or their best open registered role), or queues them as fill when that seat is taken; returns `False` and changes nothing if the raider is already in `members`, `True` otherwise. Every caller checks the result and skips `add_run`, DMs, embed edits, and saves on `False` (answering "already signed up" where a reply is owed). The one deliberate exception is Change Role, which calls `raider_signup` right after `raider_remove` with no await between, so it cannot be refused
 - `_check_fill(freed_role)` — promotes the first fill-queue raider whose registered roles include `freed_role` into that seat (DPS only while fewer than 3), updating `missing`; never touches other open seats
 - `raider_remove(raider)` — frees the place the raider actually holds (tank, healer, a DPS seat, or fill — found with `seat_of`, regardless of registered roles), promotes into that freed seat only (removing a fill raider promotes no one), and returns the promoted raider (or `None`); callers DM them via the Scheduling cog's `_notify_promoted` (`MyClient._notify_promoted` delegates)
 - `seat_of(raider)` / `open_roles()` — the raider's place (`"tank"`/`"healer"`/`"dps"`/`"fill"`/`None`) and the roles with an open seat; Change Role (`ChangeRoleTargetSelect`) offers only `open_roles()` minus the raider's own seat, says "no open roles" when there are none, and re-checks at click time
@@ -134,7 +134,7 @@ Clicking Sign Up on a full run puts the raider straight into the fill queue (`Sc
 Called when fill status changes (run becomes full or drops below full). DMs all current roster members. Also includes `schedule.format_dm_roster()` in the "now filled" message. Catches `discord.HTTPException` broadly. **Called AFTER the embed edit** in `remove_button` to ensure the embed always updates even if a DM fails.
 
 ### Off-Role Displacement
-If a main-role player signs up and an off-role filler holds the slot (>8 hrs before run), the filler is bumped to fill queue and notified.
+If a main-role player signs up and an off-role filler holds the slot (>8 hrs before run), `try_displace_off_roler` removes the filler from the run entirely (their slot, `members`, and `current_runs`; they are not moved to the fill queue) and `_notify_displaced` DMs them that they were removed.
 
 ### Event Logging (forecasting data)
 `eventlog.py` appends best-effort records to `events.jsonl` to build a dataset for a future automatic scheduler (Phase 2). Four event types are logged from the bot's flow layer:

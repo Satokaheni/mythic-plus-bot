@@ -79,7 +79,11 @@ class ScheduleButtonView(discord.ui.View):
 
                 raider = bot.state.raiders[user.id]
                 logger.info(f"Raider: {raider} current runs: {raider.current_runs} sign up: {schedule}")
-                if raider.check_availability(schedule) and schedule not in raider.current_runs:
+                if (
+                    raider.check_availability(schedule)
+                    and schedule not in raider.current_runs
+                    and not schedule.has_raider(raider)
+                ):
                     displaced = schedule.try_displace_off_roler(raider, raider.roles[0])
                     if displaced:
                         await bot._notify_displaced(displaced, schedule, raider.roles[0])
