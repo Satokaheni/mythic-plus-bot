@@ -9,9 +9,10 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 import discord
-from discord.ext import tasks
+from discord.ext import commands, tasks
 
 import blizzard
+import cogs
 import eventlog
 import forecast
 import gearaudit
@@ -74,8 +75,11 @@ logger = logging.getLogger("discord")
 # ---------------------------
 # Bot Class
 # ---------------------------
-class MyClient(discord.Client):
-    """Discord bot client for managing WoW Mythic+ raid scheduling and availability."""
+class MyClient(commands.Bot):
+    """Discord bot for Mythic+ scheduling. Features live in cogs/; this class owns startup and shared state."""
+
+    def __init__(self, *, intents: discord.Intents) -> None:
+        super().__init__(command_prefix="!", help_command=None, case_insensitive=False, intents=intents)
 
     # ---------------------------
     # User Defined Functions
@@ -1161,6 +1165,9 @@ class MyClient(discord.Client):
             self.add_view(ScheduleButtonView(schedule, self), message_id=schedule_id)
         logger.info("Re-registered %d schedule views", len(self.state.schedules))
 
+        for extension in cogs.EXTENSIONS:
+            await self.load_extension(extension)
+
         if not self.hourly_check.is_running():
             self.hourly_check.start()
 
@@ -1281,6 +1288,8 @@ class MyClient(discord.Client):
         """Handle incoming messages, responding to commands like !avail and !key."""
         if message.author.id == self.user.id:
             return
+
+        await self.process_commands(message)
 
         if message.content.startswith("!watch ") and message.author.id == BANKER_ID:
             args = message.content.split()[1:]
@@ -2028,6 +2037,12 @@ class MyClient(discord.Client):
     async def on_error(self, event, *args, **kwargs):
         """Log errors to the console."""
         logger.exception("Error in event %s: %s", event, args)
+
+    async def on_command_error(self, ctx, error) -> None:
+        """Unknown commands and failed gates stay silent, as before; anything else is logged."""
+        if isinstance(error, (commands.CommandNotFound, commands.CheckFailure)):
+            return
+        logger.exception("Command %s failed", getattr(ctx.command, "qualified_name", None), exc_info=error)
 
 
 # ---------------------------

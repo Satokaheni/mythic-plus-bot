@@ -31,7 +31,7 @@ dev = [
 # build with "Multiple top-level modules discovered".
 [tool.setuptools]
 py-modules = ["bot", "raider", "schedule", "utils", "views", "undermine", "watchlist", "eventlog", "raiderio", "forecast", "loot", "config", "messages", "state"]
-packages = ["lootcouncil"]
+packages = ["lootcouncil", "cogs"]
 
 [tool.black]
 line-length = 120
@@ -46,7 +46,7 @@ select = ["E", "F", "W", "I"]
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["bot", "raider", "schedule", "views", "utils", "undermine", "watchlist", "lootcouncil", "config", "messages", "state"]
+known-first-party = ["bot", "raider", "schedule", "views", "utils", "undermine", "watchlist", "lootcouncil", "config", "messages", "state", "cogs"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -272,6 +272,10 @@ class FakeGuild:
 
 
 class FakeMessage:
+    @property
+    def _state(self):
+        return self._world.state()
+
     def __init__(self, world, channel, author, content, embeds, view, *, ephemeral_to=None, reference=None):
         self._world = world
         self.id = _snowflake()
@@ -675,6 +679,17 @@ def _import_bot(data_dir: Path, network: bool):
     discord.Client.login = _no_login
     discord.Client.connect = _no_login
 
+    from discord.ext import commands as _commands
+
+    async def _ctx_send(self, content=None, **kwargs):
+        return await self.channel.send(content, **kwargs)
+
+    async def _ctx_reply(self, content=None, **kwargs):
+        return await self.message.reply(content, **kwargs)
+
+    _commands.Context.send = _ctx_send  # Discord delivers ctx.send to the invoking channel
+    _commands.Context.reply = _ctx_reply
+
     if not network:
         import aiohttp
 
@@ -914,8 +929,12 @@ class Harness:
         """Run one iteration of a background task loop (they are never auto-started)."""
         if loop_name not in LOOP_NAMES:
             raise HarnessError(f"unknown loop {loop_name!r}; known: {LOOP_NAMES}")
+        owners = [self.client, *self.client.cogs.values()]
+        loop = next((getattr(o, loop_name) for o in owners if hasattr(type(o), loop_name)), None)
+        if loop is None:
+            raise HarnessError(f"no client or cog defines {loop_name}")
         self.world.record("tick", loop=loop_name)
-        await getattr(self.client, loop_name)()
+        await loop()
         await self.settle()
 
     # ---- waiting and reading ---------------------------------------------
@@ -1139,7 +1158,7 @@ def doctor() -> int:
         try:
             await h.launch()
             pinned = [m for m in h.key.messages() if m.pinned and m.components]
-            return h.bot.CLIENT_ID == SENTINEL_TOKEN, bool(pinned), h.started_loops
+            return h.bot.CLIENT_ID == SENTINEL_TOKEN, bool(pinned), h.started_loops, sorted(h.client.cogs)
         finally:
             await h.close()
             _close_file_logs()
@@ -1147,10 +1166,12 @@ def doctor() -> int:
             shutil.rmtree(h.run_dir, ignore_errors=True)
 
     try:
-        token_ok, pinned, loops = asyncio.run(boot_probe())
+        token_ok, pinned, loops, cog_names = asyncio.run(boot_probe())
         line(token_ok, "bot booted offline with the sentinel token (no production token loaded)")
         line(pinned, "on_ready pinned the key-request button in #keys")
         line(set(loops) == set(LOOP_NAMES), f"background loops intercepted, not started: {sorted(loops)}")
+        cogs_ok = len(cog_names) == 8
+        line(cogs_ok, f"cogs loaded: {cog_names}")
     except Exception as exc:  # noqa: BLE001
         line(False, f"offline boot failed: {exc!r}")
     stale = list(RUNS_DIR.glob("*")) if RUNS_DIR.exists() else []
