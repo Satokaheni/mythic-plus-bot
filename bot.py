@@ -84,24 +84,6 @@ class MyClient(commands.Bot):
     async def new_availability_signup_fill_schedule(self, raider: Raider, tier: str):
         await self.get_cog("Scheduling").new_availability_signup_fill_schedule(raider, tier)
 
-
-
-
-
-
-
-
-
-    # ---------------------------
-    # Weekly Availability Reset
-    # ---------------------------
-
-
-    # ---------------------------
-    # Weekly Forecast Dry-Run Preview
-    # ---------------------------
-
-
     # ---------------------------
     # Startup
     # ---------------------------
@@ -155,5 +137,5 @@ intents.dm_messages = True
 client = MyClient(intents=intents)
 
 if __name__ == "__main__":
-    # log_handler=None: logging is configured by the logging setup, so discord.py must not add its own handler.
+    # log_handler=None: logging is configured by config._configure_logging, so discord.py must not add its own handler.
     client.run(CLIENT_ID, log_handler=None)

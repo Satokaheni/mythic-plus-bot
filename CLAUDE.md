@@ -92,7 +92,7 @@ A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Myt
 | Sniper | `!snipe`, `!snipepet`, `!unsnipe`, `!snipes` | `_send_snipe_dm`, realm/price caches | `auction_snipe_check` |
 | Gear | `!gearaudit` | `_run_gear_audit` | — |
 
-Each cog starts its loops in `cog_load` and cancels them in `cog_unload`. Cog-owned stores (`watchlist`, `snipelist`, `token_watch`, `_char_mappings`) live on their cog, not on the client.
+Each cog starts its loops in `cog_load` and cancels them in `cog_unload`. Cog-owned stores (`watchlist`, `snipelist`, `token_watch`, `char_mappings` on Forecasting) live on their cog, not on the client.
 
 ---
 
@@ -109,7 +109,7 @@ Each cog starts its loops in `cog_load` and cancels them in `cog_unload`. Cog-ow
 level → day → time → run type → (optional: add pre-registered raiders) → post
 
 ### Weekly Availability Reset
-Every Tuesday at noon CST, `weekly_avail_reset` (a `@tasks.loop(time=...)` task started in `setup_hook`):
+Every Tuesday at noon CST, `weekly_avail_reset` (a `@tasks.loop(time=...)` task owned by the Availability cog and started in its `cog_load`):
 1. Deletes the old availability message
 2. Resets `self.availability` to `{GREEN: [], YELLOW: [], RED: []}`
 3. Calls `_post_avail_message()` to post a fresh message
@@ -123,7 +123,7 @@ Uses `_CST = ZoneInfo("America/Chicago")` constant for DST-aware scheduling. The
 - Raiders respond ✅/❌ via reaction
 
 ### Full Run — Fill Offer DM (cogs/scheduling.py)
-When a user tries to sign up but the run is already full, they receive a DM with:
+Clicking Sign Up on a full run puts the raider straight into the fill queue (`ScheduleButtonView.signup_button`); no DM is sent. The fill-offer DM exists only on the DM spot-offer path: when a raider reacts ✅ to a spot offer (`Scheduling.on_spot_offer_reaction`) and the run is still full after off-role displacement, they receive a DM with:
 - Warning that the run is full
 - **Current roster** (Tank / Healer / DPS names) via inline roster string
 - Prompt to join as fill (✅/❌ reaction)
@@ -142,10 +142,10 @@ If a main-role player signs up and an off-role filler holds the slot (>8 hrs bef
 
 `hourly_check` now writes the `run_completed` event **before** deleting a passed run's Discord message, so completed-run history is preserved instead of discarded. Logging never raises and never blocks a bot flow — failures are caught and logged, not surfaced to users.
 
-A daily `raiderio_harvest` task (`@tasks.loop(hours=24)`, started in `setup_hook`) backfills real play-time data from Raider.io to seed the same dataset: for each mapped character in `character_mappings.json`, fetches recent + best Mythic+ runs and appends single-user `raiderio_run` events (`source="raiderio"`) to `events.jsonl`, deduped by `(user_id, run_id)`. Ignores `alt_of` — all of a person's characters count. Skips unregistered `discord_id`s, since Raider.io has no timezone data and forecasting needs one. The initial backfill runs on the first loop iteration at startup, then daily thereafter.
+A daily `raiderio_harvest` task (`@tasks.loop(hours=24)`, owned by the Forecasting cog and started in its `cog_load`) backfills real play-time data from Raider.io to seed the same dataset: for each mapped character in `character_mappings.json`, fetches recent + best Mythic+ runs and appends single-user `raiderio_run` events (`source="raiderio"`) to `events.jsonl`, deduped by `(user_id, run_id)`. Ignores `alt_of` — all of a person's characters count. Skips unregistered `discord_id`s, since Raider.io has no timezone data and forecasting needs one. The initial backfill runs on the first loop iteration at startup, then daily thereafter.
 
 ### Forecast Preview (Phase 2a)
-A weekly `forecast_preview` task (`@tasks.loop(time=...)`, started in `setup_hook`) fires **Wednesday at noon CST** — a day after the Tuesday availability post — and produces a dry-run preview of the best-predicted weekly run:
+A weekly `forecast_preview` task (`@tasks.loop(time=...)`, owned by the Forecasting cog and started in its `cog_load`) fires **Wednesday at noon CST** — a day after the Tuesday availability post — and produces a dry-run preview of the best-predicted weekly run:
 1. **Feasibility gate** — checks whether the current green (🟢) availability pool can field a role-valid team (1 tank, 1 healer, 3 dps) via `forecast.can_field_team()`. No-ops (logs and returns) if not.
 2. **Predictor** — `forecast.observations()` normalizes `events.jsonl` (`run_completed`, `offer_accepted`/`offer_declined`, `raiderio_run`) into per-user, per-(local weekday, 2-hour block) signed observations. `forecast.predict()` scores each (user, slot) pair as a recency-weighted (half-life 4 weeks), Laplace-smoothed positive fraction, backed off to a same-weekday prior, then an overall prior, then a flat base rate for users with no data.
 3. **Roster/slot optimization** — `forecast.rank_slots()` walks every weekday/2h-block slot in the coming week, converts each green raider's availability probability into that slot (in their own timezone), and calls `forecast.select_team()` to pick the mean-maximizing role-valid roster (1 tank, 1 healer, 3 dps, multi-role aware). Slots are ranked by the winning team's mean probability.
@@ -325,7 +325,7 @@ RAIDERIO_REGION       Raider.io region (default: us)
 - **Logging** — `config._configure_logging()` (called after `load_dotenv`) attaches a `RotatingFileHandler` (`LOG_FILE`, default `bot.log`, ~5 MB × 3 backups) plus a console handler to the root logger; `client.run(..., log_handler=None)` so discord.py doesn't add a duplicate. `LOG_LEVEL` env sets the level (default INFO). `bot.log*` is gitignored.
 - **Schedules keyed by message ID** — not UUIDs
 - **Timezones:** US only (Eastern/Central/Mountain/Pacific/Alaska/Hawaii), stored as string, loaded as ZoneInfo
-- **Persistent views** (`ScheduleButtonView`, `KeyRequestButtonView`) re-registered on `on_ready` so buttons survive restarts
+- **Persistent views** (`ScheduleButtonView`, `KeyRequestButtonView`) re-registered in `MyClient.setup_hook` so buttons survive restarts
 - **All datetimes UTC-aware** internally; displayed via Discord `<t:timestamp:F>` format
 - **Changelog file reads** use `encoding='utf-8'` explicitly — Windows default (cp1252) corrupts em-dashes
 - **Changelog bullet prefix** uses `•` not `- ` — Discord renders `- ` as markdown list syntax, stripping the dash and adding commas when copied
