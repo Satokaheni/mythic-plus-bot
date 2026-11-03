@@ -7,4 +7,5 @@ EXTENSIONS = [
     "cogs.wowtoken",
     "cogs.sniper",
     "cogs.gear",
+    "cogs.assistant",
 ]

@@ -4,8 +4,6 @@ from types import SimpleNamespace
 import discord
 import pytest
 
-from cogs.assistant import should_handle
-
 BOT, OWNER = 99, 5
 
 
@@ -18,8 +16,15 @@ def msg(content, *, dm=False, author=OWNER, bot=False, webhook=None, mtype=disco
                            mentions=[SimpleNamespace(id=i) for i in mentions])
 
 
-def run(m, enabled=True):
-    return should_handle(m, bot_user_id=BOT, allowed_ids={OWNER}, enabled=enabled)
+@pytest.fixture
+def run(fresh_import):
+    """cogs.assistant imports config, which needs the bot's env; fresh_import supplies a fake one."""
+    should_handle = fresh_import("cogs.assistant").should_handle
+
+    def _run(m, enabled=True):
+        return should_handle(m, bot_user_id=BOT, allowed_ids={OWNER}, enabled=enabled)
+
+    return _run
 
 
 @pytest.mark.parametrize("m,expected", [
@@ -40,9 +45,9 @@ def run(m, enabled=True):
     (msg("<@99> hi", group=True), "hi"),
     (msg("<@99>"), ""),
 ])
-def test_should_handle(m, expected):
+def test_should_handle(run, m, expected):
     assert run(m) == expected
 
 
-def test_disabled_ignores_everything():
+def test_disabled_ignores_everything(run):
     assert run(msg("hi", dm=True), enabled=False) is None

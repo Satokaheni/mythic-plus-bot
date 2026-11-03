@@ -5,6 +5,7 @@ pick from a select, fill a modal. They check what the user would see AND the sid
 (state files, event log).
 """
 
+import json
 from datetime import datetime, timedelta
 
 GREEN, YELLOW, RED = "🟢", "🟡", "🔴"
@@ -287,6 +288,81 @@ async def command_gates(h):
     h.check("no errors logged", not errors, errors)
 
 
+def _acts(h, before):
+    kinds = ("send", "edit", "delete", "interaction_response", "followup", "log_error")
+    return [e for e in h.world.events[before:] if e["kind"] in kinds]
+
+
+def _claude_calls(h):
+    path = h.data_dir / "assistant-work" / "fake_claude_calls.jsonl"
+    return [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+
+
+async def assistant(h):
+    owner, other, stranger, bot = h.banker, h.coordinator, h.user("Stranger"), h.mention()
+
+    await h.say(owner, "what is the best mage spec?", "dm")
+    h.check("1:1 DM without a mention is answered", bool(await h.wait_for(owner, "fake answer: what is the best mage spec?")))
+
+    before, calls = len(h.world.events), len(_claude_calls(h))
+    await h.say(owner, "what is the best mage spec?", "key")
+    await h.say(owner, "@everyone hello", "key")
+    await h.say(stranger, "hello", "dm")
+    await h.say(stranger, f"{bot} hello", "key")
+    h.check("unaddressed, @everyone, and non-allowlisted messages: no reply and no claude call",
+            not _acts(h, before) and len(_claude_calls(h)) == calls, _acts(h, before))
+
+    await h.say(owner, f"{bot} how do keys work?", "key")
+    h.check("#keys @mention is answered", bool(await h.wait_for("key", "fake answer: how do keys work?")))
+    await h.say(owner, bot, "key")
+    h.check("empty mention asks what to do", bool(await h.wait_for("key", "What can I help with?")))
+
+    before = len(h.world.events)
+    await h.say(owner, "!snipes", "dm")
+    h.check("typed !command gets exactly one reply (assistant stays out)",
+            len([e for e in h.world.events[before:] if e["kind"] == "send"]) == 1)
+
+    await h.say(owner, "please snipe 215147 for me under 5000", "dm")
+    ask = await h.wait_for(owner, "I'll run `!snipe 215147 5000 Vibrant Shard`")
+    await h.click(owner, ask, "Confirm")
+    await h.wait_for(owner, "Sniping")
+    h.check("confirmed write ran through the real command", str(owner.id) in json.dumps(h.state_file("snipes.json")))
+
+    snapshot = h.state_file("snipes.json")
+    await h.say(owner, "unsnipe 215147", "dm")
+    ask = await h.wait_for(owner, "I'll run `!unsnipe 215147`")
+    await h.click(owner, ask, "Cancel")
+    await h.wait_for(owner, "Cancelled")
+    h.check("cancelled write changes nothing", h.state_file("snipes.json") == snapshot)
+
+    before = len(h.world.events)
+    await h.say(owner, "show my snipes", "dm")
+    await h.wait_for(owner, "Your snipes")
+    h.check("read command runs without a confirm prompt",
+            not any("I'll run" in (e.get("content") or "") for e in h.world.events[before:]))
+
+    await h.say(other, "watch item 241326", "dm")
+    ask = await h.wait_for(other, "I'll run `!watch 241326`")
+    await h.click(other, ask, "Confirm")
+    await h.wait_for(other, "don't have access to `!watch`")
+    h.check("gates follow the Discord author, not Claude", h.state_file("watches.json") in (None, {}, []))
+
+    await h.say(owner, "make a run thursday", "dm")
+    h.check("key request opens the DM flow", bool(await h.wait_for(owner, "Before scheduling a key")))
+
+    for text in ("evil", "inject", "fake:badjson", "fake:error", "fake:crash", "fake:timeout"):
+        await h.say(other, text, "dm")
+        h.check(f"{text}: one failure reply", bool(await h.wait_for(other, "couldn't work that out", timeout=15)))
+
+    calls = _claude_calls(h)
+    secrets = {"CLIENT_KEY", "BLIZZ_CLIENT_SECRET", "BLIZZ_CLIENT_ID", "UNDERMINE_API_KEY", "RAIDERIO_API_KEY"}
+    h.check("no claude call saw a bot secret", all(not (secrets & set(c["env_keys"])) for c in calls), len(calls))
+    h.check("every call is locked down",
+            all("--strict-mcp-config" in c["argv"] and c["argv"][c["argv"].index("--tools") + 1] == "" for c in calls))
+    h.check("mentions never reach the prompt", all("<@" not in c["prompt"] for c in calls))
+    h.check("no errors logged", not [e for e in h.world.events if e["kind"] == "log_error"])
+
+
 def json_dump(obj) -> str:
     import json
 
@@ -301,4 +377,5 @@ JOURNEYS = {
     "snipe": (snipe, "!snipe / !snipes / !unsnipe from DMs (offline: label fallback)"),
     "banker-token": (banker_token, "!tokenalert / !token, banker gate, off"),
     "command-gates": (command_gates, "permission/channel gates stay silent; unknown commands and chat are ignored"),
+    "assistant": (assistant, "plain-language DM/mention → answer or confirmed command via fake claude"),
 }
