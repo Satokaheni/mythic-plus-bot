@@ -19,7 +19,7 @@ def msg(content, *, dm=False, author=OWNER, bot=False, webhook=None, mtype=disco
 @pytest.fixture
 def run(fresh_import):
     """cogs.assistant imports config, which needs the bot's env; fresh_import supplies a fake one."""
-    should_handle = fresh_import("cogs.assistant").should_handle
+    should_handle = fresh_import("mythicbot.cogs.assistant").should_handle
 
     def _run(m, enabled=True):
         return should_handle(m, bot_user_id=BOT, allowed_ids={OWNER}, enabled=enabled)

@@ -37,7 +37,7 @@ Preconditions:
 
 ## Gotchas
 
-- This proves the bot-side wiring only. The real CLI (flags, `StructuredOutput`-only tool list, latency) is checked by the owner with `python -m assistant.smoke --env-file .env`, not by the harness.
+- This proves the bot-side wiring only. The real CLI (flags, `StructuredOutput`-only tool list, latency) is checked by the owner with `python -m mythicbot.assistant.smoke --env-file .env`, not by the harness.
 - `h.say` returns once the bot is quiet, so a `fake:timeout` call is still in flight afterwards; wait for its failure reply with a long `timeout`.
 - The busy reply only appears while a call is in flight; send the second message right after the `fake:timeout` one.
 - A confirmed banker command in a guild channel deletes the user's plain-language message (DMs are untouched).

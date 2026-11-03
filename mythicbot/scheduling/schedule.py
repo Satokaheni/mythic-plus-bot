@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Optional
 import discord
 from discord import Color, Embed
 
-from raider import Raider
+from mythicbot.scheduling.raider import Raider
 
 if TYPE_CHECKING:
     from bot import MyClient
@@ -77,7 +77,7 @@ class Schedule:
         Returns:
             Tuple of (embed, view, content) where content contains role pings if needed
         """
-        from views import ScheduleButtonView
+        from mythicbot.scheduling.views import ScheduleButtonView
 
         if self.is_filled():
             color = Color.green()

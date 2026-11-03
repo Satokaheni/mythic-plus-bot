@@ -5,9 +5,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from freezegun import freeze_time
 
-from raider import Raider
-from schedule import Schedule
-
+from mythicbot.scheduling.raider import Raider
+from mythicbot.scheduling.schedule import Schedule
 
 # ---------------------------------------------------------------------------
 # Schedule.__init__ — organizer signup

@@ -41,7 +41,7 @@ Preconditions:
 ## Gotchas
 
 - The `Dps` option label is `role.title()`, so choose by value `dps` or label `Dps`, never `DPS`.
-- A Sign Up on a full run goes straight into the fill queue with no prompt. The "run is full, join as fill?" DM that CLAUDE.md describes exists only on the DM-offer ✅ path (`Scheduling.on_spot_offer_reaction` in `cogs/scheduling.py`), which needs `Scheduling.fill_remaining_spots`; that sleeps an hour before sending offers, so it never fires in a harness run.
+- A Sign Up on a full run goes straight into the fill queue with no prompt. The "run is full, join as fill?" DM that CLAUDE.md describes exists only on the DM-offer ✅ path (`Scheduling.on_spot_offer_reaction` in `mythicbot/cogs/scheduling.py`), which needs `Scheduling.fill_remaining_spots`; that sleeps an hour before sending offers, so it never fires in a harness run.
 - Displacement needs the run more than 8 hours away and an off-role seat holder. A run posted for later today may silently skip it.
 - The welcome signup never asks a multi-role member which role: it takes the primary if that seat is open, else the secondary if open, else queues them. Only a later click shows the role picker.
 - `Remove` by the last raider deletes the run message, so later clicks on that message fail with `This interaction failed`.

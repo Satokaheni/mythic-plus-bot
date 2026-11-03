@@ -5,11 +5,11 @@ import logging
 import discord
 from discord.ext import commands
 
-import config
-from cogs._checks import in_channels, is_elevated
-from messages import _read_changelog, _read_last_version, _write_version
-from utils import GREEN, RED, YELLOW
-from views import KeyRequestButtonView
+from mythicbot import config
+from mythicbot.cogs._checks import in_channels, is_elevated
+from mythicbot.messages import _read_changelog, _read_last_version, _write_version
+from mythicbot.scheduling.views import KeyRequestButtonView
+from mythicbot.storage import GREEN, RED, YELLOW
 
 logger = logging.getLogger("discord")
 

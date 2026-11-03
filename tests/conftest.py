@@ -9,8 +9,8 @@ from types import SimpleNamespace
 import dotenv
 import pytest
 
-from raider import Raider
-from schedule import Schedule
+from mythicbot.scheduling.raider import Raider
+from mythicbot.scheduling.schedule import Schedule
 
 
 @pytest.fixture
@@ -90,13 +90,19 @@ _REQUIRED_ENV = {
     "HEALER_ROLE_ID": "5", "DPS_ROLE_ID": "6", "COORDINATOR_ID": "7", "BANKER_ID": "8", "BLIZZ_CLIENT_ID": "x",
     "BLIZZ_CLIENT_SECRET": "x", "MYTHIC_PLUS_ID": "9", "ADMIN_ID": "10",
 }
-_FRESH = ("bot", "config", "messages", "state")
+_FRESH = ("bot", "mythicbot.config", "mythicbot.messages", "mythicbot.state")
+_FRESH_PACKAGES = ("mythicbot.cogs", "mythicbot.assistant")
 
 
 def _forget_bot_modules():
     for name in list(sys.modules):
-        if name in _FRESH or name in ("cogs", "assistant") or name.startswith(("cogs.", "assistant.")):
+        if name in _FRESH or name in _FRESH_PACKAGES or name.startswith(tuple(p + "." for p in _FRESH_PACKAGES)):
             sys.modules.pop(name, None)
+            # `from mythicbot import config` reads the parent package's attribute before sys.modules,
+            # so drop that too or the next import would hand back the stale module.
+            parent, _, leaf = name.rpartition(".")
+            if parent in sys.modules and getattr(sys.modules[parent], leaf, None) is not None:
+                delattr(sys.modules[parent], leaf)
 
 
 @pytest.fixture

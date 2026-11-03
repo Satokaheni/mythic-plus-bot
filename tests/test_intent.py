@@ -1,6 +1,6 @@
 import pytest
 
-from assistant import intent as it
+from mythicbot.assistant import intent as it
 
 
 def test_answer_and_command_roundtrip():

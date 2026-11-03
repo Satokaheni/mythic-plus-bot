@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from assistant import claude_runner as cr
+from mythicbot.assistant import claude_runner as cr
 
 FAKE = [sys.executable, str(Path(__file__).resolve().parents[1] / ".claude/skills/verify-mythic-plus-bot/scripts/fake_claude.py")]
 SCHEMA = {"type": "object"}

@@ -7,11 +7,11 @@ from textwrap import dedent
 import discord
 from discord.ext import commands, tasks
 
-import config
-import eventlog
-from messages import AVAILABILITY_MESSAGE
-from utils import GREEN, RED, YELLOW
-from views import WoWSelectionView
+from mythicbot import config
+from mythicbot.messages import AVAILABILITY_MESSAGE
+from mythicbot.scheduling import eventlog
+from mythicbot.scheduling.views import WoWSelectionView
+from mythicbot.storage import GREEN, RED, YELLOW
 
 logger = logging.getLogger("discord")
 

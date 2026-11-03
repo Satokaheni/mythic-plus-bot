@@ -7,11 +7,10 @@ import aiohttp
 import discord
 from discord.ext import commands, tasks
 
-import config
-import eventlog
-import forecast
-import raiderio
-from utils import GREEN
+from mythicbot import config
+from mythicbot.guild import raiderio
+from mythicbot.scheduling import eventlog, forecast
+from mythicbot.storage import GREEN
 
 logger = logging.getLogger("discord")
 

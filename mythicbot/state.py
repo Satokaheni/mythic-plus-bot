@@ -3,9 +3,9 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import utils
-from raider import Raider
-from utils import GREEN, RED, YELLOW
+from mythicbot import storage
+from mythicbot.scheduling.raider import Raider
+from mythicbot.storage import GREEN, RED, YELLOW
 
 
 class BotState:
@@ -41,10 +41,10 @@ class BotState:
 
     @classmethod
     def load(cls) -> "BotState":
-        return cls(*utils.load_state())
+        return cls(*storage.load_state())
 
     def save(self) -> None:
-        utils.save_state(
+        storage.save_state(
             self.raiders,
             self.schedules,
             self.availability,

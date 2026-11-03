@@ -1,7 +1,6 @@
 """Tests for the pure gear-audit rules."""
 
-from blizzard import Enchant, EquippedItem
-from gearaudit import (
+from mythicbot.guild.gearaudit import (
     ENCHANTABLE_SLOTS,
     MAX_MESSAGE_CHARS,
     CharacterFindings,
@@ -12,6 +11,7 @@ from gearaudit import (
     gem_ids,
     parse_enchant_tier,
 )
+from mythicbot.market.blizzard import Enchant, EquippedItem
 
 TIER2 = "Enchanted: Enchant Helm - Empowered Blessing of Speed |A:Professions-ChatIcon-Quality-12-Tier2:20:20|a"
 TIER1 = "Enchanted: Enchant Chest - Mark of the Worldsoul |A:Professions-ChatIcon-Quality-12-Tier1:20:20|a"

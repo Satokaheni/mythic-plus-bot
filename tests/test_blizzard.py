@@ -1,6 +1,6 @@
 """Tests for the pure parsers of the Blizzard Game Data client."""
 
-from blizzard import (
+from mythicbot.market.blizzard import (
     _parse_auctions,
     _parse_equipment,
     _parse_item_info,
@@ -31,7 +31,7 @@ def test_parse_auctions_returns_list():
 
 def test_parse_item_info_recipe_flag():
     recipe = {"name": "Recipe: Widget", "item_class": {"id": 9, "name": "Recipe"}}
-    assert _parse_item_info(recipe) == __import__("blizzard").ItemInfo("Recipe: Widget", True)
+    assert _parse_item_info(recipe) == __import__("mythicbot.market.blizzard", fromlist=["ItemInfo"]).ItemInfo("Recipe: Widget", True)
     mount = {"name": "Reins of Something", "item_class": {"id": 15, "name": "Miscellaneous"}}
     info = _parse_item_info(mount)
     assert info.name == "Reins of Something" and info.is_recipe is False

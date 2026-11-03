@@ -1,4 +1,4 @@
-from assistant.usage import DailyUsage
+from mythicbot.assistant.usage import DailyUsage
 
 
 def test_cap_and_rollover(tmp_path, monkeypatch):

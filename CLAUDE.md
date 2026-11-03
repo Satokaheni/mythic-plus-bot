@@ -9,66 +9,69 @@ This file reflects the **current state** of the codebase. Rewrite relevant secti
 A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Mythic+ runs. Manages team assembly, availability tracking, DM outreach, and schedule lifecycle.
 
 **Version:** 1.11.0
-**Entry point:** `bot.py` (`MyClient(commands.Bot)`; features live in `cogs/`)
+**Entry point:** `bot.py` (`MyClient(commands.Bot)`; features live in `mythicbot/cogs/`)
 
 ---
 
 ## File Map
 
+Layout: `bot.py` (the entry point, run from the repo root so the `*.json` state files, `CHANGELOG.md` and `version.txt` resolve against it) plus the `mythicbot` package — top-level `config`/`messages`/`state`/`storage`, then `scheduling/` (runs, raiders, views, event log, forecast), `market/` (price watch, sniper, token), `guild/` (Raider.io, gear audit), `cogs/` (one per feature), and `assistant/`. All imports are absolute (`from mythicbot.scheduling.schedule import Schedule`).
+
 | File | Purpose |
 |------|---------|
 | `bot.py` | Thin entry point: `MyClient(commands.Bot)` — state load, persistent views, cog loading, `on_ready` log line, facade delegators to the Scheduling cog, `on_command_error`/`on_error` |
-| `config.py` | Env-derived constants (IDs, channels, `BOT_VERSION`, intervals), `_CST`, and `_configure_logging()` |
-| `messages.py` | User-facing message builders and changelog/version file helpers |
-| `state.py` | `BotState` — persisted bot state (raiders, schedules, availability, dm_map, ...); `load()`/`save()` wrap `utils` |
-| `cogs/__init__.py` | `EXTENSIONS` — the list of cog modules `setup_hook` loads |
-| `cogs/_checks.py` | `commands.check` gates: `is_banker`, `is_elevated`, `in_channels` |
-| `cogs/scheduling.py` | `Scheduling` — `!key`, `!keys`, `!modify`, key-request/DM-offer flows, fill/notify logic, spot-offer reactions, `hourly_check` loop |
-| `cogs/availability.py` | `Availability` — `!avail`, availability posting, 🟢🟡🔴 reaction handling, `weekly_avail_reset` loop |
-| `cogs/admin.py` | `Admin` — `!cleanup`, `!setup`, `!help`/`!tools`, `on_ready` work (role mentions, message cache warm-up, changelog, pinned key button) |
-| `cogs/forecasting.py` | `Forecasting` — `raiderio_harvest` and `forecast_preview` loops |
-| `cogs/pricewatch.py` | `PriceWatch` — `!watch`/`!unwatch`/`!watches`, `price_watch_check` loop (banker) |
-| `cogs/wowtoken.py` | `WowToken` — `!token`/`!tokenalert`, `token_watch_check` loop (banker) |
-| `cogs/sniper.py` | `Sniper` — `!snipe`/`!snipepet`/`!unsnipe`/`!snipes`, `auction_snipe_check` loop |
-| `cogs/gear.py` | `Gear` — `!gearaudit` (elevated) |
-| `cogs/assistant.py` | `Assistant` — `on_message` listener for plain-language messages from allowlisted users; answers, or runs a validated and (for writes) confirmed command |
-| `assistant/claude_runner.py` | Runs one isolated headless `claude -p` call (flags, minimal env, timeout/kill, result parsing) |
-| `assistant/intent.py` | Command allowlist, JSON schema, arg validation, system-prompt rendering — Claude's output is validated here before anything runs |
-| `assistant/usage.py` | `DailyUsage` — per-day call counter persisted to `assistant.json` |
-| `assistant/smoke.py` | Owner-run live check of the real `claude` CLI with the exact lockdown flags |
-| `assistant/system_prompt.md` | System-prompt template (`{{COMMANDS}}` is filled from `intent.USAGE`) |
+| `mythicbot/config.py` | Env-derived constants (IDs, channels, `BOT_VERSION`, intervals), `_CST`, and `_configure_logging()` |
+| `mythicbot/messages.py` | User-facing message builders and changelog/version file helpers |
+| `mythicbot/state.py` | `BotState` — persisted bot state (raiders, schedules, availability, dm_map, ...); `load()`/`save()` wrap `storage` |
+| `mythicbot/storage.py` | Constants, state persistence (save/load JSON), class/role dicts |
+| `mythicbot/scheduling/schedule.py` | `Schedule` class — team slots, signup/removal, embed generation |
+| `mythicbot/scheduling/raider.py` | `Raider` class — player profile, availability checks, run tracking |
+| `mythicbot/scheduling/views.py` | All Discord UI: buttons, dropdowns, modals, ephemeral/persistent views |
+| `mythicbot/scheduling/eventlog.py` | Append-only availability/attendance event log for forecasting data |
+| `mythicbot/scheduling/forecast.py` | Availability predictor + roster/slot optimizer + dry-run preview formatter |
+| `mythicbot/market/undermine.py` | Async Undermine Exchange API client |
+| `mythicbot/market/watchlist.py` | `Watch`/`Watchlist` classes — price-watch state, buy-signal detection, formatters |
+| `mythicbot/market/blizzard.py` | Blizzard Game Data Auction House API client |
+| `mythicbot/market/snipelist.py` | `Snipe`/`Snipelist` classes — auction-snipe state, per-realm detection, alert planning |
+| `mythicbot/market/tokenwatch.py` | `TokenWatch` — WoW Token sell-threshold state, ratchet detection, formatters |
+| `mythicbot/guild/raiderio.py` | Raider.io client + daily harvester seeding raiderio_run events |
+| `mythicbot/guild/gearaudit.py` | Gear audit rules — enchant/socket/gem findings and officer report formatting |
+| `mythicbot/cogs/__init__.py` | `EXTENSIONS` — the list of cog modules `setup_hook` loads |
+| `mythicbot/cogs/_checks.py` | `commands.check` gates: `is_banker`, `is_elevated`, `in_channels` |
+| `mythicbot/cogs/scheduling.py` | `Scheduling` — `!key`, `!keys`, `!modify`, key-request/DM-offer flows, fill/notify logic, spot-offer reactions, `hourly_check` loop |
+| `mythicbot/cogs/availability.py` | `Availability` — `!avail`, availability posting, 🟢🟡🔴 reaction handling, `weekly_avail_reset` loop |
+| `mythicbot/cogs/admin.py` | `Admin` — `!cleanup`, `!setup`, `!help`/`!tools`, `on_ready` work (role mentions, message cache warm-up, changelog, pinned key button) |
+| `mythicbot/cogs/forecasting.py` | `Forecasting` — `raiderio_harvest` and `forecast_preview` loops |
+| `mythicbot/cogs/pricewatch.py` | `PriceWatch` — `!watch`/`!unwatch`/`!watches`, `price_watch_check` loop (banker) |
+| `mythicbot/cogs/wowtoken.py` | `WowToken` — `!token`/`!tokenalert`, `token_watch_check` loop (banker) |
+| `mythicbot/cogs/sniper.py` | `Sniper` — `!snipe`/`!snipepet`/`!unsnipe`/`!snipes`, `auction_snipe_check` loop |
+| `mythicbot/cogs/gear.py` | `Gear` — `!gearaudit` (elevated) |
+| `mythicbot/cogs/assistant.py` | `Assistant` — `on_message` listener for plain-language messages from allowlisted users; answers, or runs a validated and (for writes) confirmed command |
+| `mythicbot/assistant/claude_runner.py` | Runs one isolated headless `claude -p` call (flags, minimal env, timeout/kill, result parsing) |
+| `mythicbot/assistant/intent.py` | Command allowlist, JSON schema, arg validation, system-prompt rendering — Claude's output is validated here before anything runs |
+| `mythicbot/assistant/usage.py` | `DailyUsage` — per-day call counter persisted to `assistant.json` |
+| `mythicbot/assistant/smoke.py` | Owner-run live check of the real `claude` CLI with the exact lockdown flags |
+| `mythicbot/assistant/system_prompt.md` | System-prompt template (`{{COMMANDS}}` is filled from `intent.USAGE`) |
+| `lootcouncil/` | Standalone loot council CLI (`python -m lootcouncil <itemId>`); shares no code with the bot |
 | `.claude/skills/verify-mythic-plus-bot/` | Offline harness that drives the real bot against a fake Discord world. Never run `bot.py` with the production `.env`; use the harness |
-| `schedule.py` | `Schedule` class — team slots, signup/removal, embed generation |
-| `raider.py` | `Raider` class — player profile, availability checks, run tracking |
-| `views.py` | All Discord UI: buttons, dropdowns, modals, ephemeral/persistent views |
-| `utils.py` | Constants, state persistence (save/load JSON), class/role dicts |
-| `eventlog.py` | Append-only availability/attendance event log for forecasting data |
-| `undermine.py` | Async Undermine Exchange API client |
-| `watchlist.py` | `Watch`/`Watchlist` classes — price-watch state, buy-signal detection, formatters |
-| `blizzard.py` | Blizzard Game Data Auction House API client |
-| `snipelist.py` | `Snipe`/`Snipelist` classes — auction-snipe state, per-realm detection, alert planning |
-| `gearaudit.py` | Gear audit rules — enchant/socket/gem findings and officer report formatting |
-| `tokenwatch.py` | `TokenWatch` — WoW Token sell-threshold state, ratchet detection, formatters |
-| `raiderio.py` | Raider.io client + daily harvester seeding raiderio_run events |
-| `forecast.py` | Availability predictor + roster/slot optimizer + dry-run preview formatter |
 | `version.txt` | Current version string (triggers changelog DM on startup if changed) |
 | `CHANGELOG.md` | Version history |
 | `character_mappings.json` | Gitignored config (`discord_id → characters`), maintained manually, provided at runtime (like `.env`) |
 | `pyproject.toml` | Dependencies, linting (ruff), pytest config |
-| `tests/` | pytest suite — `test_admin_help.py`, `test_assistant_cog.py`, `test_availability_cog.py`, `test_blizzard.py`, `test_bot.py`, `test_checks.py`, `test_claude_runner.py`, `test_config.py`, `test_eventlog.py`, `test_forecast.py`, `test_gearaudit.py`, `test_intent.py`, `test_lootcouncil_clients.py`, `test_lootcouncil_core.py`, `test_lootcouncil_performance.py`, `test_lootcouncil_ranker.py`, `test_raider.py`, `test_raiderio.py`, `test_roster_handlers.py`, `test_schedule.py`, `test_smoke.py`, `test_snipelist.py`, `test_state.py`, `test_tokenwatch.py`, `test_trigger.py`, `test_undermine.py`, `test_usage.py`, `test_utils.py`, `test_watchlist.py`, `conftest.py` |
+| `tests/` | pytest suite — `test_admin_help.py`, `test_assistant_cog.py`, `test_availability_cog.py`, `test_blizzard.py`, `test_bot.py`, `test_checks.py`, `test_claude_runner.py`, `test_config.py`, `test_eventlog.py`, `test_forecast.py`, `test_gearaudit.py`, `test_intent.py`, `test_key_request.py`, `test_lootcouncil_clients.py`, `test_lootcouncil_core.py`, `test_lootcouncil_performance.py`, `test_lootcouncil_ranker.py`, `test_raider.py`, `test_raiderio.py`, `test_roster_handlers.py`, `test_schedule.py`, `test_smoke.py`, `test_snipelist.py`, `test_state.py`, `test_tokenwatch.py`, `test_trigger.py`, `test_undermine.py`, `test_usage.py`, `test_storage.py`, `test_watchlist.py`, `conftest.py` |
 
 ---
 
 ## Core Data Model
 
-### `Raider` (raider.py)
+### `Raider` (mythicbot/scheduling/raider.py)
 - `user_id`, `mention`, `name`, `class_play`, `timezone` (ZoneInfo)
 - `roles` — list of roles player can fill: `["tank"]`, `["healer"]`, `["dps"]`, or combinations
 - `current_runs` — set of `Schedule` objects they're signed up for
 - `denied_runs` — set of `Schedule` objects they declined
 - `check_availability(schedule)` — enforces 1-hour gap (single key) or 2-hour gap (multi-key) between runs
 
-### `Schedule` (schedule.py)
+### `Schedule` (mythicbot/scheduling/schedule.py)
 - `level`, `run_type` ("one"/"multiple"), `start_time`, `date_scheduled`
 - `team` — `{"tank": Raider|None, "healer": Raider|None, "dps": [up to 3], "fill": [extras]}`
 - `missing` — list of unfilled roles
@@ -83,10 +86,10 @@ A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Myt
 
 ### `MyClient(commands.Bot)` + `BotState` + cogs
 `MyClient` (bot.py) owns startup and shared handles; features are cogs loaded from `cogs.EXTENSIONS` in `setup_hook`.
-- `client.state` — a `BotState` (state.py), the persisted data: `raiders` (`Dict[user_id, Raider]`), `schedules` (`Dict[message_id, Schedule]`), `availability` (`Dict[emoji, List[Raider]]`), `availability_message_id`, `dm_map` / `dm_timestamps` (outstanding DM offers and retry timing), plus runtime-only `role_mentions` and `reminder_messages`. `state.save()` writes `state.json`. `state.register_raider(user, class, roles, tz)` is the only way the three class/role DM forms (Sign Up welcome, availability reaction, key request) store a new raider: it returns the existing record if the user registered through another form while this one was open, so seats never point at an orphaned `Raider`. `Availability._post_avail_message` saves right after setting `availability_message_id`.
+- `client.state` — a `BotState` (mythicbot/state.py), the persisted data: `raiders` (`Dict[user_id, Raider]`), `schedules` (`Dict[message_id, Schedule]`), `availability` (`Dict[emoji, List[Raider]]`), `availability_message_id`, `dm_map` / `dm_timestamps` (outstanding DM offers and retry timing), plus runtime-only `role_mentions` and `reminder_messages`. `state.save()` writes `state.json`. `state.register_raider(user, class, roles, tz)` is the only way the three class/role DM forms (Sign Up welcome, availability reaction, key request) store a new raider: it returns the existing record if the user registered through another form while this one was open, so seats never point at an orphaned `Raider`. `Availability._post_avail_message` saves right after setting `availability_message_id`.
 - `coordinator_id` — used only for conflict DMs; `elevated_ids` — `{COORDINATOR_ID} | set(ADMINS)`, used for all permission checks
 - `client.blizzard` — shared Blizzard client (used by Sniper, WowToken, Gear)
-- Facade delegators on `MyClient` (so `views.py` stays decoupled from cog layout), all forwarding to the Scheduling cog: `notify_schedule`, `message_user`, `_do_key_request_flow`, `_notify_promoted`, `_notify_displaced`, `new_availability_signup_fill_schedule`, `_notify_schedule_changed`
+- Facade delegators on `MyClient` (so `mythicbot/scheduling/views.py` stays decoupled from cog layout), all forwarding to the Scheduling cog: `notify_schedule`, `message_user`, `_do_key_request_flow`, `_notify_promoted`, `_notify_displaced`, `new_availability_signup_fill_schedule`, `_notify_schedule_changed`
 - Cross-cog calls go through those `MyClient` facade delegators (which call `get_cog("Scheduling")` internally), e.g. Availability → `bot.new_availability_signup_fill_schedule`
 
 | Cog | Commands | Listeners / flows | Loop |
@@ -116,7 +119,7 @@ Each cog starts its loops in `cog_load` and cancels them in `cog_unload`. Cog-ow
 `!key` or button → `_do_key_request_flow()` DMs user:
 level → day → time → run type → (optional: add pre-registered raiders) → post
 
-Before posting, `_run_at(schedules, start_time)` (cogs/scheduling.py) looks for a posted run starting at the same **instant** (aware datetimes, so 9 PM Eastern matches 8 PM Central). If one exists and has an open seat in one of the requester's roles, they are DMed a ✅/❌ offer to join it instead of posting a duplicate. Covered by the `key-request-join` harness journey.
+Before posting, `_run_at(schedules, start_time)` (mythicbot/cogs/scheduling.py) looks for a posted run starting at the same **instant** (aware datetimes, so 9 PM Eastern matches 8 PM Central). If one exists and has an open seat in one of the requester's roles, they are DMed a ✅/❌ offer to join it instead of posting a duplicate. Covered by the `key-request-join` harness journey.
 
 ### Weekly Availability Reset
 Every Tuesday at noon CST, `weekly_avail_reset` (a `@tasks.loop(time=...)` task owned by the Availability cog and started in its `cog_load`):
@@ -132,20 +135,20 @@ Uses `_CST = ZoneInfo("America/Chicago")` constant for DST-aware scheduling. The
 - Unanswered DMs retried after 2 hours (`retry_unanswered_dms()`)
 - Raiders respond ✅/❌ via reaction
 
-### Full Run — Fill Offer DM (cogs/scheduling.py)
+### Full Run — Fill Offer DM (mythicbot/cogs/scheduling.py)
 Clicking Sign Up on a full run puts the raider straight into the fill queue (`ScheduleButtonView.signup_button`); no fill-offer DM is sent. The fill-offer DM exists only on the DM spot-offer path: when a raider reacts ✅ to a spot offer (`Scheduling.on_spot_offer_reaction`) and the run is still full after off-role displacement, they receive a DM with:
 - Warning that the run is full
 - **Current roster** (Tank / Healer / DPS names) via inline roster string
 - Prompt to join as fill (✅/❌ reaction)
 
-### notify_schedule (cogs/scheduling.py)
+### notify_schedule (mythicbot/cogs/scheduling.py)
 Called when fill status changes (run becomes full or drops below full). DMs all current roster members. Also includes `schedule.format_dm_roster()` in the "now filled" message. Catches `discord.HTTPException` broadly. **Called AFTER the embed edit** in `remove_button` to ensure the embed always updates even if a DM fails.
 
 ### Off-Role Displacement
 If a main-role player signs up and an off-role filler holds the slot (>8 hrs before run), `try_displace_off_roler` removes the filler from the run entirely (their slot, `members`, and `current_runs`; they are not moved to the fill queue) and `_notify_displaced` DMs them that they were removed. Every path that displaces (the Sign Up registered and welcome branches in `ScheduleButtonView.signup_button`, and the DM spot-offer ✅ in `Scheduling.on_spot_offer_reaction`) first requires `not schedule.has_raider(raider)`, so a raider already in the run never bumps anyone.
 
 ### Event Logging (forecasting data)
-`eventlog.py` appends best-effort records to `events.jsonl` to build a dataset for a future automatic scheduler (Phase 2). Four event types are logged from the bot's flow layer:
+`mythicbot/scheduling/eventlog.py` appends best-effort records to `events.jsonl` to build a dataset for a future automatic scheduler (Phase 2). Four event types are logged from the bot's flow layer:
 - `avail_reaction` — 🟢/🟡/🔴 weekly availability reactions (cog `on_reaction_add` listeners)
 - `offer_accepted` / `offer_declined` — DM ✅/❌ responses to run offers (cog `on_reaction_add` listeners)
 - `run_completed` — final roster of a run whose scheduled time has passed (`hourly_check`)
@@ -171,7 +174,7 @@ Owner-only feature gated to `BANKER_ID` — tracks region-wide commodity prices 
 - **Anti-spam** — only one DM is sent per genuine dip; the watch re-arms only after the price recovers back above the item's median.
 - **Quiet hours** — alerts only sent when `watchlist.in_alert_window(now_cst)` is true (10 AM–11:59 PM CST, `ALERT_START_HOUR`/`ALERT_END_HOUR`). Outside the window `process_signal` is skipped entirely, so a still-good dip re-fires on the next in-window hourly check (deferred, not dropped).
 - **Budget buy suggestion** — `NowResult`/`Signal` carry the auction `auctions` ladder; `format_alert(watch, signal, budget_copper)` adds a "buy up to N for M" line via `watchlist.suggest_buy(auctions, low_band, budget_copper)`, which walks the ladder cheapest-first up to the low band. Budget from `BANKER_BUDGET_GOLD` env (default 100,000 gold → `BANKER_BUDGET_COPPER`). Independent of the bulk target — this line is budget-bound, not target-bound.
-- **Command grammar** — `watchlist.parse_watch_command(args)` (pure/tested) parses `!watch` into `{"kind": "single"|"multi"|"error", ...}`. The `-x<qty>` flag (quantity **glued**, never spaced) binds to the item id immediately before it. One id → `single` (`item_id`, `label`, `target_qty`), may carry a trailing label. Two or more ids → `multi` (`items`: list of `(item_id, target_qty|None)`), each with its own optional `-x` target, no custom labels. Ids without a `-x` resolve to `BANKER_BULK_QTY` at the call site. Error dicts carry a `reason` (`bad_flag` / `multi_label` / `no_item`) that `cogs/pricewatch.py` maps to an actionable message. Glued-only is deliberate: a spaced `-x 100` in the multi run would silently swallow the next item id as the quantity (a real reported bug). Single-item re-watch with `-x` updates the target in place; multi skips already-watched ids.
+- **Command grammar** — `watchlist.parse_watch_command(args)` (pure/tested) parses `!watch` into `{"kind": "single"|"multi"|"error", ...}`. The `-x<qty>` flag (quantity **glued**, never spaced) binds to the item id immediately before it. One id → `single` (`item_id`, `label`, `target_qty`), may carry a trailing label. Two or more ids → `multi` (`items`: list of `(item_id, target_qty|None)`), each with its own optional `-x` target, no custom labels. Ids without a `-x` resolve to `BANKER_BULK_QTY` at the call site. Error dicts carry a `reason` (`bad_flag` / `multi_label` / `no_item`) that `mythicbot/cogs/pricewatch.py` maps to an actionable message. Glued-only is deliberate: a spaced `-x 100` in the multi run would silently swallow the next item id as the quantity (a real reported bug). Single-item re-watch with `-x` updates the target in place; multi skips already-watched ids.
 - State persisted to `watches.json` (`Watch.target_qty` round-trips; legacy entries load as `None` → global default).
 - Commands: `!watch <itemId> [-x<qty>] [label]` or `!watch <id1> -x<qty> <id2> -x<qty> ...` (multi, per-item targets), `!unwatch <itemId> [itemId ...]` (multi), `!watches` — DM or key-channel, banker-only.
 
@@ -207,7 +210,7 @@ Officer-only, on demand. `!gearaudit [character]` (coordinator/admin, `ELEVATED_
 Flagged: a missing **permanent** enchant on an enchantable slot, an **empty gem socket**, a
 **Tier-1 enchant**, and a **rank-1 gem**. Not flagged: Tier-2 enchants (the cap this
 expansion), temporary weapon oils, and off-hands that are not weapons (`item_class.id != 2`).
-`ENCHANTABLE_SLOTS` is a module constant in `gearaudit.py` — head, shoulder, chest, legs, feet,
+`ENCHANTABLE_SLOTS` is a module constant in `mythicbot/guild/gearaudit.py` — head, shoulder, chest, legs, feet,
 both rings, main hand, plus a weapon off-hand — measured against the live roster and updated
 per expansion.
 
@@ -224,7 +227,7 @@ rarity is not caught.
 
 ### Natural-language assistant (experimental)
 
-Off by default (`ASSISTANT_ENABLED`). Lets allowlisted users (`ASSISTANT_USER_IDS`, intended: the owner) talk to the bot in plain language; a headless `claude -p` call returns either an answer or a command to run. Lives in `cogs/assistant.py` + `assistant/`.
+Off by default (`ASSISTANT_ENABLED`). Lets allowlisted users (`ASSISTANT_USER_IDS`, intended: the owner) talk to the bot in plain language; a headless `claude -p` call returns either an answer or a command to run. Lives in `mythicbot/cogs/assistant.py` + `mythicbot/assistant/`.
 
 - **Trigger rule** (`should_handle`) — handled only when enabled, the author is on the allowlist and is not a bot/webhook, the message is a normal message or reply, and it is either a **1:1 DM** or any guild or group-DM message that **@mentions the bot**. A group DM without a mention, guild text without a mention, `@everyone`, and anything starting with `!` (typed commands, also after stripping the mention) are ignored: no reply and no Claude call. A bare mention replies `What can I help with?`.
 - **Isolation** — `claude` runs with a private `CLAUDE_CONFIG_DIR` (`ASSISTANT_CONFIG_DIR`), an empty working dir (`ASSISTANT_WORK_DIR`), and a minimal env: only `PATH`, `SYSTEMROOT`, `HOME`, `USERPROFILE`, `TEMP`, `TMP` (each when present) plus `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_OAUTH_TOKEN`, `DISABLE_AUTOUPDATER=1`. No bot secret (`CLIENT_KEY`, `BLIZZ_*`, `UNDERMINE_*`, `RAIDERIO_*`) reaches it. The prompt goes on **stdin**, never argv; `create_subprocess_exec`, no shell. Flags: `--tools ""` (verified: only the internal `StructuredOutput` tool loads), `--strict-mcp-config`, `--json-schema`, `--max-turns 3`, `--max-budget-usd 0.05`, `--permission-mode dontAsk`, `--no-session-persistence`, `--system-prompt-file`, `--model` (`ASSISTANT_MODEL`, default `haiku`). `ASSISTANT_TIMEOUT` (default 60 s) kills a hung call.
@@ -236,7 +239,7 @@ Off by default (`ASSISTANT_ENABLED`). Lets allowlisted users (`ASSISTANT_USER_ID
 - **Cost guard** — `DailyUsage` counts every Claude call per Central-time day in `assistant.json` (gitignored, atomic write; `state.json` and the other state files are untouched) and replies `Daily assistant limit reached.` past `ASSISTANT_DAILY_CAP` (default 100). The owner runs this on a Claude subscription, so `total_cost_usd` and `--max-budget-usd` are an *estimate against subscription usage*, not billing, and the cap protects the plan's allowance from runaway use. One call at a time: a message that arrives mid-call gets `One moment — still working on the last one.`
 - **Failures** — timeout (process killed), crash, non-success result, unparseable output, or a rejected intent all produce the single failure reply; the bot keeps running. A result with `subtype: success` but `is_error: true` (how the CLI reports API/auth failures, e.g. an expired setup-token) is a failure, `claude success: is_error`. `RunResult.detail` carries the CLI's own reason (`result`, else the first `errors[]` entry, at most 200 chars) and the failure warning logs it; env and the token are never logged. A non-numeric `total_cost_usd` counts as 0.
 - **Startup self-checks never stop the bot** — `Assistant.cog_load` never raises (bot.py loads extensions without a try/except, so a raise would stop every cog). If an `intent.USAGE` name is not a registered command (e.g. after a rename), it logs an ERROR naming them and sets `Assistant.disabled`; this check runs even with `ASSISTANT_ENABLED` off. When enabled, it does the same if the resolved `ASSISTANT_WORK_DIR` or `ASSISTANT_CONFIG_DIR` is inside a git work tree (a `.git` in it or any parent) or inside the bot's own directory, because Claude Code loads `CLAUDE.md` from the work dir's parents and project settings from its project root. A disabled assistant's listener returns at once: no reply, no Claude call. `tests/test_assistant_cog.py` boots the real `MyClient` with every `cogs.EXTENSIONS` entry and asserts every `USAGE` name resolves.
-- **Smoke check** — `python -m assistant.smoke --env-file .env` (owner-run; reads only `CLAUDE_CODE_OAUTH_TOKEN`) calls the real CLI with the exact flags and fails unless the init message shows no tools beyond `StructuredOutput` and no MCP servers. It passed on the owner's Windows PC, which is where the bot runs (2.2–3.0 s, haiku, Claude Code 2.1.317).
+- **Smoke check** — `python -m mythicbot.assistant.smoke --env-file .env` (owner-run; reads only `CLAUDE_CODE_OAUTH_TOKEN`) calls the real CLI with the exact flags and fails unless the init message shows no tools beyond `StructuredOutput` and no MCP servers. It passed on the owner's Windows PC, which is where the bot runs (2.2–3.0 s, haiku, Claude Code 2.1.317).
 - **Install** — the Dockerfile installs the native Claude Code CLI as `botuser` (`curl -fsSL https://claude.ai/install.sh | bash -s 2.1.317 && claude --version` under `SHELL ["/bin/bash", "-o", "pipefail", "-c"]`, so a failed download fails the build; `~/.local/bin` on `PATH`, `DISABLE_AUTOUPDATER=1`). On a non-Docker host (e.g. the owner's Windows PC) install it per https://code.claude.com/docs/en/setup and run `claude setup-token` for the OAuth token.
 
 ### Help Command
@@ -249,7 +252,7 @@ Off by default (`ASSISTANT_ENABLED`). Lets allowlisted users (`ASSISTANT_USER_ID
 
 ---
 
-## Embed Layout (schedule.py `send_message`)
+## Embed Layout (mythicbot/scheduling/schedule.py `send_message`)
 
 Fields ordered for clean 3-column Discord rows:
 
@@ -275,7 +278,7 @@ All permission gates (`!cleanup`, `!avail`, `!setup`, `!gearaudit`, manage butto
 
 **Exception:** schedule conflict notifications are sent **only to `COORDINATOR_ID`**, never to admins.
 
-In `manage_button` (views.py):
+In `manage_button` (mythicbot/scheduling/views.py):
 - `is_coordinator = user.id in bot.elevated_ids` check runs **first** → `CoordinatorManageView`
 - `is_organizer`-only → `ManageScheduleView`
 
@@ -283,17 +286,17 @@ In `manage_button` (views.py):
 
 ---
 
-## State Persistence (utils.py)
+## State Persistence (mythicbot/storage.py)
 
 - File: `state.json` (atomic write via temp file)
 - Deserialization is a 4-pass process: raiders → schedules → wiring (cross-references) → reconciliation
 - Reconciliation also repairs **ghost seats** from pre-F3 state: before the F3 fix, a raider seated outside their registered roles who clicked Remove left `members`/`current_runs` but kept the seat. Any raider holding a tank/healer/DPS/fill seat but missing from `members` is appended to `members` and the run is added to their `current_runs`, so Sign Up refuses them and Remove can clear the seat. The state.json format is unchanged; normal state round-trips byte for byte.
 - Legacy `state.pkl` migration supported
-- Price-watch state is persisted separately to `watches.json` (see `watchlist.py`)
-- Auction-snipe state is persisted separately to `snipes.json` (see `snipelist.py`)
-- Token sell-alert state is persisted separately to `token_watch.json` (see `tokenwatch.py`)
-- Assistant daily-usage counter is persisted separately to `assistant.json` (gitignored, see `assistant/usage.py`)
-- Event log is persisted separately to `events.jsonl` (gitignored, append-only JSONL, see `eventlog.py`) — not part of `state.json` and not migrated
+- Price-watch state is persisted separately to `watches.json` (see `mythicbot/market/watchlist.py`)
+- Auction-snipe state is persisted separately to `snipes.json` (see `mythicbot/market/snipelist.py`)
+- Token sell-alert state is persisted separately to `token_watch.json` (see `mythicbot/market/tokenwatch.py`)
+- Assistant daily-usage counter is persisted separately to `assistant.json` (gitignored, see `mythicbot/assistant/usage.py`)
+- Event log is persisted separately to `events.jsonl` (gitignored, append-only JSONL, see `mythicbot/scheduling/eventlog.py`) — not part of `state.json` and not migrated
 
 ---
 
@@ -361,7 +364,7 @@ With the assistant enabled, allowlisted users can also trigger `!keys`, `!snipes
 
 ## Notable Conventions
 
-- **Circular imports** avoided via `TYPE_CHECKING` guards in raider.py/schedule.py
+- **Circular imports** avoided via `TYPE_CHECKING` guards in mythicbot/scheduling/raider.py/schedule.py
 - **Logging** — `config._configure_logging()` (called after `load_dotenv`) attaches a `RotatingFileHandler` (`LOG_FILE`, default `bot.log`, ~5 MB × 3 backups) plus a console handler to the root logger; `client.run(..., log_handler=None)` so discord.py doesn't add a duplicate. `LOG_LEVEL` env sets the level (default INFO). `bot.log*` is gitignored.
 - **Schedules keyed by message ID** — not UUIDs
 - **Timezones:** US only (Eastern/Central/Mountain/Pacific/Alaska/Hawaii), stored as string, loaded as ZoneInfo
@@ -371,7 +374,7 @@ With the assistant enabled, allowlisted users can also trigger `!keys`, `!snipes
 - **Changelog bullet prefix** uses `•` not `- ` — Discord renders `- ` as markdown list syntax, stripping the dash and adding commas when copied
 - **Changelog sections** — each version entry uses `### Improvements` and `### Bug Fixes` subsections; `_read_changelog` converts `###` headers to `**bold**` in the Discord post so sections are visible there too
 - **version.txt** is written by the bot after posting the changelog; never edit it manually to the new version or the post will be skipped
-- **BOT_VERSION coupling** — adding a new `## [x.y.z]` section to `CHANGELOG.md` also requires bumping `BOT_VERSION` in `config.py`, because that constant is what the Admin cog's `on_ready` compares against `version.txt` to decide whether to post. A new section with a stale `BOT_VERSION` is never announced to the guild
-- **Commands are cogs** — every `!command` is a `commands.Bot` prefix command in a cog under `cogs/` (prefix `!`, `help_command=None`, `case_insensitive=False`). Author/channel rules are `commands.check` gates in `cogs/_checks.py`. Unknown commands and failed gates are silent via `MyClient.on_command_error`; anything else is logged. `MyClient` has no `on_message`: `commands.Bot`'s default runs `process_commands`
+- **BOT_VERSION coupling** — adding a new `## [x.y.z]` section to `CHANGELOG.md` also requires bumping `BOT_VERSION` in `mythicbot/config.py`, because that constant is what the Admin cog's `on_ready` compares against `version.txt` to decide whether to post. A new section with a stale `BOT_VERSION` is never announced to the guild
+- **Commands are cogs** — every `!command` is a `commands.Bot` prefix command in a cog under `mythicbot/cogs/` (prefix `!`, `help_command=None`, `case_insensitive=False`). Author/channel rules are `commands.check` gates in `mythicbot/cogs/_checks.py`. Unknown commands and failed gates are silent via `MyClient.on_command_error`; anything else is logged. `MyClient` has no `on_message`: `commands.Bot`'s default runs `process_commands`
 - **Deliberate behavior deltas of the cog split** — (1) trailing text after an exact command is tolerated (`!keys foo` runs `!keys`); the converse also holds: former `startswith` matches such as `!gearauditX` / `!tokenalertX` no longer trigger, and argument-taking commands (`!watch`, `!snipe`, ...) with no arguments now answer with their usage text; (2) messages from other bots are ignored (`commands.Bot` default; previously only the bot's own); (3) discord.py's built-in help is disabled so `!help` keeps the bot's embed
 - **Claude output is untrusted** — the assistant never runs anything Claude names without `intent.validate` (command allowlist + arg rules) and, for writes, an owner Confirm; replies built from it use `AllowedMentions.none()` and the subprocess env never contains bot secrets

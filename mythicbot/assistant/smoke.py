@@ -18,7 +18,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-from assistant import claude_runner as cr
+from mythicbot.assistant import claude_runner as cr
 
 SCHEMA = {"type": "object", "properties": {"kind": {"type": "string", "enum": ["answer"]}, "text": {"type": "string"}},
           "required": ["kind", "text"], "additionalProperties": False}

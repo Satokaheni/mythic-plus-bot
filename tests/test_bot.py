@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 
 def _scheduling_cog(bot_module, **bot_attrs):
-    from cogs.scheduling import Scheduling
+    from mythicbot.cogs.scheduling import Scheduling
 
     cog = Scheduling.__new__(Scheduling)
     cog.bot = SimpleNamespace(**bot_attrs)
@@ -35,7 +35,7 @@ def test_run_deleted_during_dms_is_not_resurrected(bot_module, monkeypatch, make
     schedule = make_schedule(raider=make_raider(user_id=1, roles=["tank"]))
     healer = make_raider(user_id=2, roles=["healer"])
 
-    from state import BotState
+    from mythicbot.state import BotState
 
     state = BotState(raiders={}, schedules={schedule_id: schedule},
                             availability={bot_module.GREEN: [healer], bot_module.YELLOW: [], bot_module.RED: []},
@@ -58,7 +58,7 @@ def test_run_deleted_during_dms_is_not_resurrected(bot_module, monkeypatch, make
     async def no_sleep(_seconds):
         pass
 
-    monkeypatch.setattr("cogs.scheduling.asyncio.sleep", no_sleep)
+    monkeypatch.setattr("mythicbot.cogs.scheduling.asyncio.sleep", no_sleep)
 
     asyncio.run(cog.fill_remaining_spots(schedule_id))
 

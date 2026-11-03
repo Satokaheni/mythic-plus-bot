@@ -1,4 +1,4 @@
-"""Tests for utils.py — save/load state, deserialization, pickle migration."""
+"""Tests for storage.py — save/load state, deserialization, pickle migration."""
 
 import json
 import pickle
@@ -6,10 +6,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-import utils
-from raider import Raider
-from utils import GREEN, RED, YELLOW, _deserialize, load_state, save_state
-
+from mythicbot import storage
+from mythicbot.scheduling.raider import Raider
+from mythicbot.storage import GREEN, RED, YELLOW, _deserialize, load_state, save_state
 
 # ---------------------------------------------------------------------------
 # save_state / load_state
@@ -254,8 +253,24 @@ def test_migrate_from_pickle(tmp_path, monkeypatch, make_raider):
     assert (tmp_path / "state.json").exists()
 
 
+def test_migrate_from_pickle_written_before_the_package_move(tmp_path, monkeypatch, make_raider):
+    """A state.pkl from the old flat layout names its classes `raider.Raider`; it still migrates."""
+    monkeypatch.chdir(tmp_path)
+
+    raider = make_raider(user_id=1)
+    state = {"raiders": {1: raider}, "schedules": {}, "availability": {GREEN: [raider], YELLOW: [], RED: []},
+             "availability_message_id": 7}
+    legacy = pickle.dumps(state, protocol=0).replace(b"cmythicbot.scheduling.raider\n", b"craider\n")
+    assert b"craider\n" in legacy
+    (tmp_path / "state.pkl").write_bytes(legacy)
+
+    raiders_out, _, _, av_id_out, _, _ = load_state()
+
+    assert raiders_out[1].user_id == 1 and av_id_out == 7
+
+
 def test_load_state_corrupt_file_has_availability_pools(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "state.json").write_text("{not json", encoding="utf-8")
-    _, _, availability, _, _, _ = utils.load_state()
-    assert availability == {utils.GREEN: [], utils.YELLOW: [], utils.RED: []}
+    _, _, availability, _, _, _ = storage.load_state()
+    assert availability == {storage.GREEN: [], storage.YELLOW: [], storage.RED: []}

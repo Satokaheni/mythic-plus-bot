@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-from assistant.claude_runner import parse_command
+from mythicbot.assistant.claude_runner import parse_command
 
 
 def _configure_logging() -> None:

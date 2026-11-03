@@ -11,8 +11,8 @@ def _tomorrow_at(tz_name, hour):
 
 
 def test_finds_run_posted_by_someone_in_another_timezone(fresh_import, make_raider, make_schedule):
-    fresh_import("config")
-    from cogs.scheduling import _run_at
+    fresh_import("mythicbot.config")
+    from mythicbot.cogs.scheduling import _run_at
 
     central = make_raider(user_id=1, roles=["tank"], tz="US/Central")
     existing = make_schedule(raider=central, start_time=_tomorrow_at("US/Central", 20))
@@ -22,8 +22,8 @@ def test_finds_run_posted_by_someone_in_another_timezone(fresh_import, make_raid
 
 
 def test_same_wall_clock_in_another_timezone_is_a_different_run(fresh_import, make_raider, make_schedule):
-    fresh_import("config")
-    from cogs.scheduling import _run_at
+    fresh_import("mythicbot.config")
+    from mythicbot.cogs.scheduling import _run_at
 
     central = make_raider(user_id=1, roles=["tank"], tz="US/Central")
     existing = make_schedule(raider=central, start_time=_tomorrow_at("US/Central", 20))
@@ -32,8 +32,8 @@ def test_same_wall_clock_in_another_timezone_is_a_different_run(fresh_import, ma
 
 
 def test_matches_utc_instant_regardless_of_representation(fresh_import, make_raider, make_schedule):
-    fresh_import("config")
-    from cogs.scheduling import _run_at
+    fresh_import("mythicbot.config")
+    from mythicbot.cogs.scheduling import _run_at
 
     start = _tomorrow_at("US/Pacific", 18)
     existing = make_schedule(raider=make_raider(tz="US/Pacific"), start_time=start)

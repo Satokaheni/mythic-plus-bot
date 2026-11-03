@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from discord import Member
 
 if TYPE_CHECKING:
-    from schedule import Schedule
+    from mythicbot.scheduling.schedule import Schedule
 
 
 class Raider:

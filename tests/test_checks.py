@@ -18,7 +18,7 @@ def _predicate(decorator):
 
 
 def test_checks_mirror_todays_gates(bot_module):
-    from cogs import _checks
+    from mythicbot.cogs import _checks
 
     assert _predicate(_checks.is_banker())(_ctx(8))
     assert not _predicate(_checks.is_banker())(_ctx(7))

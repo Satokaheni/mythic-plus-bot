@@ -1,15 +1,15 @@
 from datetime import datetime, timezone
 
-import utils
-from state import BotState
-from utils import GREEN, RED, YELLOW
+from mythicbot import storage
+from mythicbot.state import BotState
+from mythicbot.storage import GREEN, RED, YELLOW
 
 
 def test_fresh_state_matches_load_state_defaults(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     s = BotState.load()
     assert (s.raiders, s.schedules, s.availability, s.availability_message_id, s.dm_map, s.dm_timestamps) == (
-        {}, {}, {utils.GREEN: [], utils.YELLOW: [], utils.RED: []}, 0, {}, {})
+        {}, {}, {storage.GREEN: [], storage.YELLOW: [], storage.RED: []}, 0, {}, {})
     assert s.role_mentions == {} and s.reminder_messages == {}
 
 
@@ -22,7 +22,7 @@ def test_botstate_round_trip_is_byte_identical(tmp_path, monkeypatch, make_raide
     sched.raider_signup(healer)
     healer.add_run(sched)
     sched.note = "bring flasks"
-    utils.save_state({1: tank, 2: healer}, {555: sched}, {GREEN: [tank], YELLOW: [healer], RED: []}, 777,
+    storage.save_state({1: tank, 2: healer}, {555: sched}, {GREEN: [tank], YELLOW: [healer], RED: []}, 777,
                      {9: {10: 555}}, {9: {10: datetime(2026, 1, 1, tzinfo=timezone.utc)}})
     before = (tmp_path / "state.json").read_bytes()
 

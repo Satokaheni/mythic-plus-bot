@@ -1196,7 +1196,7 @@ def doctor() -> int:
         try:
             await h.launch()
             pinned = [m for m in h.key.messages() if m.pinned and m.components]
-            import config as _c
+            from mythicbot import config as _c
 
             assistant_on = not h.client.get_cog("Assistant").disabled
             return (h.bot.CLIENT_ID == SENTINEL_TOKEN, bool(pinned), h.started_loops, sorted(h.client.cogs),

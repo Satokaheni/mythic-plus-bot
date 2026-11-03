@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
-from watchlist import format_gold
+from mythicbot.market.watchlist import format_gold
 
 logger = logging.getLogger("discord")
 

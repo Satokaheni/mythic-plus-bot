@@ -6,7 +6,7 @@ This directory is the maintained map of what a Discord user can do with the Myth
 
 - Drive the bot only through the offline harness: `python $H run <journey>` or `python $H script <scenario.py>`. Never run `python bot.py` and never load the repo `.env`; its `CLIENT_KEY` is the live production bot.
 - `python $H doctor` passes: sentinel token in use, key-request button pinned by `on_ready`, all 7 background loops intercepted.
-- Each run boots the bot (`MyClient`, a `commands.Bot` that loads the feature cogs in `cogs/`) in its own empty scratch data dir under `.verify/runs/` (no `state.json`, `events.jsonl`, `snipes.json`, `token_watch.json`, `watches.json`; `CHANGELOG.md` copied in). Nothing carries over between runs.
+- Each run boots the bot (`MyClient`, a `commands.Bot` that loads the feature cogs in `mythicbot/cogs/`) in its own empty scratch data dir under `.verify/runs/` (no `state.json`, `events.jsonl`, `snipes.json`, `token_watch.json`, `watches.json`; `CHANGELOG.md` copied in). Nothing carries over between runs.
 - After boot, `#availability` (`h.avail`) holds the pinned `v<BOT_VERSION>` changelog post and `#keys` (`h.key`) holds the pinned `CLICK TO CREATE A REQUEST` button.
 - Personas: `h.coordinator` (coordinator, in `ELEVATED_IDS`), `h.admin` (admin, in `ELEVATED_IDS`), `h.banker` (`BANKER_ID`), and `h.user("Name")` for any new, unregistered member. `h.user("Name", dms_open=False)` makes bot DMs raise `Forbidden`.
 - Game APIs (Blizzard, Undermine, Raider.io) are blocked unless the run passes `--network`.
@@ -63,7 +63,7 @@ The `command-gates` journey (permission gates across commands) also passes; it h
 - `!cleanup` and `!setup`.
 - DM outreach: `Scheduling.fill_remaining_spots` offers (sleeps an hour first, so never fires in a run), `retry_unanswered_dms`, the ✅/❌ offer reactions (`on_spot_offer_reaction`), and the full-run fill offer DM.
 - Off-role displacement (needs a run more than 8 hours out with an off-role holder).
-- Price watch: `!watch`, `!unwatch`, `!watches`, and `price_watch_check` (`cogs/pricewatch.py`, banker, Undermine API).
-- `!gearaudit` (`cogs/gear.py`, coordinator/admin, Blizzard API, `character_mappings.json`).
-- Background loops (each lives in its cog: `hourly_check` in `cogs/scheduling.py`, `weekly_avail_reset` in `cogs/availability.py`, `raiderio_harvest`/`forecast_preview` in `cogs/forecasting.py`): `hourly_check` (reminders, `run_completed` events, passed-run deletion), `weekly_avail_reset`, `raiderio_harvest`, `forecast_preview`, `auction_snipe_check` and `token_watch_check` alert DMs.
+- Price watch: `!watch`, `!unwatch`, `!watches`, and `price_watch_check` (`mythicbot/cogs/pricewatch.py`, banker, Undermine API).
+- `!gearaudit` (`mythicbot/cogs/gear.py`, coordinator/admin, Blizzard API, `character_mappings.json`).
+- Background loops (each lives in its cog: `hourly_check` in `mythicbot/cogs/scheduling.py`, `weekly_avail_reset` in `mythicbot/cogs/availability.py`, `raiderio_harvest`/`forecast_preview` in `mythicbot/cogs/forecasting.py`): `hourly_check` (reminders, `run_completed` events, passed-run deletion), `weekly_avail_reset`, `raiderio_harvest`, `forecast_preview`, `auction_snipe_check` and `token_watch_check` alert DMs.
 - Changelog announce on version bump (exercised by every boot, not asserted by a journey).

@@ -4,8 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from raider import Raider
-
+from mythicbot.scheduling.raider import Raider
 
 # ---------------------------------------------------------------------------
 # check_availability

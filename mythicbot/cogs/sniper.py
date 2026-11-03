@@ -6,9 +6,9 @@ from datetime import datetime, timedelta, timezone
 import aiohttp
 from discord.ext import commands, tasks
 
-import blizzard
-import config
-import snipelist as snipelist_mod
+from mythicbot import config
+from mythicbot.market import blizzard
+from mythicbot.market import snipelist as snipelist_mod
 
 logger = logging.getLogger("discord")
 

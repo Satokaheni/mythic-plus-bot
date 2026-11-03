@@ -11,7 +11,7 @@ dependencies = [
     "discord.py>=2.0.0",
     "python-dotenv>=1.0.0",
     # Bundled IANA timezone database — zoneinfo falls back to it when the OS tz data
-    # lacks a key (e.g. the US/* aliases on minimal Raspberry Pi / container images).
+    # lacks a key (e.g. the US/* aliases on minimal container images).
     "tzdata>=2024.1",
     # Sync HTTP for the standalone loot council CLI (the bot itself uses aiohttp).
     "requests>=2.31.0",
@@ -26,15 +26,16 @@ dev = [
     "freezegun>=1.0",
 ]
 
-# The bot is a flat collection of top-level modules (no package dir), so list
-# them explicitly — otherwise setuptools' flat-layout auto-discovery refuses to
-# build with "Multiple top-level modules discovered".
+# bot.py is the entry point; everything else lives in the mythicbot package (plus the
+# standalone lootcouncil CLI).
 [tool.setuptools]
-py-modules = ["bot", "raider", "schedule", "utils", "views", "undermine", "watchlist", "eventlog", "raiderio", "forecast", "loot", "config", "messages", "state"]
-packages = ["lootcouncil", "cogs", "assistant"]
+py-modules = ["bot"]
+
+[tool.setuptools.packages.find]
+include = ["mythicbot*", "lootcouncil*"]
 
 [tool.setuptools.package-data]
-assistant = ["system_prompt.md"]
+"mythicbot.assistant" = ["system_prompt.md"]
 
 [tool.black]
 line-length = 120
@@ -49,7 +50,7 @@ select = ["E", "F", "W", "I"]
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["bot", "raider", "schedule", "views", "utils", "undermine", "watchlist", "lootcouncil", "config", "messages", "state", "cogs", "assistant"]
+known-first-party = ["bot", "mythicbot", "lootcouncil"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

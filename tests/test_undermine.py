@@ -2,7 +2,7 @@
 
 import asyncio
 
-from undermine import NowResult, _get_json, _parse_daily, _parse_now
+from mythicbot.market.undermine import NowResult, _get_json, _parse_daily, _parse_now
 
 
 def test_parse_now_extracts_price_and_quantity():
@@ -99,18 +99,18 @@ def test_get_json_returns_none_on_bad_json():
 def test_api_key_read_lazily(monkeypatch):
     # bot.py imports undermine before calling load_dotenv(), so the key must
     # be read at call time, not captured as a module-level global at import time.
-    import undermine
+    from mythicbot.market import undermine
     monkeypatch.setenv("UNDERMINE_API_KEY", "LAZY123")
     assert undermine._api_key() == "LAZY123"
 
 
 def test_region_defaults_to_us(monkeypatch):
-    import undermine
+    from mythicbot.market import undermine
     monkeypatch.delenv("UNDERMINE_REGION", raising=False)
     assert undermine._region() == "us"
 
 
 def test_region_read_lazily(monkeypatch):
-    import undermine
+    from mythicbot.market import undermine
     monkeypatch.setenv("UNDERMINE_REGION", "eu")
     assert undermine._region() == "eu"

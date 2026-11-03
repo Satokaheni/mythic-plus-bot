@@ -7,11 +7,10 @@ import aiohttp
 import discord
 from discord.ext import commands, tasks
 
-import config
-import undermine
-import watchlist
-from cogs._checks import is_banker
-from watchlist import Watchlist
+from mythicbot import config
+from mythicbot.cogs._checks import is_banker
+from mythicbot.market import undermine, watchlist
+from mythicbot.market.watchlist import Watchlist
 
 logger = logging.getLogger("discord")
 

@@ -4,7 +4,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from assistant import smoke
+from mythicbot.assistant import smoke
 
 FAKE = Path(__file__).resolve().parent.parent / ".claude/skills/verify-mythic-plus-bot/scripts/fake_claude.py"
 

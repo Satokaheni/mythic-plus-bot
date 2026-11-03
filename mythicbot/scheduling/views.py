@@ -9,8 +9,8 @@ import discord
 
 if TYPE_CHECKING:
     from bot import MyClient
-    from raider import Raider
-    from schedule import Schedule
+    from mythicbot.scheduling.raider import Raider
+    from mythicbot.scheduling.schedule import Schedule
 
 logger = getLogger("discord")
 

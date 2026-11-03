@@ -8,10 +8,9 @@ import aiohttp
 import discord
 from discord.ext import commands
 
-import config
-import gearaudit
-import raiderio
-from cogs._checks import is_elevated
+from mythicbot import config
+from mythicbot.cogs._checks import is_elevated
+from mythicbot.guild import gearaudit, raiderio
 
 logger = logging.getLogger("discord")
 

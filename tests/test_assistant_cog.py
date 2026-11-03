@@ -11,7 +11,7 @@ import discord
 import pytest
 from discord.ext import commands, tasks
 
-from assistant.claude_runner import RunResult
+from mythicbot.assistant.claude_runner import RunResult
 
 OWNER, BOT = 5, 99
 ANSWER = {"kind": "answer", "text": "pong"}
@@ -44,7 +44,7 @@ def cog_and_calls(fresh_import, monkeypatch, tmp_path):
     monkeypatch.setenv("ASSISTANT_DAILY_CAP", "2")
     monkeypatch.setenv("ASSISTANT_WORK_DIR", str(tmp_path / "work"))
     monkeypatch.setenv("ASSISTANT_CONFIG_DIR", str(tmp_path / "config"))
-    mod = fresh_import("cogs.assistant")
+    mod = fresh_import("mythicbot.cogs.assistant")
     calls, results = [], []
 
     async def fake_run_claude(prompt, **kwargs):
@@ -152,8 +152,8 @@ def boot(fresh_import, monkeypatch, tmp_path):
 def test_every_assistant_command_resolves_on_the_real_bot(boot):
     bot, _boot = boot
     client = asyncio.run(_boot())
-    intent = importlib.import_module("assistant.intent")
-    cogs = importlib.import_module("cogs")
+    intent = importlib.import_module("mythicbot.assistant.intent")
+    cogs = importlib.import_module("mythicbot.cogs")
 
     assert len(client.cogs) == len(cogs.EXTENSIONS)
     assert [name for name in intent.USAGE if client.get_command(name) is None] == []
@@ -162,9 +162,9 @@ def test_every_assistant_command_resolves_on_the_real_bot(boot):
 
 def test_unknown_assistant_command_disables_the_assistant_not_the_bot(boot, monkeypatch, caplog):
     bot, _boot = boot
-    intent = importlib.import_module("assistant.intent")
+    intent = importlib.import_module("mythicbot.assistant.intent")
     monkeypatch.setattr(intent, "USAGE", {**intent.USAGE, "renamedaway": "!renamedaway — gone"})
-    cogs = importlib.import_module("cogs")
+    cogs = importlib.import_module("mythicbot.cogs")
 
     with caplog.at_level(logging.ERROR):
         client = asyncio.run(_boot())
@@ -185,7 +185,7 @@ def test_unknown_assistant_command_disables_the_assistant_not_the_bot(boot, monk
 
 
 def cog_module():
-    return importlib.import_module("cogs.assistant")
+    return importlib.import_module("mythicbot.cogs.assistant")
 
 
 def _load(mod, monkeypatch, work_dir, config_dir):

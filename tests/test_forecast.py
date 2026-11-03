@@ -4,7 +4,15 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-from forecast import Obs, can_field_team, format_preview, observations, predict, rank_slots, select_team
+from mythicbot.scheduling.forecast import (
+    Obs,
+    can_field_team,
+    format_preview,
+    observations,
+    predict,
+    rank_slots,
+    select_team,
+)
 
 CST = ZoneInfo("America/Chicago")
 NOW = datetime(2026, 7, 9, 12, 0, tzinfo=timezone.utc)
@@ -60,12 +68,12 @@ def _obs(weekday, block, age_weeks, sign):
 
 
 def test_predict_no_data_returns_base_prior():
-    from forecast import BASE_PRIOR
+    from mythicbot.scheduling.forecast import BASE_PRIOR
     assert predict([], 2, 9) == BASE_PRIOR
 
 
 def test_predict_positives_score_above_prior():
-    from forecast import BASE_PRIOR
+    from mythicbot.scheduling.forecast import BASE_PRIOR
     p = predict([_obs(2, 9, 0.0, 1)] * 3, 2, 9)   # 3.3/5 = 0.66
     assert p > 0.6 and p > BASE_PRIOR
 
@@ -92,7 +100,7 @@ def test_predict_recency_decay_old_positive_weaker():
 def test_predict_empty_block_stays_at_prior_despite_other_activity():
     # The anti-saturation property: heavy play in a DIFFERENT block must NOT lift
     # an empty block above the base prior (the old per-person prior did, causing saturation).
-    from forecast import BASE_PRIOR
+    from mythicbot.scheduling.forecast import BASE_PRIOR
     assert predict([_obs(2, 10, 0.0, 1)] * 5, 2, 5) == BASE_PRIOR
 
 

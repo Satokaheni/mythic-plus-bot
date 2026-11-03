@@ -6,10 +6,10 @@ from types import SimpleNamespace
 
 def test_registered_raider_reaction_persists_pool_change(fresh_import, make_raider, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # eventlog writes events.jsonl relative to cwd
-    config = fresh_import("config")
-    from cogs.availability import Availability
-    from state import BotState
-    from utils import GREEN, RED, YELLOW
+    config = fresh_import("mythicbot.config")
+    from mythicbot.cogs.availability import Availability
+    from mythicbot.state import BotState
+    from mythicbot.storage import GREEN, RED, YELLOW
 
     raider = make_raider(user_id=5)
     state = BotState(
@@ -53,9 +53,9 @@ class _AvailChannel:
 
 
 def test_posting_availability_saves_the_new_message_id(fresh_import):
-    config = fresh_import("config")
-    from cogs.availability import Availability
-    from state import BotState
+    config = fresh_import("mythicbot.config")
+    from mythicbot.cogs.availability import Availability
+    from mythicbot.state import BotState
 
     state = BotState()
     saved_ids = []
@@ -81,10 +81,10 @@ def test_registration_finishing_after_another_registration_keeps_the_first_recor
 ):
     """The class/role form waits minutes; if the user registered another way meanwhile, keep that record."""
     monkeypatch.chdir(tmp_path)
-    config = fresh_import("config")
-    import cogs.availability as availability_mod
-    from state import BotState
-    from utils import GREEN, RED, YELLOW
+    config = fresh_import("mythicbot.config")
+    from mythicbot.cogs import availability as availability_mod
+    from mythicbot.state import BotState
+    from mythicbot.storage import GREEN, RED, YELLOW
 
     first = make_raider(user_id=5, roles=["tank"], name="TestUser")
     seated_in = make_schedule(raider=first)

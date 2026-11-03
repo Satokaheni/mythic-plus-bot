@@ -2,7 +2,7 @@
 
 import json
 
-from snipelist import (
+from mythicbot.market.snipelist import (
     PET_ITEM_ID,
     AlertPlan,
     Snipe,

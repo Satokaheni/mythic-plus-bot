@@ -94,8 +94,8 @@ def load_state() -> Tuple[
 
 def _deserialize(data: dict):
     """Reconstruct all objects from a JSON state dict."""
-    from raider import Raider
-    from schedule import Schedule
+    from mythicbot.scheduling.raider import Raider
+    from mythicbot.scheduling.schedule import Schedule
 
     # Pass 1 — create all Raider objects (runs wired up in pass 3)
     raiders: Dict[int, Any] = {}
@@ -148,11 +148,20 @@ def _deserialize(data: dict):
     return raiders, schedules, availability, availability_message_id, dm_map, dm_timestamps
 
 
+class _LegacyUnpickler(pickle.Unpickler):
+    """state.pkl predates the mythicbot package: map its top-level module names to the new homes."""
+
+    _MOVED = {"raider": "mythicbot.scheduling.raider", "schedule": "mythicbot.scheduling.schedule"}
+
+    def find_class(self, module, name):
+        return super().find_class(self._MOVED.get(module, module), name)
+
+
 def _migrate_from_pickle():
     """Load from legacy state.pkl and immediately re-save as state.json."""
     try:
         with open("state.pkl", "rb") as f:
-            data = pickle.load(f)
+            data = _LegacyUnpickler(f).load()
 
         raiders = data["raiders"]
         schedules = data["schedules"]

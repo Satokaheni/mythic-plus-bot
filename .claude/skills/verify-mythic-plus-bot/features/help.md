@@ -27,5 +27,5 @@ Preconditions:
 
 - The command must be exactly `!help` or `!tools`. `!help scheduling` or a trailing space is ignored silently.
 - The command message is not deleted, unlike `!avail`, `!key`, and banker commands.
-- The embed is static text. It can drift from the real handlers (it lists `!watch <id1> <id2> …` without per-item `-x`). Check a command against its `@commands.command` handler in the owning cog (`cogs/`), not against the help text; the help embed itself is `Admin.cmd_help` in `cogs/admin.py`.
+- The embed is static text. It can drift from the real handlers (it lists `!watch <id1> <id2> …` without per-item `-x`). Check a command against its `@commands.command` handler in the owning cog (`mythicbot/cogs/`), not against the help text; the help embed itself is `Admin.cmd_help` in `mythicbot/cogs/admin.py`.
 - The embed must stay within Discord's limits (25 fields, 1024 per field, 6000 total). The harness rejects an oversized embed with `HTTPException 400`, so a long new help field fails this journey.

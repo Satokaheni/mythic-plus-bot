@@ -5,9 +5,8 @@ import logging
 import discord
 from discord.ext import commands
 
-import blizzard
-import cogs
-from config import (  # noqa: F401  (re-exported for the harness and tests)
+from mythicbot import cogs
+from mythicbot.config import (  # noqa: F401  (re-exported for the harness and tests)
     _CST,
     ADMINS,
     AVAIL_CHANNEL_ID,
@@ -30,7 +29,8 @@ from config import (  # noqa: F401  (re-exported for the harness and tests)
     TANK_ID,
     TOKEN_POLL_MINUTES,
 )
-from messages import (  # noqa: F401
+from mythicbot.market import blizzard
+from mythicbot.messages import (  # noqa: F401
     AVAILABILITY_MESSAGE,
     _dm_reminder,
     _dm_spot_available,
@@ -38,14 +38,14 @@ from messages import (  # noqa: F401
     _read_last_version,
     _write_version,
 )
-from raider import Raider
-from schedule import Schedule
-from state import BotState
-from utils import GREEN, RED, YELLOW  # noqa: F401  (re-exported for tests)
-from views import (
+from mythicbot.scheduling.raider import Raider
+from mythicbot.scheduling.schedule import Schedule
+from mythicbot.scheduling.views import (
     KeyRequestButtonView,
     ScheduleButtonView,
 )
+from mythicbot.state import BotState
+from mythicbot.storage import GREEN, RED, YELLOW  # noqa: F401  (re-exported for tests)
 
 logger = logging.getLogger("discord")
 

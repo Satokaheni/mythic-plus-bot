@@ -6,10 +6,9 @@ import aiohttp
 import discord
 from discord.ext import commands, tasks
 
-import config
-import tokenwatch
-import watchlist
-from cogs._checks import is_banker
+from mythicbot import config
+from mythicbot.cogs._checks import is_banker
+from mythicbot.market import tokenwatch, watchlist
 
 logger = logging.getLogger("discord")
 

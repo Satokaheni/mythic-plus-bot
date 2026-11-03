@@ -58,7 +58,7 @@ def _bot(schedule, raiders):
     async def notify_promoted(raider, _schedule):
         promoted.append(raider)
 
-    from state import BotState
+    from mythicbot.state import BotState
 
     state = BotState(schedules={MSG_ID: schedule}, raiders={r.user_id: r for r in raiders})
     state.save = lambda: saves.append(1)
@@ -90,7 +90,7 @@ def roster(make_raider, make_schedule):
 
 
 def test_f2_sign_up_resuming_after_raider_was_seated_elsewhere(roster):
-    from views import ScheduleButtonView
+    from mythicbot.scheduling.views import ScheduleButtonView
 
     schedule, t, h = roster
 
@@ -119,7 +119,7 @@ def test_f2_dm_offer_fill_accept_after_raider_was_seated_elsewhere(
     bot_module, make_raider, make_full_schedule, monkeypatch, tmp_path
 ):
     monkeypatch.chdir(tmp_path)  # eventlog writes events.jsonl relative to cwd
-    from cogs.scheduling import Scheduling
+    from mythicbot.cogs.scheduling import Scheduling
 
     raiders = [
         make_raider(user_id=1, roles=["tank"], name="Tank"),
@@ -171,7 +171,7 @@ def test_f2_dm_offer_fill_accept_after_raider_was_seated_elsewhere(
 
 
 def test_f2_staff_add_of_existing_member_is_refused(roster):
-    from views import _apply_manage_add
+    from mythicbot.scheduling.views import _apply_manage_add
 
     schedule, t, h = roster
     bot, saves, _ = _bot(schedule, [t, h])
@@ -191,7 +191,7 @@ def test_f2_staff_add_of_existing_member_is_refused(roster):
 
 
 def _change_role_target(raider, schedule, bot, key_msg):
-    from views import ChangeRoleTargetView
+    from mythicbot.scheduling.views import ChangeRoleTargetView
 
     return ChangeRoleTargetView(raider, schedule, bot, key_msg).children[0]
 
@@ -232,7 +232,7 @@ def test_f4_change_role_into_role_taken_since_the_menu_opened_is_refused(roster)
 
 
 def test_f4_change_role_with_no_open_roles_says_so(make_raider, make_full_schedule):
-    from views import ChangeRaiderRoleView
+    from mythicbot.scheduling.views import ChangeRaiderRoleView
 
     schedule = make_full_schedule()
     tank = schedule.team["tank"]
@@ -274,7 +274,7 @@ def test_f4_change_role_moves_raider_and_promotes_queued_player_for_freed_seat(r
 
 
 def test_f3_raider_moved_outside_their_roles_can_leave(roster):
-    from views import ScheduleButtonView
+    from mythicbot.scheduling.views import ScheduleButtonView
 
     schedule, t, h = roster
     d_bot, _, _ = _bot(schedule, [t, h])
@@ -297,8 +297,8 @@ def test_f3_raider_moved_outside_their_roles_can_leave(roster):
 
 
 def test_welcome_signup_of_existing_member_displaces_nobody(make_raider, make_schedule, monkeypatch):
-    import views
-    from views import ScheduleButtonView
+    from mythicbot.scheduling import views
+    from mythicbot.scheduling.views import ScheduleButtonView
 
     off_roler = make_raider(user_id=1, roles=["dps"], name="Off")
     schedule = make_schedule(raider=off_roler)  # start_time is 24h out, beyond the 8h displacement cutoff
@@ -349,7 +349,7 @@ def test_welcome_signup_of_existing_member_displaces_nobody(make_raider, make_sc
 def test_dm_offer_accept_by_existing_member_displaces_nobody(bot_module, make_raider, make_schedule, monkeypatch,
                                                              tmp_path):
     monkeypatch.chdir(tmp_path)  # eventlog writes events.jsonl relative to cwd
-    from cogs.scheduling import Scheduling
+    from mythicbot.cogs.scheduling import Scheduling
 
     off_roler = make_raider(user_id=1, roles=["dps"], name="Off")
     schedule = make_schedule(raider=off_roler)  # start_time is 24h out, beyond the 8h displacement cutoff

@@ -101,7 +101,7 @@ Off unless enabled. It shells out to the Claude Code CLI, so the host needs it i
    ASSISTANT_USER_IDS=<your Discord user ID>[,<more IDs>]
    ```
    Optional: `CLAUDE_BIN` (CLI path, default `claude`), `ASSISTANT_MODEL` (default `haiku`), `ASSISTANT_TIMEOUT` (seconds, default `60`), `ASSISTANT_DAILY_CAP` (calls per day, default `100`), `ASSISTANT_WORK_DIR`, `ASSISTANT_CONFIG_DIR`.
-4. Check it works: `python -m assistant.smoke --env-file .env` (reads only the token; exits 0 when the CLI answers with no tools beyond StructuredOutput and no MCP servers loaded).
+4. Check it works: `python -m mythicbot.assistant.smoke --env-file .env` (reads only the token; exits 0 when the CLI answers with no tools beyond StructuredOutput and no MCP servers loaded).
 
 Usage counts against your Claude plan's allowance; the daily cap guards against runaway use. The counter lives in `assistant.json`.
 
@@ -226,34 +226,37 @@ The bot learns **when your raiders actually play** and predicts the best time fo
 
 ```
 mythic-plus-bot/
-├── bot.py              # Thin entry point: MyClient(commands.Bot), startup, cog loading
-├── config.py           # Env-derived constants, logging setup
-├── messages.py         # Message builders, changelog/version helpers
-├── state.py            # BotState — persisted bot state
-├── cogs/               # Feature cogs (each owns its commands, listeners, and loops)
-│   ├── _checks.py      #   command gates (banker, elevated, channel)
-│   ├── scheduling.py   #   !key !keys !modify, DM offers, fill/notify, hourly_check
-│   ├── availability.py #   !avail, reaction signups, weekly_avail_reset
-│   ├── admin.py        #   !cleanup !setup !help, on_ready work
-│   ├── forecasting.py  #   raiderio_harvest, forecast_preview
-│   ├── pricewatch.py   #   !watch !unwatch !watches
-│   ├── wowtoken.py     #   !token !tokenalert
-│   ├── sniper.py       #   !snipe !snipepet !unsnipe !snipes
-│   ├── gear.py         #   !gearaudit
-│   └── assistant.py    #   plain-language assistant (uses assistant/)
-├── assistant/          # Headless-Claude runner, intent validation, daily cap, smoke check
-├── raider.py           # Raider class representing a player
-├── schedule.py         # Schedule class for raid team composition
-├── utils.py            # Utility functions and constants
-├── views.py            # Discord UI components (buttons, dropdowns, modals, views)
-├── undermine.py        # Async Undermine Exchange API client
-├── watchlist.py        # Watch/Watchlist state, buy-signal detection, formatters
-├── blizzard.py         # Blizzard Game Data Auction House API client
-├── snipelist.py        # Snipe/Snipelist state, per-realm detection, alert planning
-├── gearaudit.py        # Gear audit rules — enchant/socket/gem findings and report formatting
-├── eventlog.py         # Append-only availability/attendance event log (forecasting data)
-├── raiderio.py         # Raider.io client + daily harvester seeding raiderio_run events
-├── forecast.py         # Availability predictor + roster/slot optimizer + dry-run preview
+├── bot.py              # Entry point (run from the repo root): MyClient(commands.Bot), startup, cog loading
+├── mythicbot/
+│   ├── config.py       # Env-derived constants, logging setup
+│   ├── messages.py     # Message builders, changelog/version helpers
+│   ├── state.py        # BotState — persisted bot state
+│   ├── storage.py      # state.json save/load, constants, class/role dicts
+│   ├── scheduling/     # Mythic+ runs
+│   │   ├── schedule.py #   Schedule: team slots, signup/removal, embed
+│   │   ├── raider.py   #   Raider: player profile, availability, run tracking
+│   │   ├── views.py    #   Discord UI (buttons, dropdowns, modals)
+│   │   ├── eventlog.py #   append-only availability/attendance log (forecasting data)
+│   │   └── forecast.py #   availability predictor + roster/slot optimizer
+│   ├── market/         # Auction house and token
+│   │   ├── undermine.py   blizzard.py     # API clients
+│   │   ├── watchlist.py   snipelist.py    # price-watch / auction-snipe state and signals
+│   │   └── tokenwatch.py                  # WoW Token sell alert
+│   ├── guild/          # Raider.io harvester, gear audit rules
+│   ├── cogs/           # Feature cogs (each owns its commands, listeners, and loops)
+│   │   ├── _checks.py      # command gates (banker, elevated, channel)
+│   │   ├── scheduling.py   # !key !keys !modify, DM offers, fill/notify, hourly_check
+│   │   ├── availability.py # !avail, reaction signups, weekly_avail_reset
+│   │   ├── admin.py        # !cleanup !setup !help, on_ready work
+│   │   ├── forecasting.py  # raiderio_harvest, forecast_preview
+│   │   ├── pricewatch.py   # !watch !unwatch !watches
+│   │   ├── wowtoken.py     # !token !tokenalert
+│   │   ├── sniper.py       # !snipe !snipepet !unsnipe !snipes
+│   │   ├── gear.py         # !gearaudit
+│   │   └── assistant.py    # plain-language assistant (uses mythicbot/assistant/)
+│   └── assistant/      # Headless-Claude runner, intent validation, daily cap, smoke check
+├── lootcouncil/        # Standalone loot council CLI (python -m lootcouncil <itemId>)
+├── tests/              # pytest suite
 ├── .claude/skills/verify-mythic-plus-bot/  # Offline harness for end-to-end verification
 ├── state.json          # Persisted bot state (auto-generated)
 ├── watches.json        # Persisted price-watch state (auto-generated)

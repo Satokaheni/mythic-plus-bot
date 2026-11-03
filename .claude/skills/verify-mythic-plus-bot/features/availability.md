@@ -8,8 +8,8 @@ A coordinator or admin posts the weekly availability message in `#availability`;
 - `avail-register` an unregistered reaction DMs the class/role/timezone form and registers the member on `Submit`.
 - `avail-pool` a reaction puts the raider in exactly one of the 🟢/🟡/🔴 pools; a new reaction moves them.
 - `avail-event` each pool change appends an `avail_reaction` event (`user_id`, `emoji`, `tz`, `week_of`) to `events.jsonl`.
-- `avail-offers` a 🟢/🟡 reaction may DM offers for unfilled runs posted over an hour ago (`Scheduling.new_availability_signup_fill_schedule` in `cogs/scheduling.py`).
-- `avail-weekly` `Availability.weekly_avail_reset` (`cogs/availability.py`; Tuesdays, noon CST) deletes the old post, empties the pools, and posts a fresh one.
+- `avail-offers` a 🟢/🟡 reaction may DM offers for unfilled runs posted over an hour ago (`Scheduling.new_availability_signup_fill_schedule` in `mythicbot/cogs/scheduling.py`).
+- `avail-weekly` `Availability.weekly_avail_reset` (`mythicbot/cogs/availability.py`; Tuesdays, noon CST) deletes the old post, empties the pools, and posts a fresh one.
 
 ## How to get to it (user POV)
 
@@ -39,7 +39,7 @@ Preconditions:
 - **Fixed in 1.10.1: fresh install and damaged state.** `utils.load_state` now returns `{🟢: [], 🟡: [], 🔴: []}` on a missing, corrupt, or unmigratable state file, so the first reaction on a fresh install works: the pools exist from boot, a new member's DM form registers them into the pool they reacted with, and `state.json` is written. The `availability-signup` journey covers exactly this path and passes; do not weaken it.
 - `!avail` itself (`Availability.cmd_avail` → `_post_avail_message`) never calls `state.save()`, so `availability_message_id` is persisted only by the next state write. A restart right after `!avail` forgets which post is current, and reactions on it are then ignored.
 - `!avail` only works in `#availability`. In `#keys` it is deleted silently; elsewhere it is ignored.
-- **Fixed in 1.10.1: a registered raider's pool change is persisted.** The registered branch of `Availability.on_availability_reaction` (`cogs/availability.py`) now calls `state.save()` after moving the raider, so `state.json` shows the new pool immediately and a restart keeps it. The last check of `availability-signup` ("re-reacting 🔴 moves Alice…") reads `state.json` and passes.
+- **Fixed in 1.10.1: a registered raider's pool change is persisted.** The registered branch of `Availability.on_availability_reaction` (`mythicbot/cogs/availability.py`) now calls `state.save()` after moving the raider, so `state.json` shows the new pool immediately and a restart keeps it. The last check of `availability-signup` ("re-reacting 🔴 moves Alice…") reads `state.json` and passes.
 - Removing a reaction does nothing. Only adding a reaction changes pools.
 - The 🔴 tier never triggers offers, and offers skip runs posted less than an hour ago, so `avail-offers` never fires in a fresh run without an hour-old schedule.
 - `weekly_avail_reset` returns early on every day except Tuesday in `America/Chicago`. A tick proves nothing on other days.

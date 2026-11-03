@@ -10,14 +10,14 @@ from zoneinfo import ZoneInfo
 import discord
 from discord.ext import commands, tasks
 
-import config
-import eventlog
-from cogs._checks import in_channels
-from messages import _dm_reminder, _dm_spot_available
-from raider import Raider
-from schedule import Schedule
-from utils import GREEN, RED, YELLOW
-from views import KeyRequestView, PrePostAddRaiderView, RoleSelectView, WoWSelectionView
+from mythicbot import config
+from mythicbot.cogs._checks import in_channels
+from mythicbot.messages import _dm_reminder, _dm_spot_available
+from mythicbot.scheduling import eventlog
+from mythicbot.scheduling.raider import Raider
+from mythicbot.scheduling.schedule import Schedule
+from mythicbot.scheduling.views import KeyRequestView, PrePostAddRaiderView, RoleSelectView, WoWSelectionView
+from mythicbot.storage import GREEN, RED, YELLOW
 
 logger = logging.getLogger("discord")
 

@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
-from blizzard import EquippedItem
+from mythicbot.market.blizzard import EquippedItem
 
 # Slots that take a permanent enchant this expansion. Measured against the live roster on
 # 2026-08-30 (30 characters): CHEST 30/30, FINGER_2 29/30, MAIN_HAND 29/30, FINGER_1 28/30,

@@ -21,8 +21,8 @@ sys.path.insert(0, REPO)
 
 import discord  # noqa: E402  (schedule.py / raider.py import it)
 
-from raider import Raider  # noqa: E402
-from schedule import Schedule  # noqa: E402
+from mythicbot.scheduling.raider import Raider  # noqa: E402
+from mythicbot.scheduling.schedule import Schedule  # noqa: E402
 
 EXPECTED_PYTHON = (3, 10)
 EXPECTED_DISCORD = "2.3.1"

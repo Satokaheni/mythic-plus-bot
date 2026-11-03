@@ -7,7 +7,7 @@ import pytest
 
 
 def _help_field_names(fresh_import):
-    admin = fresh_import("cogs.admin")
+    admin = fresh_import("mythicbot.cogs.admin")
     sent = []
 
     async def send(content=None, **kwargs):

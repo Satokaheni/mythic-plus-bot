@@ -11,15 +11,15 @@ from typing import Optional
 import discord
 from discord.ext import commands
 
-import config
-from assistant import claude_runner, intent
-from assistant.usage import DailyUsage
+from mythicbot import config
+from mythicbot.assistant import claude_runner, intent
+from mythicbot.assistant.usage import DailyUsage
 
 logger = logging.getLogger("discord")
 FAILURE = "I couldn't work that out — try `!help`."
 NO_MENTIONS = discord.AllowedMentions.none()
 MAX_ANSWER_CHUNKS = 3
-_REPO_DIR = Path(__file__).resolve().parents[1]
+_REPO_DIR = Path(__file__).resolve().parents[2]
 
 _HANDLED_TYPES = (discord.MessageType.default, discord.MessageType.reply)
 

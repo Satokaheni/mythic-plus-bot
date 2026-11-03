@@ -2,7 +2,7 @@
 
 from discord.ext import commands
 
-import config
+from mythicbot import config
 
 
 def is_banker():
