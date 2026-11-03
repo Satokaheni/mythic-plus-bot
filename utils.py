@@ -118,7 +118,13 @@ def _deserialize(data: dict):
     # If a raider appears in a schedule's members list but is missing from their
     # current_runs (e.g. due to a prior bug that reset current_runs to []), add
     # them back so both sides of the relationship are consistent.
+    # A raider holding a seat but missing from members is a ghost seat from pre-F3 state (Remove
+    # dropped an off-role raider from members but left the seat): make them a member again.
     for schedule in schedules.values():
+        team = schedule.team
+        for raider in [team["tank"], team["healer"], *team["dps"], *team["fill"]]:
+            if raider is not None and raider not in schedule.members:
+                schedule.members.append(raider)
         for raider in schedule.members:
             raider.current_runs.add(schedule)
 

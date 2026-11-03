@@ -299,7 +299,7 @@ def _usage_count(h):
 
 
 def _claude_calls(h):
-    path = h.data_dir / "assistant-work" / "fake_claude_calls.jsonl"
+    path = h.assistant_dir / "work" / "fake_claude_calls.jsonl"
     return [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
 
 
@@ -356,11 +356,15 @@ async def assistant(h):
     h.check("read command runs without a confirm prompt",
             not any("I'll run" in (e.get("content") or "") for e in h.world.events[before:]))
 
+    before, watches = len(h.world.events), h.state_file("watches.json")
     await h.say(other, "watch item 241326", "dm")
-    ask = await h.wait_for(other, "I'll run `!watch 241326`")
-    await h.click(other, ask, "Confirm")
     await h.wait_for(other, "don't have access to `!watch`")
-    h.check("gates follow the Discord author, not Claude", h.state_file("watches.json") in (None, {}, []))
+    await h.settle()
+    acts = [e for e in _acts(h, before) if e["kind"] != "typing"]
+    h.check("a gated write is refused before any confirm prompt: the access reply is the only act",
+            [e["kind"] for e in acts] == ["send"] and "I'll run" not in (acts[0].get("content") or ""), acts)
+    h.check("gates follow the Discord author, not Claude",
+            h.state_file("watches.json") == watches and watches in (None, {}, []))
 
     await h.say(owner, "make a run thursday", "dm")
     h.check("key request opens the DM flow", bool(await h.wait_for(owner, "Before scheduling a key")))
@@ -388,6 +392,11 @@ async def assistant(h):
     prompt_files = [c["argv"][c["argv"].index("--system-prompt-file") + 1] for c in calls]
     h.check("--system-prompt-file is an absolute path that exists (claude runs with cwd=work dir)",
             all(Path(f).is_absolute() and Path(f).is_file() for f in prompt_files), sorted(set(prompt_files)))
+    repo = Path(__file__).resolve().parents[4]
+    h.check("claude's work and config dirs are outside the repo (no CLAUDE.md or project settings reach it)",
+            all(Path(f).parent == h.assistant_dir / "config" for f in prompt_files)
+            and repo not in h.assistant_dir.parents and (h.assistant_dir / "work").is_dir(),
+            str(h.assistant_dir))
     h.check("the bot mention never reaches the prompt", all(bot not in c["prompt"] for c in calls))
     h.check("no errors logged", not [e for e in h.world.events if e["kind"] == "log_error"])
 

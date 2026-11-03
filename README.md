@@ -101,7 +101,7 @@ Off unless enabled. It shells out to the Claude Code CLI, so the host needs it i
    ASSISTANT_USER_IDS=<your Discord user ID>[,<more IDs>]
    ```
    Optional: `CLAUDE_BIN` (CLI path, default `claude`), `ASSISTANT_MODEL` (default `haiku`), `ASSISTANT_TIMEOUT` (seconds, default `60`), `ASSISTANT_DAILY_CAP` (calls per day, default `100`), `ASSISTANT_WORK_DIR`, `ASSISTANT_CONFIG_DIR`.
-4. Check it works: `python -m assistant.smoke --env-file .env` (reads only the token; exits 0 when the CLI answers with no tools or MCP servers loaded).
+4. Check it works: `python -m assistant.smoke --env-file .env` (reads only the token; exits 0 when the CLI answers with no tools beyond StructuredOutput and no MCP servers loaded).
 
 Usage counts against your Claude plan's allowance; the daily cap guards against runaway use. The counter lives in `assistant.json`.
 

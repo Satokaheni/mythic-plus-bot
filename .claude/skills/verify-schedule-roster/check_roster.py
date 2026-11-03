@@ -205,12 +205,12 @@ def signup_finish(w, n, pick):
 
 def auto_guard(w, n):
     """views.py ScheduleButtonView.signup_button, new-raider welcome branch, and cogs/scheduling.py
-    Scheduling.on_spot_offer_reaction, ✅ branch (DM offer): guard,
-    try_displace_off_roler(raider, roles[0]); if displaced, or the run is full (DM offer asks about
+    Scheduling.on_spot_offer_reaction, ✅ branch (DM offer): guard (available, run not in current_runs,
+    not has_raider), try_displace_off_roler(raider, roles[0]); if displaced, or the run is full (DM offer asks about
     the fill queue first), await (resumes in `auto_finish`); else raider_signup(raider), and add_run only
     if it returned True."""
     r = w.r[n]
-    if not r.check_availability(w.s) or w.s in r.current_runs:
+    if not r.check_availability(w.s) or w.s in r.current_runs or w.s.has_raider(r):
         return None
     displaced = w.s.try_displace_off_roler(r, r.roles[0])
     if displaced is not None or w.s.is_filled():

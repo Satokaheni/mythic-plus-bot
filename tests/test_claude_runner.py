@@ -42,6 +42,31 @@ def test_parse_result_shapes():
     assert not cr.parse_result(json.dumps({"type": "result", "subtype": "success"}).encode()).ok  # no structured_output
 
 
+def _result(**fields) -> bytes:
+    return json.dumps({"type": "result", **fields}).encode()
+
+
+def test_parse_result_success_subtype_with_is_error_is_a_failure_with_detail():
+    auth = cr.parse_result(_result(subtype="success", is_error=True, total_cost_usd=0,
+                                   result="Invalid API key · Please run /login " + "x" * 300))
+    assert not auth.ok
+    assert auth.error == "claude success: is_error"
+    assert auth.detail.startswith("Invalid API key") and len(auth.detail) == 200
+
+
+def test_parse_result_detail_falls_back_to_first_error():
+    failed = cr.parse_result(_result(subtype="error_during_execution", is_error=True,
+                                     errors=["boom: upstream 529", "second"]))
+    assert failed.error == "claude error_during_execution: is_error" and failed.detail == "boom: upstream 529"
+    assert cr.parse_result(_result(subtype="error_max_turns")).detail == ""
+
+
+def test_parse_result_non_numeric_cost_counts_as_zero():
+    odd = cr.parse_result(_result(subtype="success", total_cost_usd="n/a", structured_output={"kind": "answer"}))
+    assert odd.ok and odd.cost_usd == 0.0
+    assert cr.parse_result(_result(subtype="success", total_cost_usd=[1], structured_output={})).cost_usd == 0.0
+
+
 def _run(prompt, tmp_path, timeout=10):
     return asyncio.run(cr.run_claude(prompt, cmd=FAKE, schema=SCHEMA, model="haiku",
                                      system_prompt_file=tmp_path / "p.md", work_dir=tmp_path / "w",

@@ -19,6 +19,7 @@ logger = logging.getLogger("discord")
 FAILURE = "I couldn't work that out — try `!help`."
 NO_MENTIONS = discord.AllowedMentions.none()
 MAX_ANSWER_CHUNKS = 3
+_REPO_DIR = Path(__file__).resolve().parents[1]
 
 _HANDLED_TYPES = (discord.MessageType.default, discord.MessageType.reply)
 
@@ -47,6 +48,16 @@ def should_handle(message, *, bot_user_id: int, allowed_ids, enabled: bool) -> O
     if cleaned.startswith("!"):
         return None
     return cleaned
+
+
+def _unsafe_location(path: Path) -> Optional[str]:
+    """Claude Code reads CLAUDE.md from parent dirs and settings from the project root: keep it out of any repo."""
+    if path == _REPO_DIR or _REPO_DIR in path.parents:
+        return "is inside the bot's own directory"
+    for parent in (path, *path.parents):
+        if (parent / ".git").exists():
+            return f"is inside a git work tree ({parent})"
+    return None
 
 
 def _chunks(text: str, size: int = 2000, limit: int = MAX_ANSWER_CHUNKS):
@@ -85,17 +96,28 @@ class Assistant(commands.Cog):
         self.work_dir = Path(config.ASSISTANT_WORK_DIR).resolve()
         self.config_dir = Path(config.ASSISTANT_CONFIG_DIR).resolve()
         self.system_prompt_file = self.config_dir / "system_prompt.md"
+        self.disabled = False  # set by cog_load when the setup is unsafe; never raised, so the bot still starts
 
     async def cog_load(self) -> None:
         unknown = [name for name in intent.USAGE if self.bot.get_command(name) is None]
         if unknown:
-            raise RuntimeError(f"assistant catalog names commands the bot doesn't have: {unknown}")
+            logger.error("assistant disabled: its catalog names commands the bot doesn't have: %s", unknown)
+            self.disabled = True
+            return
         if config.ASSISTANT_ENABLED:
+            for label, path in (("ASSISTANT_WORK_DIR", self.work_dir), ("ASSISTANT_CONFIG_DIR", self.config_dir)):
+                problem = _unsafe_location(path)
+                if problem:
+                    logger.error("assistant disabled: %s %s %s; point it outside any repo", label, path, problem)
+                    self.disabled = True
+                    return
             self.system_prompt_file.parent.mkdir(parents=True, exist_ok=True)
             self.system_prompt_file.write_text(intent.render_system_prompt(intent.TEMPLATE_PATH), encoding="utf-8")
 
     @commands.Cog.listener("on_message")
     async def on_assistant_message(self, message: discord.Message) -> None:
+        if self.disabled:
+            return
         prompt = should_handle(message, bot_user_id=self.bot.user.id, allowed_ids=config.ASSISTANT_USER_IDS,
                                enabled=config.ASSISTANT_ENABLED)
         if prompt is None:
@@ -124,7 +146,7 @@ class Assistant(commands.Cog):
                     message.guild is None, result.ok, result.subtype, result.cost_usd, result.duration_s)
         logger.debug("assistant: prompt=%r", prompt[:200])
         if not result.ok:
-            logger.warning("assistant: claude call failed: %s", result.error)
+            logger.warning("assistant: claude call failed: %s detail=%r", result.error, result.detail)
             await message.channel.send(FAILURE)
             return
         try:
@@ -145,6 +167,9 @@ class Assistant(commands.Cog):
             await self.bot._do_key_request_flow(message.author)
             return
         command = intent.build_command(parsed)
+        ctx = await self._permitted_context(message, command)  # gates run before any confirm prompt
+        if ctx is None:
+            return
         if parsed.needs_confirm:
             view = ConfirmView(message.author.id)
             ask = await message.channel.send(f"I'll run `{command}` — confirm?", view=view, allowed_mentions=NO_MENTIONS)
@@ -153,23 +178,24 @@ class Assistant(commands.Cog):
                 await ask.edit(content=f"Cancelled `{command}`.", view=None)
                 return
             await ask.edit(content=f"Running `{command}`.", view=None)
-        await self._invoke(message, command)
+        await self.bot.invoke(ctx)  # re-runs the command's checks at execution time
 
-    async def _invoke(self, message: discord.Message, command: str) -> None:
+    async def _permitted_context(self, message: discord.Message, command: str) -> Optional[commands.Context]:
+        """The real command's context for the Discord author, or None after replying why it won't run."""
         proxy = copy.copy(message)
         proxy.content = command
         ctx = await self.bot.get_context(proxy)
         if ctx.command is None:
             await message.channel.send(FAILURE)
-            return
+            return None
         try:
             allowed = await ctx.command.can_run(ctx)
         except commands.CheckFailure:
             allowed = False
         if not allowed:
             await message.channel.send(f"You don't have access to `!{ctx.command.name}` here.")
-            return
-        await self.bot.invoke(ctx)
+            return None
+        return ctx
 
 
 async def setup(bot) -> None:

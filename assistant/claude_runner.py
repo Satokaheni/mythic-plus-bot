@@ -20,6 +20,7 @@ class RunResult:
     cost_usd: float = 0.0
     duration_s: float = 0.0
     subtype: str = ""
+    detail: str = ""  # a short reason from the CLI's result (e.g. an auth failure); never env or the token
 
 
 def parse_command(value: str) -> List[str]:
@@ -57,6 +58,20 @@ def minimal_env(*, config_dir, token, base=None) -> dict:
     return env
 
 
+def _cost(value) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _detail(data: dict) -> str:
+    """The CLI's own failure text: `result`, else the first of `errors[]`."""
+    errors = data.get("errors")
+    first_error = errors[0] if isinstance(errors, list) and errors else ""
+    return str(data.get("result") or first_error or "")[:200]
+
+
 def parse_result(stdout: bytes) -> RunResult:
     try:
         data = json.loads(stdout.decode("utf-8", "replace"))
@@ -66,10 +81,11 @@ def parse_result(stdout: bytes) -> RunResult:
         data = next((m for m in reversed(data) if isinstance(m, dict) and m.get("type") == "result"), {})
     if not isinstance(data, dict) or data.get("type") != "result":
         return RunResult(ok=False, error="no result message")
-    cost = float(data.get("total_cost_usd") or 0.0)
+    cost = _cost(data.get("total_cost_usd"))
     subtype = str(data.get("subtype", ""))
     if subtype != "success" or data.get("is_error"):
-        return RunResult(ok=False, error=f"claude {subtype or 'error'}", cost_usd=cost, subtype=subtype)
+        error = f"claude {subtype or 'error'}" + (": is_error" if data.get("is_error") else "")
+        return RunResult(ok=False, error=error, cost_usd=cost, subtype=subtype, detail=_detail(data))
     output = data.get("structured_output")
     if not isinstance(output, dict):
         return RunResult(ok=False, error="no structured output", cost_usd=cost, subtype=subtype)

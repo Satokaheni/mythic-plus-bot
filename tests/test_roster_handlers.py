@@ -344,3 +344,48 @@ def test_welcome_signup_of_existing_member_displaces_nobody(make_raider, make_sc
     assert schedule in off_roler.current_runs
     assert _places(schedule, old_self) == 1
     assert any("already signed up or unavailable" in (c or "") for c in sent)
+
+
+def test_dm_offer_accept_by_existing_member_displaces_nobody(bot_module, make_raider, make_schedule, monkeypatch,
+                                                             tmp_path):
+    monkeypatch.chdir(tmp_path)  # eventlog writes events.jsonl relative to cwd
+    from cogs.scheduling import Scheduling
+
+    off_roler = make_raider(user_id=1, roles=["dps"], name="Off")
+    schedule = make_schedule(raider=off_roler)  # start_time is 24h out, beyond the 8h displacement cutoff
+    schedule.team["dps"].clear()
+    schedule.members.clear()
+    schedule.signup, schedule.missing = 0, ["tank", "healer", "dps"]
+    assert schedule.raider_signup(off_roler, role="tank")
+    off_roler.add_run(schedule)
+    me = make_raider(user_id=2, roles=["tank"], name="Me")
+    assert schedule.raider_signup(me, role="dps")  # a member whose current_runs doesn't list the run yet
+    bot, _, _ = _bot(schedule, [off_roler, me])
+    displaced = []
+
+    async def notify_displaced(*args):
+        displaced.append(args)
+
+    class _DM:
+        id = 900
+
+        async def send(self, content):
+            return SimpleNamespace(id=901, add_reaction=_noop)
+
+    def get_channel(_channel_id):
+        raise AssertionError("the run post must not be edited for an existing member")
+
+    dm = _DM()
+    bot.state.dm_map, bot.state.dm_timestamps = {dm.id: {902: MSG_ID}}, {}
+    bot.user = SimpleNamespace(id=999)
+    bot.get_channel = get_channel
+    cog = Scheduling.__new__(Scheduling)
+    cog.bot = bot
+    cog._notify_displaced = notify_displaced
+    reaction = SimpleNamespace(emoji="✅", message=SimpleNamespace(id=902, channel=dm))
+
+    asyncio.run(cog.on_spot_offer_reaction(reaction, SimpleNamespace(id=me.user_id)))
+
+    assert displaced == []
+    assert schedule.team["tank"] is off_roler and off_roler in schedule.members
+    assert _places(schedule, me) == 1

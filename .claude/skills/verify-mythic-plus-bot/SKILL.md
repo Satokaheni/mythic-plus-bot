@@ -40,14 +40,25 @@ There is no long-running server: each journey boots its own bot in-process and t
   Run one iteration on demand with `await h.tick("hourly_check")`; `h.tick` finds each loop on the cog that owns it (or on the client).
 
 Fake IDs (in `IDS` in harness.py): coordinator `h.coordinator`, banker `h.banker`, admin `h.admin`,
-channels `h.avail` (#availability) and `h.key` (#keys). New users: `h.user("Name")`.
+channels `h.avail` (#availability) and `h.key` (#keys). New users: `h.user("Name")`. `h.mention()` returns the
+bot's mention string (`<@bot-id>`) for @mention messages, e.g. `await h.say(u, f"{h.mention()} hi", "key")`.
+
+The assistant runs against a fake claude: `FAKE_ENV` sets `ASSISTANT_ENABLED=1`, allowlists `h.banker` and
+`h.coordinator`, and points `CLAUDE_BIN` at `scripts/fake_claude.py` (nothing calls Anthropic). It reads the
+prompt on stdin, appends `{argv, env_keys, prompt}` to `fake_claude_calls.jsonl` in its work dir, and answers
+by prompt text: `fake:long` (7000-char answer), `fake:timeout` (sleeps past `ASSISTANT_TIMEOUT=3`),
+`fake:badjson`, `fake:crash` (exit 2), `fake:error` (`error_during_execution`); `snipe`/`unsnipe`/`my snipes`/
+`watch`/`make a run` route to those commands, `evil` names a disallowed command, `inject` an unsafe arg, and
+anything else gets `fake answer: <prompt>`. The assistant refuses a work/config dir inside a git work tree,
+so they live outside the repo at `h.assistant_dir` = `<system temp>/mpb-verify/<run-id>/{work,config}`.
 
 ## Doctor
 
 `python $H doctor` — read-only. Run it first, and whenever anything looks off. It checks python and
 discord.py 2.x, that the discord.py internals the harness routes through exist, deps import,
 `.verify/` is gitignored, then does a throwaway offline boot and confirms: sentinel token in use,
-key-request button pinned by `on_ready`, all 7 loops intercepted. It also reports stale scratch dirs.
+key-request button pinned by `on_ready`, all 7 loops intercepted, all 9 cogs loaded, the fake claude in
+use, and the assistant enabled with its dirs outside the repo. It also reports stale scratch dirs.
 A discord.py upgrade that renames `ViewStore.dispatch_view` / `dispatch_modal` / `View._scheduled_task`
 shows up here first.
 
@@ -119,8 +130,8 @@ Proof standards:
 
 ## Cleanup
 
-`python $H cleanup` removes scratch data dirs under `.verify/runs/` (normally already gone; they
-linger only with `--keep` or a killed run). It never touches `.verify/evidence/`. The harness runs
+`python $H cleanup` removes scratch data dirs under `.verify/runs/` and the assistant dirs under
+`<system temp>/mpb-verify/` (normally already gone; they linger only with `--keep` or a killed run). It never touches `.verify/evidence/`. The harness runs
 in-process and opens no ports, so there is nothing else to stop; to kill a hung run, stop the
 `python … harness.py` process you launched, by its PID, never by process name.
 

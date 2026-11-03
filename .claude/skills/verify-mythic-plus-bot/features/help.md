@@ -4,7 +4,7 @@
 
 ## Sub-features
 
-- `help-embed` posts the commands embed with eight category fields: Mythic+ Scheduling, Availability & Setup, Gear Audit, Price Watch, WoW Token, Auction Sniper, Assistant, Help.
+- `help-embed` posts the commands embed with its category fields: Mythic+ Scheduling, Availability & Setup, Gear Audit, Price Watch, WoW Token, Auction Sniper, Assistant (only when `ASSISTANT_ENABLED` is on, as in the harness), Help.
 - `help-alias` makes `!tools` produce the same embed.
 - `help-anywhere` answers in the channel the command came from: a guild channel or a DM.
 

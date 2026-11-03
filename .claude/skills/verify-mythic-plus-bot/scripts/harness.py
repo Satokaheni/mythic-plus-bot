@@ -28,6 +28,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import time
 import traceback
 from datetime import datetime, timezone
@@ -40,6 +41,9 @@ REPO = SCRIPTS.parents[3]  # <repo>/.claude/skills/verify-mythic-plus-bot/script
 VERIFY_ROOT = REPO / ".verify"
 RUNS_DIR = VERIFY_ROOT / "runs"  # scratch data dirs, removed by cleanup
 EVIDENCE_DIR = VERIFY_ROOT / "evidence"  # proof, never removed by cleanup
+# The assistant refuses a work/config dir inside any git work tree (Claude Code would read the repo's
+# CLAUDE.md and settings), so the fake claude's dirs live under the system temp dir, removed by cleanup.
+ASSISTANT_ROOT = Path(tempfile.gettempdir()) / "mpb-verify"
 
 SENTINEL_TOKEN = "verify-harness-offline-token"
 IDS = {
@@ -76,8 +80,6 @@ FAKE_ENV = {
     "ASSISTANT_ENABLED": "1",
     "ASSISTANT_USER_IDS": f"{IDS['banker']},{IDS['coordinator']}",
     "CLAUDE_BIN": json.dumps([sys.executable, str(Path(__file__).resolve().parent / "fake_claude.py")]),
-    "ASSISTANT_CONFIG_DIR": "assistant-config",
-    "ASSISTANT_WORK_DIR": "assistant-work",
     "ASSISTANT_TIMEOUT": "3",
     "CLAUDE_CODE_OAUTH_TOKEN": "offline-fake-token",
 }
@@ -678,7 +680,7 @@ _bot_module = None
 _network_attempts: List[dict] = []
 
 
-def _import_bot(data_dir: Path, network: bool):
+def _import_bot(data_dir: Path, network: bool, assistant_dir: Path):
     """Import bot.py once per process, from inside the scratch data dir, with fake env."""
     global _bot_module
     os.chdir(data_dir)
@@ -688,9 +690,11 @@ def _import_bot(data_dir: Path, network: bool):
 
     values = dotenv.dotenv_values(REPO / ".env") if network and (REPO / ".env").exists() else {}
     for k in list(os.environ):
-        if k in FAKE_ENV or k in NETWORK_ENV_ALLOWLIST or k == "LOG_FILE":
+        if k in FAKE_ENV or k in NETWORK_ENV_ALLOWLIST or k == "LOG_FILE" or k.startswith("ASSISTANT_"):
             del os.environ[k]
     os.environ.update(FAKE_ENV)
+    os.environ["ASSISTANT_WORK_DIR"] = str(assistant_dir / "work")
+    os.environ["ASSISTANT_CONFIG_DIR"] = str(assistant_dir / "config")
     for k in NETWORK_ENV_ALLOWLIST:
         if values.get(k):
             os.environ[k] = values[k]
@@ -742,6 +746,7 @@ class Harness:
         self.quiet = quiet if quiet is not None else (2.0 if network else 0.15)
         self.run_dir = RUNS_DIR / run_id
         self.data_dir = self.run_dir / "data"
+        self.assistant_dir = ASSISTANT_ROOT / run_id  # work/ and config/ for the fake claude, outside the repo
         self.evidence_dir = EVIDENCE_DIR / run_id
         self.world = World()
         self.checks: List[dict] = []
@@ -762,7 +767,7 @@ class Harness:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         # Deploy-time files a fresh checkout ships with. The bot reads them from its cwd.
         shutil.copy2(REPO / "CHANGELOG.md", self.data_dir / "CHANGELOG.md")
-        self.bot = _import_bot(self.data_dir, self.network)
+        self.bot = _import_bot(self.data_dir, self.network, self.assistant_dir)
         root = logging.getLogger()
         for old in [h for h in root.handlers if isinstance(h, _LogCapture)]:
             root.removeHandler(old)
@@ -1121,6 +1126,7 @@ async def _run_one(name: str, fn: Callable, network: bool, keep: bool) -> dict:
         os.chdir(REPO)
         if not keep:
             shutil.rmtree(h.run_dir, ignore_errors=True)
+            shutil.rmtree(h.assistant_dir, ignore_errors=True)
     return summary
 
 
@@ -1146,6 +1152,7 @@ def _print_summary(s: dict, keep: bool):
     print(f"    evidence: {EVIDENCE_DIR / s['run_id']}")
     if keep:
         print(f"    data dir kept: {RUNS_DIR / s['run_id'] / 'data'}")
+        print(f"    assistant dirs kept: {ASSISTANT_ROOT / s['run_id']}")
 
 
 def _load_scenario(path: str) -> Callable:
@@ -1191,24 +1198,29 @@ def doctor() -> int:
             pinned = [m for m in h.key.messages() if m.pinned and m.components]
             import config as _c
 
-            return h.bot.CLIENT_ID == SENTINEL_TOKEN, bool(pinned), h.started_loops, sorted(h.client.cogs), _c.CLAUDE_CMD
+            assistant_on = not h.client.get_cog("Assistant").disabled
+            return (h.bot.CLIENT_ID == SENTINEL_TOKEN, bool(pinned), h.started_loops, sorted(h.client.cogs),
+                    _c.CLAUDE_CMD, assistant_on, Path(_c.ASSISTANT_WORK_DIR))
         finally:
             await h.close()
             _close_file_logs()
             os.chdir(REPO)
             shutil.rmtree(h.run_dir, ignore_errors=True)
+            shutil.rmtree(h.assistant_dir, ignore_errors=True)
 
     try:
-        token_ok, pinned, loops, cog_names, claude_cmd = asyncio.run(boot_probe())
+        token_ok, pinned, loops, cog_names, claude_cmd, assistant_on, work_dir = asyncio.run(boot_probe())
         line(token_ok, "bot booted offline with the sentinel token (no production token loaded)")
         line(pinned, "on_ready pinned the key-request button in #keys")
         line(set(loops) == set(LOOP_NAMES), f"background loops intercepted, not started: {sorted(loops)}")
         cogs_ok = len(cog_names) == 9
         line(cogs_ok, f"cogs loaded: {cog_names}")
         line(claude_cmd[-1].endswith("fake_claude.py"), f"assistant uses the fake claude: {claude_cmd}")
+        line(assistant_on and REPO not in work_dir.parents,
+             f"assistant enabled, with its work/config dirs outside the repo: {work_dir.parent}")
     except Exception as exc:  # noqa: BLE001
         line(False, f"offline boot failed: {exc!r}")
-    stale = list(RUNS_DIR.glob("*")) if RUNS_DIR.exists() else []
+    stale = [d for root in (RUNS_DIR, ASSISTANT_ROOT) if root.exists() for d in root.iterdir()]
     print(f"[--] scratch run dirs present: {len(stale)}{' (run: harness.py cleanup)' if stale else ''}")
     return 0 if ok else 1
 
@@ -1232,11 +1244,12 @@ def main(argv=None) -> int:
         return doctor()
     if args.cmd == "cleanup":
         n = 0
-        if RUNS_DIR.exists():
-            for d in RUNS_DIR.iterdir():
-                shutil.rmtree(d, ignore_errors=True)
-                n += 1
-        print(f"removed {n} scratch run dir(s) under {RUNS_DIR}; evidence kept in {EVIDENCE_DIR}")
+        for root in (RUNS_DIR, ASSISTANT_ROOT):
+            if root.exists():
+                for d in root.iterdir():
+                    shutil.rmtree(d, ignore_errors=True)
+                    n += 1
+        print(f"removed {n} scratch run dir(s) under {RUNS_DIR} and {ASSISTANT_ROOT}; evidence kept in {EVIDENCE_DIR}")
         return 0
 
     sys.path.insert(0, str(SCRIPTS))

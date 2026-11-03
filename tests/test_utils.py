@@ -195,6 +195,36 @@ def test_deserialize_missing_schedule_id_skipped(make_raider):
     assert raiders_out[1].current_runs == set()
 
 
+def test_deserialize_repairs_ghost_seat(make_raider, make_schedule):
+    """Pre-F3 state: a raider seated outside their roles who clicked Remove kept the seat but left members."""
+    organizer = make_raider(user_id=1, roles=["tank"], name="T")
+    ghost = make_raider(user_id=2, roles=["dps"], name="Ghost")
+    sched = make_schedule(raider=organizer)
+    organizer.add_run(sched)
+    assert sched.raider_signup(ghost, role="healer")
+    sched.members.remove(ghost)  # what the pre-F3 Remove left behind; ghost.current_runs stays empty
+    msg_id = 100
+    ids = {id(sched): msg_id}
+    data = {
+        "version": 2,
+        "raiders": {str(r.user_id): r.to_dict(ids) for r in (organizer, ghost)},
+        "schedules": {str(msg_id): sched.to_dict(msg_id)},
+        "availability": {},
+        "availability_message_id": 0,
+        "dm_map": {},
+        "dm_timestamps": {},
+    }
+
+    raiders_out, schedules_out, *_ = _deserialize(data)
+
+    loaded, ghost_out = schedules_out[msg_id], raiders_out[2]
+    assert loaded.team["healer"] is ghost_out
+    assert loaded.members.count(ghost_out) == 1
+    assert loaded in ghost_out.current_runs
+    assert loaded.has_raider(ghost_out)
+    assert loaded.raider_signup(ghost_out) is False  # Sign Up refuses them instead of seating them twice
+
+
 # ---------------------------------------------------------------------------
 # _migrate_from_pickle
 # ---------------------------------------------------------------------------

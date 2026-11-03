@@ -12,6 +12,8 @@
 - Double-clicking Sign Up (or accepting an offer at the same moment) can no longer put you in a run twice.
 - A player moved into a role outside their registered roles can now leave or be removed properly.
 - Change Role only offers roles that are open, so a player can no longer be stranded in the fill queue.
+- A player stuck in a run's seat by the old Remove bug is restored to the run on restart, so they can leave it normally.
+- Accepting a run offer for a run you're already in no longer bumps another player.
 
 ## [1.10.1] - 2026-11-03
 

@@ -971,7 +971,11 @@ class Scheduling(commands.Cog):
                 tz=raider.timezone,
                 run_id=schedule_id,
             )
-            if raider.check_availability(schedule) and schedule not in raider.current_runs:
+            if (
+                raider.check_availability(schedule)
+                and schedule not in raider.current_runs
+                and not schedule.has_raider(raider)
+            ):
                 displaced = schedule.try_displace_off_roler(raider, raider.roles[0])
                 if displaced:
                     await self._notify_displaced(displaced, schedule, raider.roles[0])

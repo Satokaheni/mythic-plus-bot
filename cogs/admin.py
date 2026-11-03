@@ -210,11 +210,12 @@ class Admin(commands.Cog):
             ),
             inline=False,
         )
-        embed.add_field(
-            name="🤖 Assistant (owner, experimental)",
-            value="DM me, or mention me, in plain language — I'll answer or offer to run a command (writes ask for confirmation).",
-            inline=False,
-        )
+        if config.ASSISTANT_ENABLED:
+            embed.add_field(
+                name="🤖 Assistant (owner, experimental)",
+                value="DM me, or mention me, in plain language — I'll answer or offer to run a command (writes ask for confirmation).",
+                inline=False,
+            )
         embed.add_field(
             name="ℹ️ Help",
             value="`!help` or `!tools` — show this message",

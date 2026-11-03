@@ -26,8 +26,10 @@ USER botuser
 # https://code.claude.com/docs/en/setup ("Install a specific version"), pinned to the version the
 # assistant's smoke check passed on. It installs under ~/.local, so put ~/.local/bin on PATH.
 # The assistant is off unless ASSISTANT_ENABLED=1 and CLAUDE_CODE_OAUTH_TOKEN are set at runtime.
-RUN curl -fsSL https://claude.ai/install.sh | bash -s 2.1.317
+# pipefail: without it a failed download still exits 0 and ships an image with no `claude`.
 ENV PATH="/home/botuser/.local/bin:${PATH}"
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN curl -fsSL https://claude.ai/install.sh | bash -s 2.1.317 && claude --version
 ENV DISABLE_AUTOUPDATER=1
 
 # state.pkl and version.txt are written here at runtime.
