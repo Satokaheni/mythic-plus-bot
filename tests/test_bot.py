@@ -1,48 +1,9 @@
 """Tests for MyClient flows in bot.py."""
 
 import asyncio
-import importlib
-import logging
-import sys
 from types import SimpleNamespace
 
-import dotenv
 import pytest
-
-_REQUIRED_ENV = {
-    "CLIENT_KEY": "x",
-    "AVAIL_CHANNEL_ID": "1",
-    "KEY_CHANNEL_ID": "2",
-    "GUILD_ID": "3",
-    "TANK_ROLE_ID": "4",
-    "HEALER_ROLE_ID": "5",
-    "DPS_ROLE_ID": "6",
-    "COORDINATOR_ID": "7",
-    "BANKER_ID": "8",
-    "BLIZZ_CLIENT_ID": "x",
-    "BLIZZ_CLIENT_SECRET": "x",
-    "MYTHIC_PLUS_ID": "9",
-    "ADMIN_ID": "10",
-}
-
-
-@pytest.fixture
-def bot_module(monkeypatch, tmp_path):
-    for name, value in _REQUIRED_ENV.items():
-        monkeypatch.setenv(name, value)
-    monkeypatch.setenv("LOG_FILE", str(tmp_path / "bot.log"))
-    monkeypatch.setenv("BLIZZ_REGION", "us")
-    monkeypatch.setattr(dotenv, "load_dotenv", lambda *args, **kwargs: None)
-    root = logging.getLogger()
-    handlers, level = list(root.handlers), root.level
-    sys.modules.pop("bot", None)
-    yield importlib.import_module("bot")
-    sys.modules.pop("bot", None)
-    for handler in root.handlers:
-        if handler not in handlers:
-            handler.close()
-    root.handlers, root.level = handlers, level
-
 
 class _FakeMessage:
     id = 500

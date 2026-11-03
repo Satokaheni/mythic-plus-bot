@@ -1,8 +1,12 @@
 """Shared pytest fixtures for the Mythic+ bot test suite."""
 
+import importlib
+import logging
+import sys
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import dotenv
 import pytest
 
 from raider import Raider
@@ -79,3 +83,45 @@ def make_full_schedule(make_raider, make_schedule):
         return sched
 
     return _factory
+
+
+_REQUIRED_ENV = {
+    "CLIENT_KEY": "x", "AVAIL_CHANNEL_ID": "1", "KEY_CHANNEL_ID": "2", "GUILD_ID": "3", "TANK_ROLE_ID": "4",
+    "HEALER_ROLE_ID": "5", "DPS_ROLE_ID": "6", "COORDINATOR_ID": "7", "BANKER_ID": "8", "BLIZZ_CLIENT_ID": "x",
+    "BLIZZ_CLIENT_SECRET": "x", "MYTHIC_PLUS_ID": "9", "ADMIN_ID": "10",
+}
+_FRESH = ("bot", "config", "messages", "state")
+
+
+def _forget_bot_modules():
+    for name in list(sys.modules):
+        if name in _FRESH or name == "cogs" or name.startswith("cogs."):
+            sys.modules.pop(name, None)
+
+
+@pytest.fixture
+def fresh_import(monkeypatch, tmp_path):
+    """Import an env-reading module (bot, config, ...) fresh, with fake env; undo its log handlers."""
+    for name, value in _REQUIRED_ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("LOG_FILE", str(tmp_path / "bot.log"))
+    monkeypatch.setenv("BLIZZ_REGION", "us")
+    monkeypatch.setattr(dotenv, "load_dotenv", lambda *args, **kwargs: None)
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+
+    def _import(name: str):
+        _forget_bot_modules()
+        return importlib.import_module(name)
+
+    yield _import
+    _forget_bot_modules()
+    for handler in root.handlers:
+        if handler not in handlers:
+            handler.close()
+    root.handlers, root.level = handlers, level
+
+
+@pytest.fixture
+def bot_module(fresh_import):
+    return fresh_import("bot")

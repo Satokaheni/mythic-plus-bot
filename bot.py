@@ -2,9 +2,7 @@
 
 import asyncio
 import logging
-import os
 from datetime import datetime, time, timedelta, timezone
-from logging.handlers import RotatingFileHandler
 from textwrap import dedent
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -12,7 +10,6 @@ from zoneinfo import ZoneInfo
 import aiohttp
 import discord
 from discord.ext import tasks
-from dotenv import load_dotenv
 
 import blizzard
 import eventlog
@@ -23,6 +20,37 @@ import snipelist as snipelist_mod
 import tokenwatch
 import undermine
 import watchlist
+from config import (  # noqa: F401  (re-exported for the harness and tests)
+    _CST,
+    ADMINS,
+    AVAIL_CHANNEL_ID,
+    BANKER_BUDGET_COPPER,
+    BANKER_BULK_QTY,
+    BANKER_ID,
+    BLIZZ_CLIENT_ID,
+    BLIZZ_CLIENT_SECRET,
+    BOT_VERSION,
+    CLIENT_ID,
+    COORDINATOR_ID,
+    DPS_ID,
+    ELEVATED_IDS,
+    GEAR_AUDIT_CONCURRENCY,
+    GUILD_ID,
+    HEALER_ID,
+    KEY_CHANNEL_ID,
+    MYTHIC_PLUS_ID,
+    SNIPE_SWEEP_MINUTES,
+    TANK_ID,
+    TOKEN_POLL_MINUTES,
+)
+from messages import (  # noqa: F401
+    AVAILABILITY_MESSAGE,
+    _dm_reminder,
+    _dm_spot_available,
+    _read_changelog,
+    _read_last_version,
+    _write_version,
+)
 from raider import Raider
 from schedule import Schedule
 from utils import GREEN, RED, YELLOW, load_state, save_state
@@ -37,157 +65,9 @@ from views import (
 from watchlist import Watchlist
 
 # ---------------------------
-# Logging Setup
+# Logging
 # ---------------------------
 logger = logging.getLogger("discord")
-
-
-def _configure_logging() -> None:
-    """Log to a rotating file (for headless deploys) and the console.
-
-    The file is capped so it can't fill a Raspberry Pi's SD card. Tunable via env:
-    LOG_FILE (default bot.log), LOG_LEVEL (default INFO).
-    """
-    level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
-    log_file = os.getenv("LOG_FILE", "bot.log")
-    fmt = logging.Formatter("%(asctime)s %(levelname)-8s %(name)s %(message)s", "%Y-%m-%d %H:%M:%S")
-    root = logging.getLogger()
-    root.setLevel(level)
-    # ~5 MB per file, 3 rotated backups -> at most ~20 MB on disk.
-    file_handler = RotatingFileHandler(log_file, maxBytes=5_000_000, backupCount=3, encoding="utf-8")
-    console_handler = logging.StreamHandler()
-    for handler in (file_handler, console_handler):
-        handler.setFormatter(fmt)
-        root.addHandler(handler)
-
-
-# ---------------------------
-# Global Variables
-# ---------------------------
-load_dotenv(".env")
-_configure_logging()
-
-
-def _require_env(name: str) -> str:
-    value = os.getenv(name)
-    if not value:
-        raise RuntimeError(f"Missing required environment variable: {name}")
-    return value
-
-
-CLIENT_ID = _require_env("CLIENT_KEY")
-AVAIL_CHANNEL_ID = int(_require_env("AVAIL_CHANNEL_ID"))
-KEY_CHANNEL_ID = int(_require_env("KEY_CHANNEL_ID"))
-GUILD_ID = int(_require_env("GUILD_ID"))
-TANK_ID = int(_require_env("TANK_ROLE_ID"))
-HEALER_ID = int(_require_env("HEALER_ROLE_ID"))
-DPS_ID = int(_require_env("DPS_ROLE_ID"))
-COORDINATOR_ID = int(_require_env("COORDINATOR_ID"))
-BANKER_ID = int(_require_env("BANKER_ID"))
-# Gold budget used to size price-watch buy suggestions (default 100,000 gold).
-BANKER_BUDGET_COPPER = int(os.getenv("BANKER_BUDGET_GOLD", "100000")) * 10000
-# Default bulk order size the price-watch buy signal targets (per-item overridable via `!watch -x`).
-BANKER_BULK_QTY = int(os.getenv("BANKER_BULK_QTY", "100"))
-GEAR_AUDIT_CONCURRENCY = 5  # Parallel Blizzard profile fetches; the roster is ~30 characters.
-# Blizzard Game Data API — server-specific auction sniper (see snipes.json).
-BLIZZ_CLIENT_ID = _require_env("BLIZZ_CLIENT_ID")
-BLIZZ_CLIENT_SECRET = _require_env("BLIZZ_CLIENT_SECRET")
-os.environ.setdefault("BLIZZ_REGION", "us")
-SNIPE_SWEEP_MINUTES = 30
-# Blizzard refreshes the WoW Token price roughly every 20 minutes.
-TOKEN_POLL_MINUTES = 20
-MYTHIC_PLUS_ID = int(_require_env("MYTHIC_PLUS_ID"))
-ADMINS = [int(id_str) for id_str in _require_env("ADMIN_ID").split(",") if id_str.strip().isdigit()]
-ELEVATED_IDS = {COORDINATOR_ID} | set(ADMINS)
-_CST = ZoneInfo("America/Chicago")
-# ---------------------------
-# Version & Changelog
-# ---------------------------
-BOT_VERSION = "1.10.0"
-
-_VERSION_FILE = "version.txt"
-
-
-def _read_last_version() -> str:
-    try:
-        with open(_VERSION_FILE, "r") as f:
-            return f.read().strip()
-    except FileNotFoundError:
-        return ""
-
-
-def _write_version(version: str) -> None:
-    with open(_VERSION_FILE, "w") as f:
-        f.write(version)
-
-
-def _read_changelog(version: str) -> list[str]:
-    """Read entries for a given version from CHANGELOG.md, preserving section headers."""
-    try:
-        with open("CHANGELOG.md", "r", encoding="utf-8") as f:
-            lines = f.read().splitlines()
-    except FileNotFoundError:
-        return []
-    in_section = False
-    entries = []
-    for line in lines:
-        if line.startswith(f"## [{version}]"):
-            in_section = True
-            continue
-        if in_section:
-            if line.startswith("## ["):
-                break
-            if line.startswith("### "):
-                entries.append(f"**{line[4:]}**")
-            elif line.startswith("- "):
-                entries.append(line[2:])
-    return entries
-
-
-def AVAILABILITY_MESSAGE(x, y, z) -> str:
-    return f"""
-React to this message to set your availability for this week's mythic plus runs
-<t:{int(x)}:F> to <t:{int(y)}:F>
-
-**If this is your first time signing up please check your DMs after reacting**
-
-
-:green_circle: - Available
-:yellow_circle: - Maybe Available
-:red_circle: - Not Available
-
-{z}
-"""
-
-
-# ---------------------------
-# DM Message Builders
-# ---------------------------
-
-
-def _dm_spot_available(name: str, level: str, ts: int, roster: str, role: str, role_type: str = "primary") -> str:
-    return dedent(f"""
-        Hello {name}, a spot has opened up for (Level {level})
-        Run on <t:{ts}:F>.
-        Your {role_type} role ({role}) is needed.
-
-        {roster}
-
-        React with :white_check_mark: if you would like to go, or :x: to decline.
-        """)
-
-
-def _dm_reminder(name: str, level: str, ts: int, roster: str, role: str) -> str:
-    return dedent(f"""
-        🔔 **Reminder** 🔔
-        Hello {name}, a spot is still available for (Level {level})
-        Run on <t:{ts}:F>.
-        Your role ({role}) is needed.
-
-        {roster}
-
-        React with :white_check_mark: if you would like to go, or :x: to decline.
-        """)
 
 
 # ---------------------------
