@@ -5,6 +5,14 @@ from types import SimpleNamespace
 
 import pytest
 
+def _scheduling_cog(bot_module, **bot_attrs):
+    from cogs.scheduling import Scheduling
+
+    cog = Scheduling.__new__(Scheduling)
+    cog.bot = SimpleNamespace(**bot_attrs)
+    return cog
+
+
 class _FakeMessage:
     id = 500
 
@@ -28,31 +36,34 @@ def test_run_deleted_during_dms_is_not_resurrected(bot_module, monkeypatch, make
     schedule = make_schedule(raider=make_raider(user_id=1, roles=["tank"]))
     healer = make_raider(user_id=2, roles=["healer"])
 
-    client = bot_module.MyClient.__new__(bot_module.MyClient)
     from state import BotState
 
-    client.state = BotState(raiders={}, schedules={schedule_id: schedule},
+    state = BotState(raiders={}, schedules={schedule_id: schedule},
                             availability={bot_module.GREEN: [healer], bot_module.YELLOW: [], bot_module.RED: []},
                             availability_message_id=None, dm_map={}, dm_timestamps={})
-    client.state.save = lambda: None
+    state.save = lambda: None
 
     def delete_run():
-        client.state.schedules.pop(schedule_id, None)
+        state.schedules.pop(schedule_id, None)
 
     async def create_dm():
         return _FakeDM(delete_run)
 
-    client.get_channel = lambda _id: object()
-    client.get_user = lambda _id: SimpleNamespace(create_dm=create_dm)
+    cog = _scheduling_cog(
+        bot_module,
+        state=state,
+        get_channel=lambda _id: object(),
+        get_user=lambda _id: SimpleNamespace(create_dm=create_dm),
+    )
 
     async def no_sleep(_seconds):
         pass
 
-    monkeypatch.setattr(bot_module.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr("cogs.scheduling.asyncio.sleep", no_sleep)
 
-    asyncio.run(client.fill_remaining_spots(schedule_id))
+    asyncio.run(cog.fill_remaining_spots(schedule_id))
 
-    assert schedule_id not in client.state.schedules
+    assert schedule_id not in state.schedules
 
 
 def test_notify_promoted_dms_new_slot(bot_module, make_raider, make_full_schedule):
@@ -65,10 +76,11 @@ def test_notify_promoted_dms_new_slot(bot_module, make_raider, make_full_schedul
     async def send(content):
         sent.append(content)
 
-    client = bot_module.MyClient.__new__(bot_module.MyClient)
-    client.get_user = lambda uid: SimpleNamespace(send=send) if uid == backup.user_id else None
+    cog = _scheduling_cog(
+        bot_module, get_user=lambda uid: SimpleNamespace(send=send) if uid == backup.user_id else None
+    )
 
-    asyncio.run(client._notify_promoted(backup, sched))
+    asyncio.run(cog._notify_promoted(backup, sched))
 
     assert len(sent) == 1
     assert "Tank" in sent[0]
