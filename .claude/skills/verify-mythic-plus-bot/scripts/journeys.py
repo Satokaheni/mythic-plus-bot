@@ -249,6 +249,44 @@ async def banker_token(h):
             (h.state_file("token_watch.json") or {}).get("token_watch", {}).get("threshold", "missing") is None)
 
 
+BOT_ACTIONS = ("send", "edit", "delete", "bot_react", "pin", "unpin", "interaction_response", "followup", "rejected")
+
+
+async def _assert_silent(h, user, text, where, label):
+    before = len(h.world.events)
+    msg = await h.say(user, text, where)
+    acts = [e for e in h.world.events[before:] if e["kind"] in BOT_ACTIONS or e["kind"] == "log_error"]
+    h.check(f"silent: {label}", not acts and not msg.deleted, acts)
+
+
+async def command_gates(h):
+    """Who gets silence, what gets deleted, and where gated commands answer."""
+    nobody = h.user("Nobody")
+    await _assert_silent(h, nobody, "!watch 123", "key", "non-banker !watch")
+    await _assert_silent(h, nobody, "!watches", "dm", "non-banker !watches")
+    await _assert_silent(h, nobody, "!tokenalert 5", "dm", "non-banker !tokenalert")
+    await _assert_silent(h, nobody, "!cleanup", "key", "non-elevated !cleanup")
+    await _assert_silent(h, nobody, "!setup", "key", "non-elevated !setup")
+    await _assert_silent(h, nobody, "!avail", "avail", "non-elevated !avail in #availability")
+    await _assert_silent(h, nobody, "!gearaudit", "dm", "non-elevated !gearaudit")
+    await _assert_silent(h, nobody, "!key", "dm", "!key in a DM")
+    await _assert_silent(h, nobody, "!key", "avail", "!key in #availability")
+    await _assert_silent(h, nobody, "!keys", "key", "!keys from an unregistered user")
+    await _assert_silent(h, nobody, "!foo", "key", "unknown command")
+    await _assert_silent(h, nobody, "hello there", "key", "plain chat in #keys")
+    await _assert_silent(h, nobody, "what runs are up this week?", "dm", "plain chat in a DM")
+
+    avail_in_keys = await h.say(nobody, "!avail", "key")
+    h.check("!avail typed in #keys is deleted", avail_in_keys.deleted)
+
+    await h.say(h.coordinator, "!cleanup", "dm")
+    reply = await h.wait_for(h.coordinator, "must be used in the availability or key channel")
+    h.check("elevated !cleanup outside the channels gets a DM explaining where", bool(reply))
+
+    errors = [e for e in h.world.events if e["kind"] == "log_error"]
+    h.check("no errors logged", not errors, errors)
+
+
 def json_dump(obj) -> str:
     import json
 
@@ -262,4 +300,5 @@ JOURNEYS = {
     "signup-fill-restart": (signup_fill_restart, "restart, Sign Up via persistent button, role pick, fill DMs, queue"),
     "snipe": (snipe, "!snipe / !snipes / !unsnipe from DMs (offline: label fallback)"),
     "banker-token": (banker_token, "!tokenalert / !token, banker gate, off"),
+    "command-gates": (command_gates, "permission/channel gates stay silent; unknown commands and chat are ignored"),
 }
