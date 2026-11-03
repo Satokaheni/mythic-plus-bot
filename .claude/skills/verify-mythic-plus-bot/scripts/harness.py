@@ -284,6 +284,7 @@ class FakeMessage:
         self.author = author
         self.content = content or ""
         self.embeds = list(embeds)
+        self.attachments = []
         self.components = _render_components(view)
         self.ephemeral_to = ephemeral_to
         self.reference = reference
