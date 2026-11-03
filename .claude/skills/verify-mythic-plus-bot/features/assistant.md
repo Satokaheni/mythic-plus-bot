@@ -5,7 +5,7 @@ An allowlisted user (the harness allowlists `h.banker` and `h.coordinator`) can 
 ## Sub-features
 
 - `assistant-answer` a 1:1 DM or a guild @mention gets `fake answer: <prompt>`; long answers are capped at 3 messages ending in `…`.
-- `assistant-silent` guild text without a mention, `@everyone`, non-allowlisted authors, and typed `!commands` get no assistant reply and no Claude call.
+- `assistant-silent` guild text or a group DM without a mention, `@everyone`, non-allowlisted authors, and typed `!commands` get no assistant reply and no Claude call. A group DM or guild message that @mentions the bot is handled; the harness has no group-DM entry point, so that rule is pinned by `tests/test_trigger.py`.
 - `assistant-empty` a bare @mention replies `What can I help with?`.
 - `assistant-read` a read command (`show my snipes` -> `!snipes`) runs with no confirm prompt.
 - `assistant-write` a write command (`please snipe ...`, `unsnipe ...`) posts the confirm prompt; Confirm runs the real command, Cancel changes nothing.
