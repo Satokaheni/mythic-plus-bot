@@ -58,7 +58,7 @@ None. `KNOWN` in the script is empty, so any violation is new. F1-F4 (found at `
 
 ## Coverage record
 
-Sync commit: `0c75335f41a1859f2db35e304c9fe4d86c6f1abc` (branch `refactor/modularize-bot`, bot split into cogs, v1.10.1). Previously synced at `3febdaca6f014b7464b47f2612fc3af83c36f3d1` (`feature/loot-council-helper`, pre-refactor `bot.py`). Confirmed at this commit, by reading each handler, that the steps below match the code. The refactor moved the `bot.py` handlers into cogs and renamed `bot.<x>` state to `bot.state.<x>`; the call order and await points of every mirrored step are unchanged. `schedule.py` and `raider.py` did not change between the two commits.
+Sync commit: `e7c30e9930a99837ae8704d8a894345162791b5d` (branch `refactor/modularize-bot`, roster fixes F1-F4, v1.10.1). Previously synced at `0c75335f41a1859f2db35e304c9fe4d86c6f1abc` (bot split into cogs) and before that at `3febdaca6f014b7464b47f2612fc3af83c36f3d1` (`feature/loot-council-helper`, pre-refactor `bot.py`). Confirmed at this commit, by reading each handler, that the steps below match the code, and the run's verdict is `PASS: every property holds` with `KNOWN` empty. Since `0c75335`, `schedule.py` changed (`raider_signup` returns a bool and refuses existing members, `_check_fill(freed_role)`, `raider_remove` via `seat_of`, new `open_roles`) and the mirrored handlers gained the result checks and Change Role re-checks noted below; `raider.py` did not change.
 
 Called for real (imported):
 - `schedule.py`: `Schedule.__init__`, `raider_signup` (and its `False` return for a raider already in the run), `_check_fill(freed_role)`, `raider_remove`, `seat_of`, `open_roles`, `try_displace_off_roler`, `has_raider`, `is_filled`, `__eq__`/`__hash__` (through `current_runs` sets).
@@ -76,7 +76,7 @@ Mirrored (call order, guards, and await points copied into the step functions of
 
 ## Does my change touch this?
 
-Run `git diff 0c75335f41a1859f2db35e304c9fe4d86c6f1abc -- schedule.py raider.py views.py bot.py cogs/ state.py` and look for any function in the coverage record, or a new caller of `raider_signup`, `raider_remove`, `try_displace_off_roler`, `add_run`, or `remove_run`. The mirrored handlers are named by function (in `views.py` and `cogs/scheduling.py`); find them by name, not line number.
+Run `git diff e7c30e9930a99837ae8704d8a894345162791b5d -- schedule.py raider.py views.py bot.py cogs/ state.py` and look for any function in the coverage record, or a new caller of `raider_signup`, `raider_remove`, `try_displace_off_roler`, `add_run`, or `remove_run`. The mirrored handlers are named by function (in `views.py` and `cogs/scheduling.py`); find them by name, not line number.
 
 - Changed only `schedule.py` / `raider.py` methods: rerun; the check calls them directly.
 - Changed a mirrored handler (new guard, moved `await`, new role options, new path into `raider_signup`): update the matching step function first, so it still calls the same methods in the same order between the same awaits, then rerun.
