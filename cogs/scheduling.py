@@ -22,6 +22,17 @@ from views import KeyRequestView, PrePostAddRaiderView, RoleSelectView, WoWSelec
 logger = logging.getLogger("discord")
 
 
+def _run_at(schedules: dict, start_time: datetime) -> tuple:
+    """Return (message_id, schedule) for a posted run starting at the same instant, else (None, None).
+
+    Aware datetimes compare as instants, so a 9 PM Eastern request matches an 8 PM Central run.
+    """
+    for sched_id, sched in schedules.items():
+        if sched.start_time == start_time:
+            return sched_id, sched
+    return None, None
+
+
 class Scheduling(commands.Cog):
     def __init__(self, bot) -> None:
         self.bot = bot
@@ -535,7 +546,7 @@ class Scheduling(commands.Cog):
                     roles.append(selection_view.selected_secondary)
 
                 if selection_view.selected_class and roles:
-                    self.bot.state.raiders[user.id] = Raider(
+                    self.bot.state.register_raider(
                         user, selection_view.selected_class, roles, selection_view.selected_timezone
                     )
                     logger.info(
@@ -578,15 +589,7 @@ class Scheduling(commands.Cog):
                     logger.info(f"Key request denied for {user} due to schedule conflict")
                     return
 
-                existing_schedule, existing_schedule_id = None, None
-                for sched_id, sched in self.bot.state.schedules.items():
-                    if (
-                        sched.date_scheduled == view.selected_day
-                        and sched.start_time.time() == view.selected_start_time.time()
-                    ):
-                        existing_schedule = sched
-                        existing_schedule_id = sched_id
-                        break
+                existing_schedule_id, existing_schedule = _run_at(self.bot.state.schedules, temp_schedule.start_time)
 
                 if existing_schedule and sum(
                     role in existing_schedule.missing for role in self.bot.state.raiders[user.id].roles
@@ -615,7 +618,7 @@ class Scheduling(commands.Cog):
                                 return
                             self.bot.state.raiders[user.id].add_run(existing_schedule)
                             await user.send(
-                                f"✅ You have been added to the existing run on {existing_schedule.date_scheduled} at {existing_schedule.start_time.strftime('%I:%M %p')}."
+                                f"✅ You have been added to the existing run at <t:{int(existing_schedule.start_time.timestamp())}:F>."
                             )
                             if existing_schedule.is_filled():
                                 await self.notify_schedule(existing_schedule)

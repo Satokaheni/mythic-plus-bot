@@ -10,7 +10,6 @@ from discord.ext import commands, tasks
 import config
 import eventlog
 from messages import AVAILABILITY_MESSAGE
-from raider import Raider
 from utils import GREEN, RED, YELLOW
 from views import WoWSelectionView
 
@@ -45,9 +44,17 @@ class Availability(commands.Cog):
             )
         )
         self.bot.state.availability_message_id = msg.id
+        self.bot.state.save()
         await msg.add_reaction(GREEN)
         await msg.add_reaction(YELLOW)
         await msg.add_reaction(RED)
+
+    def _move_to_pool(self, raider, emoji) -> None:
+        """Put the raider in exactly one availability pool: the one they just reacted with."""
+        for pool in self.bot.state.availability.values():
+            if raider in pool:
+                pool.remove(raider)
+        self.bot.state.availability[emoji].append(raider)
 
     def _log_avail_reaction(self, raider, emoji) -> None:
         """Log an availability-reaction event (best-effort)."""
@@ -119,20 +126,10 @@ class Availability(commands.Cog):
             return
 
         if user.id in self.bot.state.raiders:
-            # Check if they're already in any availability list and remove them
-            if self.bot.state.raiders[user.id] in self.bot.state.availability[GREEN]:
-                self.bot.state.availability[GREEN].remove(self.bot.state.raiders[user.id])
-            if self.bot.state.raiders[user.id] in self.bot.state.availability[YELLOW]:
-                self.bot.state.availability[YELLOW].remove(self.bot.state.raiders[user.id])
-            if self.bot.state.raiders[user.id] in self.bot.state.availability[RED]:
-                self.bot.state.availability[RED].remove(self.bot.state.raiders[user.id])
-
-            if self.bot.state.raiders[user.id] not in self.bot.state.availability[reaction.emoji]:
-                self.bot.state.availability[reaction.emoji].append(self.bot.state.raiders[user.id])
-                await self.bot.new_availability_signup_fill_schedule(self.bot.state.raiders[user.id], reaction.emoji)
-
-                self._log_avail_reaction(self.bot.state.raiders[user.id], reaction.emoji)
-
+            raider = self.bot.state.raiders[user.id]
+            self._move_to_pool(raider, reaction.emoji)
+            await self.bot.new_availability_signup_fill_schedule(raider, reaction.emoji)
+            self._log_avail_reaction(raider, reaction.emoji)
             self.bot.state.save()
         else:
             try:
@@ -151,17 +148,15 @@ class Availability(commands.Cog):
                     roles.append(view.selected_secondary)
 
                 if view.selected_class and roles:
-                    self.bot.state.raiders[user.id] = Raider(user, view.selected_class, roles, view.selected_timezone)
-                    self.bot.state.availability[reaction.emoji].append(self.bot.state.raiders[user.id])
+                    raider = self.bot.state.register_raider(user, view.selected_class, roles, view.selected_timezone)
+                    self._move_to_pool(raider, reaction.emoji)
                     logger.info(
                         f"Signup from {user}: class={view.selected_class} roles={roles} timezone={view.selected_timezone}"
                     )
 
-                    await self.bot.new_availability_signup_fill_schedule(
-                        self.bot.state.raiders[user.id], reaction.emoji
-                    )
+                    await self.bot.new_availability_signup_fill_schedule(raider, reaction.emoji)
 
-                    self._log_avail_reaction(self.bot.state.raiders[user.id], reaction.emoji)
+                    self._log_avail_reaction(raider, reaction.emoji)
 
                     self.bot.state.save()
                 else:

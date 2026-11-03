@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import utils
+from raider import Raider
 from utils import GREEN, RED, YELLOW
 
 
@@ -27,6 +28,16 @@ class BotState:
         self.dm_timestamps: Dict[int, Dict[int, datetime]] = dm_timestamps if dm_timestamps is not None else {}
         self.role_mentions: Dict[str, Any] = {}
         self.reminder_messages: Dict[int, List[int]] = {}
+
+    def register_raider(self, user, class_play: str, roles: List[str], tz: str) -> Raider:
+        """Store a new Raider for `user` and return it, or return the one already stored.
+
+        The class/role DM form stays open for minutes, so the user may have registered through
+        another form meanwhile; replacing that record would orphan the one their seats point to.
+        """
+        if user.id not in self.raiders:
+            self.raiders[user.id] = Raider(user, class_play, roles, tz)
+        return self.raiders[user.id]
 
     @classmethod
     def load(cls) -> "BotState":

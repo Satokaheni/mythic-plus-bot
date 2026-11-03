@@ -42,3 +42,25 @@ def test_default_availability_has_pools_and_is_not_shared():
     a, b = BotState(), BotState()
     assert a.availability == {GREEN: [], YELLOW: [], RED: []}
     assert a.availability[GREEN] is not b.availability[GREEN]
+
+
+def test_register_raider_creates_and_stores_a_new_raider():
+    from types import SimpleNamespace
+
+    s = BotState()
+    user = SimpleNamespace(id=5, mention="<@5>", display_name="Five")
+
+    raider = s.register_raider(user, "Mage", ["dps"], "US/Central")
+
+    assert s.raiders[5] is raider and raider.roles == ["dps"] and raider.class_play == "Mage"
+
+
+def test_register_raider_keeps_an_existing_record(make_raider):
+    from types import SimpleNamespace
+
+    existing = make_raider(user_id=5, roles=["tank"])
+    s = BotState(raiders={5: existing})
+
+    raider = s.register_raider(SimpleNamespace(id=5, mention="<@5>", display_name="Five"), "Mage", ["dps"], "US/Central")
+
+    assert raider is existing and s.raiders[5] is existing and existing.roles == ["tank"]

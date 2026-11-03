@@ -58,10 +58,10 @@ def _bot(schedule, raiders):
     async def notify_promoted(raider, _schedule):
         promoted.append(raider)
 
-    state = SimpleNamespace(
-        schedules={MSG_ID: schedule}, raiders={r.user_id: r for r in raiders}, role_mentions={},
-        save=lambda: saves.append(1),
-    )
+    from state import BotState
+
+    state = BotState(schedules={MSG_ID: schedule}, raiders={r.user_id: r for r in raiders})
+    state.save = lambda: saves.append(1)
     bot = SimpleNamespace(
         state=state, elevated_ids=set(), message_user=_noop, notify_schedule=_noop,
         _notify_displaced=_noop, _notify_promoted=notify_promoted,
@@ -389,3 +389,51 @@ def test_dm_offer_accept_by_existing_member_displaces_nobody(bot_module, make_ra
     assert displaced == []
     assert schedule.team["tank"] is off_roler and off_roler in schedule.members
     assert _places(schedule, me) == 1
+
+
+def test_change_role_that_fills_the_run_sends_the_filled_dms(roster, make_raider):
+    """Moving a queued player into the last open seat fills the run, so the roster gets the 'filled' DM."""
+    schedule, t, h = roster
+    schedule.raider_signup(h)
+    for n in (3, 4):
+        schedule.raider_signup(make_raider(user_id=n, roles=["dps"], name=f"D{n}"))
+    queued = make_raider(user_id=6, roles=["tank"], name="Queued")
+    schedule.raider_signup(queued)
+    assert schedule.team["fill"] == [queued] and not schedule.is_filled()
+    bot, _, _ = _bot(schedule, [t, h, queued])
+    notified = []
+
+    async def notify_schedule(s):
+        notified.append(s)
+
+    bot.notify_schedule = notify_schedule
+
+    async def move_to_dps():
+        select = _change_role_target(queued, schedule, bot, _KeyMessage())
+        select._values = ["dps"]
+        await select.callback(_interaction(99))
+
+    asyncio.run(move_to_dps())
+
+    assert schedule.is_filled() and queued in schedule.team["dps"]
+    assert notified == [schedule]
+
+
+def test_change_role_between_open_seats_sends_no_filled_dms(roster):
+    schedule, t, h = roster
+    bot, _, _ = _bot(schedule, [t, h])
+    notified = []
+
+    async def notify_schedule(s):
+        notified.append(s)
+
+    bot.notify_schedule = notify_schedule
+
+    async def move_to_healer():
+        select = _change_role_target(t, schedule, bot, _KeyMessage())
+        select._values = ["healer"]
+        await select.callback(_interaction(99))
+
+    asyncio.run(move_to_healer())
+
+    assert schedule.team["healer"] is t and notified == []

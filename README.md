@@ -133,7 +133,7 @@ Players click the **⚔️ CLICK TO CREATE A REQUEST** button pinned in the key 
 3. Start time (in their registered timezone)
 4. Run type (one key or multiple keys)
 
-If a run already exists at that time, the bot asks if the player wants to join it instead. After submitting, the organizer can optionally add registered raiders before the schedule is published.
+If a run is already posted for that same moment (even when the organizers are in different timezones), the bot asks if the player wants to join it instead. After submitting, the organizer can optionally add registered raiders before the schedule is published.
 
 ### Schedule Buttons
 

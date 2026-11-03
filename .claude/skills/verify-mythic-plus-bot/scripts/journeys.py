@@ -54,11 +54,12 @@ async def signup_new_raider(h, user, schedule_msg, **profile):
     await h.wait_for(user, "Registration complete")
 
 
-async def create_key_request(h, organizer, *, level="10", time_label="8:00 PM", note="verify harness run",
-                             register=None):
-    """Organizer clicks the pinned key-request button and walks the DM flow to a posted schedule.
+async def submit_key_form(h, organizer, *, level="10", time_label="8:00 PM", note="verify harness run",
+                          register=None):
+    """Organizer clicks the pinned key-request button and submits the DM key form (and note prompt).
 
     register: profile dict when the organizer is not registered yet (the flow asks for it first).
+    Returns the requested day (ISO date, tomorrow).
     """
     pinned = [m for m in h.key.messages() if m.pinned and m.components]
     h.check("key-request button is pinned in #keys", len(pinned) == 1, len(pinned))
@@ -84,7 +85,12 @@ async def create_key_request(h, organizer, *, level="10", time_label="8:00 PM", 
         await h.submit_modal(organizer, {"Note": note})
     else:
         await h.click(organizer, confirm, "No, Continue")
+    return tomorrow
 
+
+async def create_key_request(h, organizer, *, register=None, **form):
+    """Organizer walks the whole key-request flow to a posted schedule. Returns (posted, day)."""
+    tomorrow = await submit_key_form(h, organizer, register=register, **form)
     prepost = await h.wait_for(organizer, "Would you like to add any registered raiders")
     await h.click(organizer, prepost, "Post Schedule")
     posted = await h.wait_for("key", "Scheduled Mythic+ Run")
@@ -159,6 +165,32 @@ async def key_request(h):
                 {k: sched.get(k) for k in ("date_scheduled", "note")})
     h.check("organizer's current_runs includes the schedule",
             posted.id in state["raiders"][str(tank.id)]["current_runs"], state["raiders"][str(tank.id)])
+
+
+async def key_request_join(h):
+    """A second organizer asks for the same instant in another timezone and joins the posted run."""
+    tank = h.user("Tanky")
+    posted, _ = await create_key_request(h, tank, note=None, register={"klass": "Warrior", "primary": "tank"})
+
+    healer = h.user("Healy")
+    # 9 PM Eastern is the same moment as Tanky's 8 PM Central run.
+    await submit_key_form(h, healer, time_label="9:00 PM", note=None,
+                          register={"klass": "Priest", "primary": "healer", "tz": "US/Eastern"})
+    offer = await h.wait_for(healer, "A run already exists at this time")
+    h.check("join offer names the existing run's level", "Level 10" in offer.text(), offer.text())
+    await h.react(healer, offer, "✅")
+    added = await h.wait_for(healer, "added to the existing run")
+    h.check("join confirmation shows the run time as a Discord timestamp", "<t:" in added.text(), added.text())
+
+    healer_field = h.key._messages[posted.id].embed_field("Healer") or ""
+    h.check("posted embed now shows the healer", healer.mention in healer_field, healer_field)
+    state = h.state_file()
+    h.check("no duplicate run was posted", list(state["schedules"]) == [str(posted.id)], list(state["schedules"]))
+    h.check("healer is persisted in the run's healer seat",
+            state["schedules"][str(posted.id)]["team"].get("healer") == healer.id,
+            state["schedules"][str(posted.id)]["team"])
+    h.check("healer's current_runs includes the run",
+            posted.id in state["raiders"][str(healer.id)]["current_runs"], state["raiders"][str(healer.id)])
 
 
 async def signup_fill_restart(h):
@@ -411,6 +443,7 @@ JOURNEYS = {
     "help": (help_command, "!help / !tools list every command category"),
     "availability-signup": (availability_signup, "!avail post, 🟢 reaction, DM class/role form, pool switch"),
     "key-request": (key_request, "pinned button -> DM key form -> note modal -> posted schedule"),
+    "key-request-join": (key_request_join, "same-instant key request in another timezone -> join offer -> ✅"),
     "signup-fill-restart": (signup_fill_restart, "restart, Sign Up via persistent button, role pick, fill DMs, queue"),
     "snipe": (snipe, "!snipe / !snipes / !unsnipe from DMs (offline: label fallback)"),
     "banker-token": (banker_token, "!tokenalert / !token, banker gate, off"),

@@ -30,7 +30,6 @@ class ScheduleButtonView(discord.ui.View):
     @discord.ui.button(label="Sign Up", style=discord.ButtonStyle.success, emoji="✅", custom_id="signup")
     async def signup_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Handle signup button click."""
-        from raider import Raider
 
         user = interaction.user
         schedule = self.schedule
@@ -69,7 +68,7 @@ class ScheduleButtonView(discord.ui.View):
                     )
                     return
 
-                bot.state.raiders[user.id] = Raider(
+                raider = bot.state.register_raider(
                     user, selection_view.selected_class, roles, selection_view.selected_timezone
                 )
 
@@ -77,7 +76,6 @@ class ScheduleButtonView(discord.ui.View):
                     f"New raider registered via button: {user.display_name}: class={selection_view.selected_class} roles={roles} timezone={selection_view.selected_timezone}"
                 )
 
-                raider = bot.state.raiders[user.id]
                 logger.info(f"Raider: {raider} current runs: {raider.current_runs} sign up: {schedule}")
                 if (
                     raider.check_availability(schedule)
@@ -818,6 +816,7 @@ class ChangeRoleTargetSelect(discord.ui.Select):
             self.view.stop()
             return
 
+        fill_status = schedule.is_filled()
         promoted = schedule.raider_remove(raider)
         schedule.raider_signup(raider, role=new_role)
         raider.add_run(schedule)
@@ -840,6 +839,8 @@ class ChangeRoleTargetSelect(discord.ui.Select):
         await interaction.response.send_message(
             f"✅ **{raider.name}** has been moved to **{role_display}**.", ephemeral=True
         )
+        if schedule.is_filled() != fill_status:
+            await bot.notify_schedule(schedule)
         if promoted:
             await bot._notify_promoted(promoted, schedule)
         self.view.stop()

@@ -14,6 +14,10 @@
 - Change Role only offers roles that are open, so a player can no longer be stranded in the fill queue.
 - A player stuck in a run's seat by the old Remove bug is restored to the run on restart, so they can leave it normally.
 - Accepting a run offer for a run you're already in no longer bumps another player.
+- Requesting a key at the same time as a posted run now offers to join that run instead of posting a duplicate, even across timezones.
+- Posting the availability message with `!avail` now saves it right away, so reactions still count after a restart.
+- Registering through two sign-up forms at once no longer replaces your record and loses track of your runs.
+- Moving a player with Change Role now sends the "run is filled" DMs when that move fills the run.
 
 ## [1.10.1] - 2026-11-03
 
