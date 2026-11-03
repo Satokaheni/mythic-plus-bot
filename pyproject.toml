@@ -33,6 +33,9 @@ dev = [
 py-modules = ["bot", "raider", "schedule", "utils", "views", "undermine", "watchlist", "eventlog", "raiderio", "forecast", "loot", "config", "messages", "state"]
 packages = ["lootcouncil", "cogs", "assistant"]
 
+[tool.setuptools.package-data]
+assistant = ["system_prompt.md"]
+
 [tool.black]
 line-length = 120
 target-version = ["py39", "py310", "py311"]
