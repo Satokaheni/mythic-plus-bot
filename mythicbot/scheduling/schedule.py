@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Optional
 import discord
 from discord import Color, Embed
 
-from raider import Raider
+from mythicbot.scheduling.raider import Raider
 
 if TYPE_CHECKING:
     from bot import MyClient
@@ -46,24 +46,23 @@ class Schedule:
         self.organizer_id: int = raider_scheduled.user_id
         self.raider_signup(raider_scheduled, role=organizer_role)
 
-    def _check_fill(self) -> Optional[Raider]:
-        """Promote the first fill raider who fits an open slot and return them, or None."""
+    def _check_fill(self, freed_role: str) -> Optional[Raider]:
+        """Promote the first fill raider who plays `freed_role` into that open seat and return them, or None."""
+        if freed_role not in self.open_roles():
+            return None
         for raider in self.team["fill"]:
-            for role in raider.roles:
-                if role == "dps":
-                    if len(self.team["dps"]) >= 3:
-                        continue
-                    self.team["dps"].append(raider)
-                    if len(self.team["dps"]) == 3:
-                        self.missing.remove("dps")
-                elif not self.team[role]:
-                    self.team[role] = raider
-                    self.missing.remove(role)
-                else:
-                    continue
-                self.signup += 1
-                self.team["fill"].remove(raider)
-                return raider
+            if freed_role not in raider.roles:
+                continue
+            self.team["fill"].remove(raider)
+            if freed_role == "dps":
+                self.team["dps"].append(raider)
+                if len(self.team["dps"]) == 3:
+                    self.missing.remove("dps")
+            else:
+                self.team[freed_role] = raider
+                self.missing.remove(freed_role)
+            self.signup += 1
+            return raider
         return None
 
     def send_message(
@@ -78,7 +77,7 @@ class Schedule:
         Returns:
             Tuple of (embed, view, content) where content contains role pings if needed
         """
-        from views import ScheduleButtonView
+        from mythicbot.scheduling.views import ScheduleButtonView
 
         if self.is_filled():
             color = Color.green()
@@ -170,14 +169,18 @@ class Schedule:
             Reminder for {self.team["tank"].mention} {self.team["healer"].mention} {self.team["dps"][0].mention} {self.team["dps"][1].mention} {self.team["dps"][2].mention}
         """
 
-    def raider_signup(self, raider: Raider, role: Optional[str] = None):
+    def raider_signup(self, raider: Raider, role: Optional[str] = None) -> bool:
         """Add a raider to the schedule, assigning them to appropriate roles.
 
         Args:
             raider: The raider to sign up.
             role: Specific role to sign up as. If None, auto-selects the best
                   available role from the raider's registered roles.
+
+        Returns False, changing nothing, when the raider is already in the run; True otherwise.
         """
+        if self.has_raider(raider):
+            return False
         if role is None:
             role = (
                 raider.roles[0]
@@ -206,6 +209,7 @@ class Schedule:
         self.members.append(raider)
         if self.signup == 5:
             self.full = True
+        return True
 
     def try_displace_off_roler(self, new_raider: Raider, effective_role: str) -> Optional["Raider"]:
         """Check if an off-role slot occupant can be displaced to make room for a main-role player.
@@ -262,29 +266,46 @@ class Schedule:
         return displaced
 
     def raider_remove(self, raider: Raider) -> Optional[Raider]:
-        """Remove a raider from the schedule and return the fill raider promoted into their slot, if any."""
+        """Free the raider's place, wherever they sit, and return the fill raider promoted into that seat, if any."""
+        seat = self.seat_of(raider)
         promoted = None
-        if raider in self.team["fill"]:
+        if seat == "fill":
             self.team["fill"].remove(raider)
-        else:
-            for role in raider.roles:
-                if role == "dps" and raider in self.team["dps"]:
-                    self.team["dps"].remove(raider)
-                    self.signup -= 1
-                    if "dps" not in self.missing:
-                        self.missing.append("dps")
-                    promoted = self._check_fill()
-                elif role in self.team and self.team[role] == raider:
-                    self.team[role] = None
-                    self.signup -= 1
-                    self.missing.append(role)
-                    promoted = self._check_fill()
+        elif seat is not None:
+            if seat == "dps":
+                self.team["dps"].remove(raider)
+            else:
+                self.team[seat] = None
+            self.signup -= 1
+            if seat not in self.missing:
+                self.missing.append(seat)
+            promoted = self._check_fill(seat)
         if raider in self.members:
             self.members.remove(raider)
         if self.signup < 5:
             self.full = False
         raider.remove_run(self)
         return promoted
+
+    def seat_of(self, raider: Raider) -> Optional[str]:
+        """Return the place the raider holds: "tank", "healer", "dps", "fill", or None."""
+        if self.team["tank"] == raider:
+            return "tank"
+        if self.team["healer"] == raider:
+            return "healer"
+        if raider in self.team["dps"]:
+            return "dps"
+        if raider in self.team["fill"]:
+            return "fill"
+        return None
+
+    def open_roles(self) -> list[str]:
+        """Return the roles with an open seat, in tank/healer/dps order."""
+        return [
+            role
+            for role in ("tank", "healer", "dps")
+            if (len(self.team["dps"]) < 3 if role == "dps" else self.team[role] is None)
+        ]
 
     def is_filled(self) -> bool:
         """Return True if the schedule is full (5 signups)."""
@@ -322,14 +343,9 @@ class Schedule:
         return raider in self.members
 
     def try_signup(self, raider: Raider) -> bool:
-        """Attempt to sign up a raider. Returns True if they were added.
-        Prevents duplicate signups.
-        """
-        if raider in self.members:
-            return False
+        """Sign up a raider who is not yet in the run; return True only if they took a seat (not the fill queue)."""
         before = self.signup
-        self.raider_signup(raider)
-        return self.signup > before
+        return self.raider_signup(raider) and self.signup > before
 
     def __eq__(self, other) -> bool:
         """Check equality based on level, date, and start time."""

@@ -1,7 +1,6 @@
 """Tests for the pure gear-audit rules."""
 
-from blizzard import Enchant, EquippedItem
-from gearaudit import (
+from mythicbot.guild.gearaudit import (
     ENCHANTABLE_SLOTS,
     MAX_MESSAGE_CHARS,
     CharacterFindings,
@@ -12,6 +11,7 @@ from gearaudit import (
     gem_ids,
     parse_enchant_tier,
 )
+from mythicbot.market.blizzard import Enchant, EquippedItem
 
 TIER2 = "Enchanted: Enchant Helm - Empowered Blessing of Speed |A:Professions-ChatIcon-Quality-12-Tier2:20:20|a"
 TIER1 = "Enchanted: Enchant Chest - Mark of the Worldsoul |A:Professions-ChatIcon-Quality-12-Tier1:20:20|a"
@@ -107,10 +107,17 @@ def test_audit_character_counts_empty_sockets():
     assert findings.low_gems == []
 
 
-def test_audit_character_flags_below_epic_gems():
+def test_audit_character_flags_rank_one_gems():
     items = full_kit() + [item("NECK", sockets=(111,))]
-    findings = audit_character("Rare Gem", "Mal'Ganis", items, {111: "RARE"})
-    assert findings.low_gems == [("NECK", "RARE")]
+    findings = audit_character("Rank One", "Mal'Ganis", items, {111: "UNCOMMON"})
+    assert findings.low_gems == [("NECK", "UNCOMMON")]
+
+
+def test_audit_character_accepts_rank_two_and_meta_gems():
+    items = full_kit() + [item("NECK", sockets=(240890,)), item("WRIST", sockets=(240983,))]
+    findings = audit_character("Geared", "Mal'Ganis", items, {240890: "RARE", 240983: "EPIC"})
+    assert findings.low_gems == []
+    assert findings.is_clean
 
 
 def test_audit_character_does_not_flag_unknown_gem_quality():
@@ -122,7 +129,7 @@ def test_audit_character_does_not_flag_unknown_gem_quality():
 def test_problem_count_sums_every_kind():
     items = [i for i in full_kit() if i.slot != "HEAD"]
     items += [item("HEAD"), item("NECK", sockets=(None, 111))]
-    findings = audit_character("Messy", "Mal'Ganis", items, {111: "RARE"})
+    findings = audit_character("Messy", "Mal'Ganis", items, {111: "UNCOMMON"})
     assert findings.problem_count == 3  # 1 missing enchant + 1 empty socket + 1 low gem
 
 

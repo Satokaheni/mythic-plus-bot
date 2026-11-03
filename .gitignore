@@ -31,6 +31,8 @@ snipes.json
 snipes.json.tmp
 token_watch.json
 token_watch.json.tmp
+assistant.json
+assistant.json.tmp
 events.jsonl
 character_mappings.json
 lootcouncil_cache.json
@@ -50,3 +52,6 @@ Thumbs.db
 
 # Claude Code local settings (machine-specific)
 .claude/settings.local.json
+
+# Verify harness scratch runs and evidence (.claude/skills/verify-mythic-plus-bot)
+.verify/

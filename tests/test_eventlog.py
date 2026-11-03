@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from eventlog import local_slot, week_of
+from mythicbot.scheduling.eventlog import local_slot, week_of
 
 
 def test_local_slot_basic():
@@ -40,7 +40,7 @@ def test_week_of_tuesday_after_noon_is_this_week():
     assert week_of(ts) == "2026-07-07"
 
 
-from eventlog import log_event, read_events
+from mythicbot.scheduling.eventlog import log_event, read_events
 
 
 def test_log_and_read_round_trip(tmp_path):

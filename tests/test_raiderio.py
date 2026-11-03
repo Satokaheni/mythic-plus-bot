@@ -6,9 +6,16 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-import eventlog
-import raiderio
-from raiderio import Run, _parse_completed_at, _parse_runs, fetch_character_runs, harvest, load_character_mappings
+from mythicbot.guild import raiderio
+from mythicbot.guild.raiderio import (
+    Run,
+    _parse_completed_at,
+    _parse_runs,
+    fetch_character_runs,
+    harvest,
+    load_character_mappings,
+)
+from mythicbot.scheduling import eventlog
 
 
 def test_parse_completed_at_utc():

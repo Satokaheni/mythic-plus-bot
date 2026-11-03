@@ -1,6 +1,6 @@
 """Tests for the pure parsers of the Blizzard Game Data client."""
 
-from blizzard import (
+from mythicbot.market.blizzard import (
     _parse_auctions,
     _parse_equipment,
     _parse_item_info,
@@ -31,7 +31,7 @@ def test_parse_auctions_returns_list():
 
 def test_parse_item_info_recipe_flag():
     recipe = {"name": "Recipe: Widget", "item_class": {"id": 9, "name": "Recipe"}}
-    assert _parse_item_info(recipe) == __import__("blizzard").ItemInfo("Recipe: Widget", True)
+    assert _parse_item_info(recipe) == __import__("mythicbot.market.blizzard", fromlist=["ItemInfo"]).ItemInfo("Recipe: Widget", True)
     mount = {"name": "Reins of Something", "item_class": {"id": 15, "name": "Miscellaneous"}}
     info = _parse_item_info(mount)
     assert info.name == "Reins of Something" and info.is_recipe is False
@@ -103,11 +103,11 @@ def test_parse_equipment_tolerates_missing_and_malformed_entries():
 
 
 def test_parse_item_info_reads_quality():
-    data = {"name": "Flawless Deadly Peridot", "item_class": {"id": 3}, "quality": {"type": "EPIC"}}
+    data = {"name": "Flawless Deadly Peridot", "item_class": {"id": 3}, "quality": {"type": "RARE"}}
     info = _parse_item_info(data)
     assert info.name == "Flawless Deadly Peridot"
     assert info.is_recipe is False
-    assert info.quality == "EPIC"
+    assert info.quality == "RARE"
 
 
 def test_parse_item_info_quality_defaults_to_empty():

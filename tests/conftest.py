@@ -1,12 +1,16 @@
 """Shared pytest fixtures for the Mythic+ bot test suite."""
 
+import importlib
+import logging
+import sys
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import dotenv
 import pytest
 
-from raider import Raider
-from schedule import Schedule
+from mythicbot.scheduling.raider import Raider
+from mythicbot.scheduling.schedule import Schedule
 
 
 @pytest.fixture
@@ -79,3 +83,51 @@ def make_full_schedule(make_raider, make_schedule):
         return sched
 
     return _factory
+
+
+_REQUIRED_ENV = {
+    "CLIENT_KEY": "x", "AVAIL_CHANNEL_ID": "1", "KEY_CHANNEL_ID": "2", "GUILD_ID": "3", "TANK_ROLE_ID": "4",
+    "HEALER_ROLE_ID": "5", "DPS_ROLE_ID": "6", "COORDINATOR_ID": "7", "BANKER_ID": "8", "BLIZZ_CLIENT_ID": "x",
+    "BLIZZ_CLIENT_SECRET": "x", "MYTHIC_PLUS_ID": "9", "ADMIN_ID": "10",
+}
+_FRESH = ("bot", "mythicbot.config", "mythicbot.messages", "mythicbot.state")
+_FRESH_PACKAGES = ("mythicbot.cogs", "mythicbot.assistant")
+
+
+def _forget_bot_modules():
+    for name in list(sys.modules):
+        if name in _FRESH or name in _FRESH_PACKAGES or name.startswith(tuple(p + "." for p in _FRESH_PACKAGES)):
+            sys.modules.pop(name, None)
+            # `from mythicbot import config` reads the parent package's attribute before sys.modules,
+            # so drop that too or the next import would hand back the stale module.
+            parent, _, leaf = name.rpartition(".")
+            if parent in sys.modules and getattr(sys.modules[parent], leaf, None) is not None:
+                delattr(sys.modules[parent], leaf)
+
+
+@pytest.fixture
+def fresh_import(monkeypatch, tmp_path):
+    """Import an env-reading module (bot, config, ...) fresh, with fake env; undo its log handlers."""
+    for name, value in _REQUIRED_ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("LOG_FILE", str(tmp_path / "bot.log"))
+    monkeypatch.setenv("BLIZZ_REGION", "us")
+    monkeypatch.setattr(dotenv, "load_dotenv", lambda *args, **kwargs: None)
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+
+    def _import(name: str):
+        _forget_bot_modules()
+        return importlib.import_module(name)
+
+    yield _import
+    _forget_bot_modules()
+    for handler in root.handlers:
+        if handler not in handlers:
+            handler.close()
+    root.handlers, root.level = handlers, level
+
+
+@pytest.fixture
+def bot_module(fresh_import):
+    return fresh_import("bot")

@@ -1,7 +1,35 @@
+## [1.11.0] - 2026-11-03
+
+### Improvements
+- **Gear Audit** — coordinators/admins can run `!gearaudit [character]` to see missing enchants, empty sockets, and low-rank enchants/gems, worst first.
+- Commands that need arguments now reply with usage help when sent without them.
+- Requesting a key at the same time as a posted run now offers to join that run instead of posting a duplicate.
+
+### Bug Fixes
+- Availability reactions now work on a fresh install and keep counting after a bot restart.
+- When someone leaves a run, the next queued player for that role takes their spot.
+- You can no longer end up in a run twice, and accepting an offer for a run you're already in no longer bumps anyone.
+- Players stuck in a run (moved into an off-role seat, or left behind by an old Remove bug) can now leave or be removed.
+- Change Role only offers open roles, and sends the "run is filled" DMs when a move fills the run.
+- Filling out two sign-up forms at once no longer loses track of your runs.
+
+## [1.10.1] - 2026-11-03
+
+### Bug Fixes
+- Availability reactions no longer fail after a fresh install or a damaged state file — the 🟢/🟡/🔴 pools now exist from the start.
+- Changing your weekly availability reaction is now remembered after the bot restarts.
+- When someone leaves a run, the next queued player for that role now takes the open spot.
+- Double-clicking Sign Up (or accepting an offer at the same moment) can no longer put you in a run twice.
+- A player moved into a role outside their registered roles can now leave or be removed properly.
+- Change Role only offers roles that are open, so a player can no longer be stranded in the fill queue.
+
+### Improvements
+- Internal restructure: each feature now lives in its own module. Commands that take arguments now reply with usage help when sent with none; everything else works as before.
+
 ## [1.10.0]
 
 ### Improvements
-- **Gear Audit** — new coordinator/admin command `!gearaudit [character]` that checks every mapped character against Blizzard's armory data and reports who is missing an enchant, who has an empty gem socket, and who is carrying a Tier-1 enchant or a below-epic gem, worst-first. Characters that fail to fetch are listed separately so stale entries in `character_mappings.json` surface. On demand only — no background task and no DMs to the audited player.
+- **Gear Audit** — new coordinator/admin command `!gearaudit [character]` that checks every mapped character against Blizzard's armory data and reports who is missing an enchant, who has an empty gem socket, and who is carrying a Tier-1 enchant or a rank-1 gem, worst-first. Characters that fail to fetch are listed separately so stale entries in `character_mappings.json` surface. On demand only — no background task and no DMs to the audited player.
 
 ## [1.9.0]
 

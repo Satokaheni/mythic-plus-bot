@@ -80,7 +80,7 @@ def load_state() -> Tuple[
     if not os.path.exists("state.json"):
         if os.path.exists("state.pkl"):
             return _migrate_from_pickle()
-        return {}, {}, {}, 0, {}, {}
+        return {}, {}, {GREEN: [], YELLOW: [], RED: []}, 0, {}, {}
 
     try:
         with open("state.json", "r", encoding="utf-8") as f:
@@ -89,13 +89,13 @@ def load_state() -> Tuple[
         return _deserialize(data)
     except (json.JSONDecodeError, KeyError, ValueError) as exc:
         logger.warning("Error loading state.json: %s. Using default state.", exc)
-        return {}, {}, {}, 0, {}, {}
+        return {}, {}, {GREEN: [], YELLOW: [], RED: []}, 0, {}, {}
 
 
 def _deserialize(data: dict):
     """Reconstruct all objects from a JSON state dict."""
-    from raider import Raider
-    from schedule import Schedule
+    from mythicbot.scheduling.raider import Raider
+    from mythicbot.scheduling.schedule import Schedule
 
     # Pass 1 — create all Raider objects (runs wired up in pass 3)
     raiders: Dict[int, Any] = {}
@@ -118,7 +118,13 @@ def _deserialize(data: dict):
     # If a raider appears in a schedule's members list but is missing from their
     # current_runs (e.g. due to a prior bug that reset current_runs to []), add
     # them back so both sides of the relationship are consistent.
+    # A raider holding a seat but missing from members is a ghost seat from pre-F3 state (Remove
+    # dropped an off-role raider from members but left the seat): make them a member again.
     for schedule in schedules.values():
+        team = schedule.team
+        for raider in [team["tank"], team["healer"], *team["dps"], *team["fill"]]:
+            if raider is not None and raider not in schedule.members:
+                schedule.members.append(raider)
         for raider in schedule.members:
             raider.current_runs.add(schedule)
 
@@ -142,11 +148,20 @@ def _deserialize(data: dict):
     return raiders, schedules, availability, availability_message_id, dm_map, dm_timestamps
 
 
+class _LegacyUnpickler(pickle.Unpickler):
+    """state.pkl predates the mythicbot package: map its top-level module names to the new homes."""
+
+    _MOVED = {"raider": "mythicbot.scheduling.raider", "schedule": "mythicbot.scheduling.schedule"}
+
+    def find_class(self, module, name):
+        return super().find_class(self._MOVED.get(module, module), name)
+
+
 def _migrate_from_pickle():
     """Load from legacy state.pkl and immediately re-save as state.json."""
     try:
         with open("state.pkl", "rb") as f:
-            data = pickle.load(f)
+            data = _LegacyUnpickler(f).load()
 
         raiders = data["raiders"]
         schedules = data["schedules"]
@@ -160,4 +175,4 @@ def _migrate_from_pickle():
         return raiders, schedules, availability, availability_message_id, dm_map, dm_timestamps
     except Exception as exc:
         logger.warning("Error migrating from state.pkl: %s. Using default state.", exc)
-        return {}, {}, {}, 0, {}, {}
+        return {}, {}, {GREEN: [], YELLOW: [], RED: []}, 0, {}, {}

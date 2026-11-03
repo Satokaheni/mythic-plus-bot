@@ -1,6 +1,22 @@
 """Tests for the price-watch state, detection, and formatting logic."""
 
-from watchlist import Watch, Signal, Watchlist, auto_tune, bulk_price, evaluate, format_alert, format_gold, format_watch_line, in_alert_window, median, parse_watch_command, percentile, process_signal, suggest_buy
+from mythicbot.market.watchlist import (
+    Signal,
+    Watch,
+    Watchlist,
+    auto_tune,
+    bulk_price,
+    evaluate,
+    format_alert,
+    format_gold,
+    format_watch_line,
+    in_alert_window,
+    median,
+    parse_watch_command,
+    percentile,
+    process_signal,
+    suggest_buy,
+)
 
 
 def test_format_gold_full_denominations():

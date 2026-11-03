@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from loot import format_loot_table, format_performance_table, main, parse_weights
+from lootcouncil.__main__ import format_loot_table, format_performance_table, main, parse_weights
 from lootcouncil.config import Config
 from lootcouncil.models import DPS, HEALER, TANK, Character, PerformanceScore, RawMetrics, UpgradeInfo
 from lootcouncil.ranker import LootRanker, LootResult, RankedCandidate, normalize_upgrades, weighted_score
@@ -408,7 +408,7 @@ def test_main_exits_0_on_success(monkeypatch, capsys, tmp_path):
     )
 
     # Patch Config.load to return our valid config
-    monkeypatch.setattr("loot.Config.load", lambda: valid_cfg)
+    monkeypatch.setattr("lootcouncil.__main__.Config.load", lambda: valid_cfg)
 
     # Patch LootRanker to return our fake result
     fake_ranker = MagicMock()
@@ -417,8 +417,8 @@ def test_main_exits_0_on_success(monkeypatch, capsys, tmp_path):
     def fake_loot_ranker_init(self, cfg, wowaudit, analyzer):
         pass
 
-    monkeypatch.setattr("loot.LootRanker.__init__", fake_loot_ranker_init)
-    monkeypatch.setattr("loot.LootRanker.rank", lambda self, item_id, difficulty, refresh: fake_result)
+    monkeypatch.setattr("lootcouncil.__main__.LootRanker.__init__", fake_loot_ranker_init)
+    monkeypatch.setattr("lootcouncil.__main__.LootRanker.rank", lambda self, item_id, difficulty, refresh: fake_result)
 
     exit_code = main(["215147"])
     assert exit_code == 0
@@ -439,7 +439,7 @@ def test_main_exits_1_when_ranking_raises(monkeypatch, capsys, tmp_path):
     valid_cfg.guild_server_slug = "area-52"
     valid_cfg.season_zone_id = 1
 
-    monkeypatch.setattr("loot.Config.load", lambda: valid_cfg)
+    monkeypatch.setattr("lootcouncil.__main__.Config.load", lambda: valid_cfg)
 
     # Patch LootRanker to raise RuntimeError
     def fake_loot_ranker_init(self, cfg, wowaudit, analyzer):
@@ -448,8 +448,8 @@ def test_main_exits_1_when_ranking_raises(monkeypatch, capsys, tmp_path):
     def fake_rank_raises(*args, **kwargs):
         raise RuntimeError("Simulated ranking error")
 
-    monkeypatch.setattr("loot.LootRanker.__init__", fake_loot_ranker_init)
-    monkeypatch.setattr("loot.LootRanker.rank", fake_rank_raises)
+    monkeypatch.setattr("lootcouncil.__main__.LootRanker.__init__", fake_loot_ranker_init)
+    monkeypatch.setattr("lootcouncil.__main__.LootRanker.rank", fake_rank_raises)
 
     exit_code = main(["215147"])
     assert exit_code == 1
@@ -478,13 +478,13 @@ def test_main_exits_0_on_empty_result(monkeypatch, capsys, tmp_path):
         weight_performance=0.4,
     )
 
-    monkeypatch.setattr("loot.Config.load", lambda: valid_cfg)
+    monkeypatch.setattr("lootcouncil.__main__.Config.load", lambda: valid_cfg)
 
     def fake_loot_ranker_init(self, cfg, wowaudit, analyzer):
         pass
 
-    monkeypatch.setattr("loot.LootRanker.__init__", fake_loot_ranker_init)
-    monkeypatch.setattr("loot.LootRanker.rank", lambda self, item_id, difficulty, refresh: empty_result)
+    monkeypatch.setattr("lootcouncil.__main__.LootRanker.__init__", fake_loot_ranker_init)
+    monkeypatch.setattr("lootcouncil.__main__.LootRanker.rank", lambda self, item_id, difficulty, refresh: empty_result)
 
     exit_code = main(["215147"])
     assert exit_code == 0

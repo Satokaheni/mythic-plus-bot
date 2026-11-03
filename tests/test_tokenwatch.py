@@ -2,7 +2,7 @@
 
 import pytest
 
-from tokenwatch import TokenWatch, evaluate, format_alert, format_status, parse_threshold, should_rearm
+from mythicbot.market.tokenwatch import TokenWatch, evaluate, format_alert, format_status, parse_threshold, should_rearm
 
 
 def test_defaults_are_disabled():

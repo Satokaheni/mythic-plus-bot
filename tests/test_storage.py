@@ -1,4 +1,4 @@
-"""Tests for utils.py — save/load state, deserialization, pickle migration."""
+"""Tests for storage.py — save/load state, deserialization, pickle migration."""
 
 import json
 import pickle
@@ -6,9 +6,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from raider import Raider
-from utils import GREEN, RED, YELLOW, _deserialize, load_state, save_state
-
+from mythicbot import storage
+from mythicbot.scheduling.raider import Raider
+from mythicbot.storage import GREEN, RED, YELLOW, _deserialize, load_state, save_state
 
 # ---------------------------------------------------------------------------
 # save_state / load_state
@@ -40,14 +40,14 @@ def test_save_load_roundtrip(tmp_path, monkeypatch, make_raider, make_schedule):
 def test_load_empty_when_no_file(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     result = load_state()
-    assert result == ({}, {}, {}, 0, {}, {})
+    assert result == ({}, {}, {GREEN: [], YELLOW: [], RED: []}, 0, {}, {})
 
 
 def test_load_corrupt_json_returns_defaults(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "state.json").write_text("{ not valid json }", encoding="utf-8")
     result = load_state()
-    assert result == ({}, {}, {}, 0, {}, {})
+    assert result == ({}, {}, {GREEN: [], YELLOW: [], RED: []}, 0, {}, {})
 
 
 def test_load_key_error_returns_defaults(tmp_path, monkeypatch):
@@ -65,7 +65,7 @@ def test_load_key_error_returns_defaults(tmp_path, monkeypatch):
     }
     (tmp_path / "state.json").write_text(json.dumps(bad_data), encoding="utf-8")
     result = load_state()
-    assert result == ({}, {}, {}, 0, {}, {})
+    assert result == ({}, {}, {GREEN: [], YELLOW: [], RED: []}, 0, {}, {})
 
 
 def test_load_value_error_returns_defaults(tmp_path, monkeypatch):
@@ -81,7 +81,7 @@ def test_load_value_error_returns_defaults(tmp_path, monkeypatch):
     }
     (tmp_path / "state.json").write_text(json.dumps(bad_data), encoding="utf-8")
     result = load_state()
-    assert result == ({}, {}, {}, 0, {}, {})
+    assert result == ({}, {}, {GREEN: [], YELLOW: [], RED: []}, 0, {}, {})
 
 
 def test_availability_roundtrip(tmp_path, monkeypatch, make_raider):
@@ -194,6 +194,36 @@ def test_deserialize_missing_schedule_id_skipped(make_raider):
     assert raiders_out[1].current_runs == set()
 
 
+def test_deserialize_repairs_ghost_seat(make_raider, make_schedule):
+    """Pre-F3 state: a raider seated outside their roles who clicked Remove kept the seat but left members."""
+    organizer = make_raider(user_id=1, roles=["tank"], name="T")
+    ghost = make_raider(user_id=2, roles=["dps"], name="Ghost")
+    sched = make_schedule(raider=organizer)
+    organizer.add_run(sched)
+    assert sched.raider_signup(ghost, role="healer")
+    sched.members.remove(ghost)  # what the pre-F3 Remove left behind; ghost.current_runs stays empty
+    msg_id = 100
+    ids = {id(sched): msg_id}
+    data = {
+        "version": 2,
+        "raiders": {str(r.user_id): r.to_dict(ids) for r in (organizer, ghost)},
+        "schedules": {str(msg_id): sched.to_dict(msg_id)},
+        "availability": {},
+        "availability_message_id": 0,
+        "dm_map": {},
+        "dm_timestamps": {},
+    }
+
+    raiders_out, schedules_out, *_ = _deserialize(data)
+
+    loaded, ghost_out = schedules_out[msg_id], raiders_out[2]
+    assert loaded.team["healer"] is ghost_out
+    assert loaded.members.count(ghost_out) == 1
+    assert loaded in ghost_out.current_runs
+    assert loaded.has_raider(ghost_out)
+    assert loaded.raider_signup(ghost_out) is False  # Sign Up refuses them instead of seating them twice
+
+
 # ---------------------------------------------------------------------------
 # _migrate_from_pickle
 # ---------------------------------------------------------------------------
@@ -221,3 +251,26 @@ def test_migrate_from_pickle(tmp_path, monkeypatch, make_raider):
     assert raider.user_id in raiders_out
     assert av_id_out == 7
     assert (tmp_path / "state.json").exists()
+
+
+def test_migrate_from_pickle_written_before_the_package_move(tmp_path, monkeypatch, make_raider):
+    """A state.pkl from the old flat layout names its classes `raider.Raider`; it still migrates."""
+    monkeypatch.chdir(tmp_path)
+
+    raider = make_raider(user_id=1)
+    state = {"raiders": {1: raider}, "schedules": {}, "availability": {GREEN: [raider], YELLOW: [], RED: []},
+             "availability_message_id": 7}
+    legacy = pickle.dumps(state, protocol=0).replace(b"cmythicbot.scheduling.raider\n", b"craider\n")
+    assert b"craider\n" in legacy
+    (tmp_path / "state.pkl").write_bytes(legacy)
+
+    raiders_out, _, _, av_id_out, _, _ = load_state()
+
+    assert raiders_out[1].user_id == 1 and av_id_out == 7
+
+
+def test_load_state_corrupt_file_has_availability_pools(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "state.json").write_text("{not json", encoding="utf-8")
+    _, _, availability, _, _, _ = storage.load_state()
+    assert availability == {storage.GREEN: [], storage.YELLOW: [], storage.RED: []}

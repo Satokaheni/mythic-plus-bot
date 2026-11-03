@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
-from blizzard import EquippedItem
+from mythicbot.market.blizzard import EquippedItem
 
 # Slots that take a permanent enchant this expansion. Measured against the live roster on
 # 2026-08-30 (30 characters): CHEST 30/30, FINGER_2 29/30, MAIN_HAND 29/30, FINGER_1 28/30,
@@ -26,7 +26,8 @@ ENCHANTABLE_SLOTS: Tuple[str, ...] = (
 )
 
 WEAPON_ITEM_CLASS_ID = 2  # OFF_HAND counts only when it holds a weapon; shields take no enchant.
-GEM_MIN_QUALITY = "EPIC"
+# Rank 1 stat gems are UNCOMMON, rank 2 ("Flawless") RARE, meta diamonds EPIC (measured 2026-09-03).
+GEM_MIN_QUALITY = "RARE"
 MAX_ENCHANT_TIER = 2  # The cap this expansion, so Tier 1 is the only rank worth flagging.
 
 # Blizzard's quality ladder, lowest first. Anything not listed is left ungraded.

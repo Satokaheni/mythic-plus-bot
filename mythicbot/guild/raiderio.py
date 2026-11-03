@@ -11,7 +11,7 @@ from urllib.parse import urlencode
 
 import aiohttp
 
-import eventlog
+from mythicbot.scheduling import eventlog
 
 logger = logging.getLogger("discord")
 
