@@ -15,7 +15,3 @@ def is_elevated():
 
 def in_channels(*channel_ids: int):
     return commands.check(lambda ctx: ctx.guild is not None and ctx.channel.id in channel_ids)
-
-
-def dm_or_channels(*channel_ids: int):
-    return commands.check(lambda ctx: ctx.guild is None or ctx.channel.id in channel_ids)

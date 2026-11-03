@@ -4,7 +4,8 @@ import asyncio
 from types import SimpleNamespace
 
 
-def test_registered_raider_reaction_persists_pool_change(fresh_import, make_raider):
+def test_registered_raider_reaction_persists_pool_change(fresh_import, make_raider, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)  # eventlog writes events.jsonl relative to cwd
     config = fresh_import("config")
     from cogs.availability import Availability
     from state import BotState

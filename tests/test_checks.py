@@ -26,8 +26,6 @@ def test_checks_mirror_todays_gates(bot_module):
     assert not _predicate(_checks.is_elevated())(_ctx(8))
     assert _predicate(_checks.in_channels(2))(_ctx(1, 2))
     assert not _predicate(_checks.in_channels(2))(_ctx(1, 2, guild=False))
-    assert _predicate(_checks.dm_or_channels(2))(_ctx(1, 99, guild=False))
-    assert not _predicate(_checks.dm_or_channels(2))(_ctx(1, 99))
 
 
 @pytest.mark.parametrize("error", [commands.CommandNotFound("x"), commands.CheckFailure("x")])

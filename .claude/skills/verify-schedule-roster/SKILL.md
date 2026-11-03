@@ -12,7 +12,7 @@ A test checks the sequences someone wrote down. This check runs **every** sequen
 From the repo root (Python 3.10, discord.py 2.3.1; the script warns if either differs; stdlib only otherwise, nothing to install):
 
 ```
-PYTHONIOENCODING=utf-8 A:/anaconda3/python.exe .claude/skills/verify-schedule-roster/check_roster.py
+PYTHONIOENCODING=utf-8 python .claude/skills/verify-schedule-roster/check_roster.py
 ```
 
 Takes about a minute. Exit 0 prints `PASS: matches the recorded findings exactly`. Exit 1 prints `FAIL` with a reason. For a fast loop on one configuration, add `--only player:seq:far` (scope `player|all`, interleave `seq|race`, start `far|near`); `--only` exits 1 whenever anything is violated, known or not.

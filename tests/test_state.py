@@ -36,3 +36,9 @@ def test_instances_do_not_share_containers():
     a.raiders[1] = "x"
     a.reminder_messages[1] = [2]
     assert b.raiders == {} and b.reminder_messages == {}
+
+
+def test_default_availability_has_pools_and_is_not_shared():
+    a, b = BotState(), BotState()
+    assert a.availability == {GREEN: [], YELLOW: [], RED: []}
+    assert a.availability[GREEN] is not b.availability[GREEN]

@@ -107,6 +107,10 @@ class Availability(commands.Cog):
     async def on_availability_reaction(self, reaction: discord.Reaction, user: discord.Member) -> None:
         if user.id == self.bot.user.id:
             return
+        logger.info(
+            f"Reaction added: {user.display_name}, {reaction.emoji} Raider: {user.id in self.bot.state.raiders} "
+            f"ID in schedules: {reaction.message.id in self.bot.state.schedules}"
+        )
         if not (
             reaction.message.channel.id == config.AVAIL_CHANNEL_ID
             and reaction.message.id == self.bot.state.availability_message_id

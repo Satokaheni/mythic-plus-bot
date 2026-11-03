@@ -22,7 +22,7 @@ A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Myt
 | `messages.py` | User-facing message builders and changelog/version file helpers |
 | `state.py` | `BotState` — persisted bot state (raiders, schedules, availability, dm_map, ...); `load()`/`save()` wrap `utils` |
 | `cogs/__init__.py` | `EXTENSIONS` — the list of cog modules `setup_hook` loads |
-| `cogs/_checks.py` | `commands.check` gates: `is_banker`, `is_elevated`, `in_channels`, `dm_or_channels` |
+| `cogs/_checks.py` | `commands.check` gates: `is_banker`, `is_elevated`, `in_channels` |
 | `cogs/scheduling.py` | `Scheduling` — `!key`, `!keys`, `!modify`, key-request/DM-offer flows, fill/notify logic, spot-offer reactions, `hourly_check` loop |
 | `cogs/availability.py` | `Availability` — `!avail`, availability posting, 🟢🟡🔴 reaction handling, `weekly_avail_reset` loop |
 | `cogs/admin.py` | `Admin` — `!cleanup`, `!setup`, `!help`/`!tools`, `on_ready` work (role mentions, message cache warm-up, changelog, pinned key button) |
@@ -49,7 +49,7 @@ A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Myt
 | `CHANGELOG.md` | Version history |
 | `character_mappings.json` | Gitignored config (`discord_id → characters`), maintained manually, provided at runtime (like `.env`) |
 | `pyproject.toml` | Dependencies, linting (ruff), pytest config |
-| `tests/` | pytest suite — `test_raider.py`, `test_schedule.py`, `test_utils.py`, `conftest.py` |
+| `tests/` | pytest suite — `test_raider.py`, `test_schedule.py`, `test_utils.py`, `test_config.py`, `test_state.py`, `test_checks.py`, `test_availability_cog.py`, `conftest.py` |
 
 ---
 
@@ -75,11 +75,11 @@ A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Myt
 
 ### `MyClient(commands.Bot)` + `BotState` + cogs
 `MyClient` (bot.py) owns startup and shared handles; features are cogs loaded from `cogs.EXTENSIONS` in `setup_hook`.
-- `client.state` — a `BotState` (state.py), the persisted data: `raiders` (`Dict[user_id, Raider]`), `schedules` (`Dict[message_id, Schedule]`), `availability` (`Dict[emoji, List[Raider]]`), `availability_message_id`, `dm_map` / `dm_timestamps` (outstanding DM offers and retry timing), plus runtime-only `role_mentions`. `state.save()` writes `state.json`.
+- `client.state` — a `BotState` (state.py), the persisted data: `raiders` (`Dict[user_id, Raider]`), `schedules` (`Dict[message_id, Schedule]`), `availability` (`Dict[emoji, List[Raider]]`), `availability_message_id`, `dm_map` / `dm_timestamps` (outstanding DM offers and retry timing), plus runtime-only `role_mentions` and `reminder_messages`. `state.save()` writes `state.json`.
 - `coordinator_id` — used only for conflict DMs; `elevated_ids` — `{COORDINATOR_ID} | set(ADMINS)`, used for all permission checks
 - `client.blizzard` — shared Blizzard client (used by Sniper, WowToken, Gear)
 - Facade delegators on `MyClient` (so `views.py` stays decoupled from cog layout), all forwarding to the Scheduling cog: `notify_schedule`, `message_user`, `_do_key_request_flow`, `_notify_promoted`, `_notify_displaced`, `new_availability_signup_fill_schedule`, `_notify_schedule_changed`
-- Cross-cog calls go through `bot.get_cog("Scheduling")` (e.g. Availability → `new_availability_signup_fill_schedule`)
+- Cross-cog calls go through those `MyClient` facade delegators (which call `get_cog("Scheduling")` internally), e.g. Availability → `bot.new_availability_signup_fill_schedule`
 
 | Cog | Commands | Listeners / flows | Loop |
 |-----|----------|-------------------|------|

@@ -14,7 +14,7 @@ This directory is the maintained map of what a Discord user can do with the Myth
 ## Driving conventions
 
 - Start every recipe from the baseline state unless its preconditions say otherwise.
-- Act only as a user acts: `h.say` (message), `h.react` (reaction), `h.click` (button by label or custom_id), `h.choose` (select by placeholder or custom_id, option by value or label), `h.submit_modal` (modal fields by label). Never call handler methods or mutate `client.schedules` / `client.raiders`.
+- Act only as a user acts: `h.say` (message), `h.react` (reaction), `h.click` (button by label or custom_id), `h.choose` (select by placeholder or custom_id, option by value or label), `h.submit_modal` (modal fields by label). Never call handler methods or mutate `client.state.schedules` / `client.state.raiders`.
 - Register people the way users do: a 🟢/🟡/🔴 reaction on the availability post, the `Sign Up` button, or the key-request flow. Reuse the steps in `scripts/journeys.py` (`post_availability`, `register_via_availability`, `signup_new_raider`, `fill_class_form`, `create_key_request`).
 - After each action, wait on the user-visible result with `h.wait_for(where, contains)`; never sleep a fixed time.
 - Treat command strings, labels, and placeholders as literal. They are matched by substring (`"Choose start time"` matches `Choose start time (Central time)`).

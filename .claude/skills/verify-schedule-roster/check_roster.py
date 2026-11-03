@@ -13,7 +13,6 @@ import argparse
 import os
 import sys
 import time
-from collections import deque
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -21,6 +20,7 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, REPO)
 
 import discord  # noqa: E402  (schedule.py / raider.py import it)
+
 from raider import Raider  # noqa: E402
 from schedule import Schedule  # noqa: E402
 
@@ -169,7 +169,7 @@ def make_raider(name, uid):
 
 
 def post_run(pool, organizer, role, start):
-    """cogs/scheduling.py SchedulingCog._do_key_request_flow, new-run branch: Schedule(...organizer_role=role),
+    """cogs/scheduling.py Scheduling._do_key_request_flow, new-run branch: Schedule(...organizer_role=role),
     then at Post Schedule raiders[user].add_run(schedule). Pre-post Add Raider is covered by `staff_add` below."""
     raiders = {n: make_raider(n, 1000 + i) for i, n in enumerate(pool)}
     s = Schedule(raiders[organizer], "10", start.strftime("%Y-%m-%d"), start, "one", organizer_role=role)
@@ -210,7 +210,7 @@ def signup_finish(w, n, pick):
 
 def auto_guard(w, n):
     """views.py ScheduleButtonView.signup_button, new-raider welcome branch, and cogs/scheduling.py
-    SchedulingCog.on_spot_offer_reaction, ✅ branch (DM offer): guard,
+    Scheduling.on_spot_offer_reaction, ✅ branch (DM offer): guard,
     try_displace_off_roler(raider, roles[0]); if displaced, or the run is full (DM offer asks about
     the fill queue first), await (resumes in `auto_finish`); else raider_signup(raider) + add_run."""
     r = w.r[n]

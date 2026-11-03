@@ -3,7 +3,6 @@
 import asyncio
 from types import SimpleNamespace
 
-import pytest
 
 def _scheduling_cog(bot_module, **bot_attrs):
     from cogs.scheduling import Scheduling

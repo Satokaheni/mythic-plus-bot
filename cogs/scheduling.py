@@ -951,6 +951,8 @@ class Scheduling(commands.Cog):
             return
         if reaction.message.channel.id not in self.bot.state.dm_map or user.id not in self.bot.state.raiders:
             return
+        if reaction.emoji not in ["✅", "❌"]:
+            return
 
         if reaction.emoji == "✅":
             schedule_id = self.bot.state.dm_map.get(reaction.message.channel.id, {}).get(reaction.message.id)

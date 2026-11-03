@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import utils
+from utils import GREEN, RED, YELLOW
 
 
 class BotState:
@@ -18,7 +19,9 @@ class BotState:
     ) -> None:
         self.raiders: Dict[int, Any] = raiders if raiders is not None else {}
         self.schedules: Dict[int, Any] = schedules if schedules is not None else {}
-        self.availability: Dict[str, List[Any]] = availability if availability is not None else {}
+        self.availability: Dict[str, List[Any]] = (
+            availability if availability is not None else {GREEN: [], YELLOW: [], RED: []}
+        )
         self.availability_message_id: Optional[int] = availability_message_id
         self.dm_map: Dict[int, Dict[int, int]] = dm_map if dm_map is not None else {}
         self.dm_timestamps: Dict[int, Dict[int, datetime]] = dm_timestamps if dm_timestamps is not None else {}

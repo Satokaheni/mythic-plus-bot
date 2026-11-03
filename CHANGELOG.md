@@ -5,7 +5,7 @@
 - Changing your weekly availability reaction is now remembered after the bot restarts.
 
 ### Improvements
-- Internal restructure: each feature now lives in its own module. No change to commands or behavior.
+- Internal restructure: each feature now lives in its own module. Commands that take arguments now reply with usage help when sent with none; everything else works as before.
 
 ## [1.10.0]
 
