@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import datetime, time, timedelta, timezone
 from textwrap import dedent
-from typing import Dict, List, Optional, Tuple
+from typing import Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -15,12 +15,7 @@ import blizzard
 import cogs
 import eventlog
 import forecast
-import gearaudit
 import raiderio
-import snipelist as snipelist_mod
-import tokenwatch
-import undermine
-import watchlist
 from config import (  # noqa: F401  (re-exported for the harness and tests)
     _CST,
     ADMINS,
@@ -64,7 +59,6 @@ from views import (
     ScheduleButtonView,
     WoWSelectionView,
 )
-from watchlist import Watchlist
 
 # ---------------------------
 # Logging
@@ -709,164 +703,6 @@ class MyClient(commands.Bot):
                     )
                     self.state.reminder_messages.setdefault(schedule_id, []).append(reminder_msg.id)
 
-    @tasks.loop(hours=1)
-    async def price_watch_check(self):
-        """Hourly sweep of watched commodities; DMs the banker on a buy signal."""
-        if not self.is_ready():
-            logger.warning("price_watch_check: Bot not ready yet, skipping this iteration")
-            return
-
-        watches = self.watchlist.all()
-        if not watches:
-            return
-
-        now = datetime.now(timezone.utc)
-        # Only alert during waking hours (10 AM–11:59 PM CST). Outside the window we skip the
-        # alert/state transition so a still-good dip re-fires on the next in-window check.
-        alert_ok = watchlist.in_alert_window(datetime.now(_CST))
-        banker = None
-        async with aiohttp.ClientSession() as session:
-            for watch in watches:
-                try:
-                    now_result = await undermine.fetch_now(session, watch.item_id)
-                    if now_result is None:
-                        continue
-                    daily = await undermine.fetch_daily(session, watch.item_id)
-                    target = watch.target_qty or BANKER_BULK_QTY
-                    signal = watchlist.evaluate(
-                        now_result.price, now_result.quantity, daily, watch, now_result.auctions, target
-                    )
-                    if alert_ok and watchlist.process_signal(watch, signal, now):
-                        if banker is None:
-                            banker = await self.fetch_user(BANKER_ID)
-                        try:
-                            await banker.send(watchlist.format_alert(watch, signal, BANKER_BUDGET_COPPER))
-                        except discord.HTTPException:
-                            logger.warning("price_watch_check: could not DM banker for item %s", watch.item_id)
-                    watchlist.auto_tune(watch, now)
-                except Exception as exc:  # noqa: BLE001 - one bad item must not kill the sweep
-                    logger.warning("price_watch_check failed for item %s: %s", watch.item_id, exc)
-
-        self.watchlist.save()
-
-    @tasks.loop(minutes=TOKEN_POLL_MINUTES)
-    async def token_watch_check(self):
-        """Poll the WoW Token price; DM the banker when it rises past their sell threshold."""
-        if not self.is_ready():
-            logger.warning("token_watch_check: Bot not ready yet, skipping this iteration")
-            return
-        if self.token_watch.threshold is None:
-            return
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                result = await self.blizzard.token_price(session)
-            if result is None:
-                logger.warning("token_watch_check: token payload carried no price, skipping")
-                return
-            price, _updated = result
-
-            # Price fell back under the threshold: reset the ratchet so the next
-            # crossing alerts again. Guarded so a quiet sub-threshold price does
-            # not rewrite the state file every 20 minutes.
-            if tokenwatch.should_rearm(self.token_watch, price):
-                self.token_watch.last_alert = None
-                self.token_watch.save()
-                return
-
-            report = tokenwatch.evaluate(self.token_watch, price)
-            if report is None:
-                return
-
-            banker = await self.fetch_user(BANKER_ID)
-            try:
-                await banker.send(
-                    tokenwatch.format_alert(report, self.token_watch.threshold, self.token_watch.last_alert)
-                )
-            except discord.HTTPException:
-                logger.warning("token_watch_check: could not DM banker; not advancing the ratchet")
-                return
-
-            # Commit the ratchet only after the DM actually landed, so a Discord
-            # failure cannot silently swallow an alert the owner never saw.
-            self.token_watch.last_alert = report
-            self.token_watch.save()
-        except Exception as exc:  # noqa: BLE001 - a bad poll must not kill the loop
-            logger.warning("token_watch_check failed: %s", exc)
-
-    @tasks.loop(minutes=SNIPE_SWEEP_MINUTES)
-    async def auction_snipe_check(self):
-        """Sweep every region realm; DM subscribers when a snipe's cheapest price beats target."""
-        if not self.is_ready():
-            logger.warning("auction_snipe_check: not ready, skipping")
-            return
-        keys = self.snipelist.watched_keys()
-        if not keys:
-            return
-
-        async with aiohttp.ClientSession() as session:
-            try:
-                now = datetime.now(timezone.utc)
-                stale = (
-                    self._snipe_realm_ids_fetched is None
-                    or (now - self._snipe_realm_ids_fetched) >= timedelta(hours=24)
-                )
-                if not self._snipe_realm_ids or stale:
-                    self._snipe_realm_ids = await self.blizzard.list_connected_realms(session)
-                    self._snipe_realm_ids_fetched = now
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("auction_snipe_check: realm list failed: %s", exc)
-                return
-
-            # Refresh each realm's watched-item prices (conditional; 304 -> reuse cache).
-            for realm_id in self._snipe_realm_ids:
-                try:
-                    result = await self.blizzard.get_realm_auctions(
-                        session, realm_id, self._snipe_realm_modified.get(realm_id)
-                    )
-                    if result is blizzard.NOT_MODIFIED:
-                        continue
-                    auctions, last_modified = result
-                    prices = {}
-                    for kind, key_id in keys:
-                        bp = snipelist_mod.best_price_for(auctions, kind, key_id)
-                        if bp is not None:
-                            prices[(kind, key_id)] = bp
-                    self._snipe_price_cache[realm_id] = prices
-                    self._snipe_realm_modified[realm_id] = last_modified
-                except Exception as exc:  # noqa: BLE001 - one bad realm must not kill the sweep
-                    logger.warning("auction_snipe_check: realm %s failed: %s", realm_id, exc)
-
-            # Aggregate cheapest-anywhere per key and decide alerts.
-            for snipe in self.snipelist.all():
-                try:
-                    key = (snipe.kind, snipe.key_id)
-                    realm_prices = {
-                        rid: prices[key] for rid, prices in self._snipe_price_cache.items() if key in prices
-                    }
-                    best = snipelist_mod.cheapest(realm_prices)
-                    plans = snipelist_mod.plan_alerts(snipe, best, BANKER_ID)
-                    if not plans or best is None:
-                        continue
-                    realm = await self.blizzard.realm_name(session, best[2])
-                    for plan in plans:
-                        await self._send_snipe_dm(session, snipe, best, realm, plan)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("auction_snipe_check: snipe %s failed: %s", snipe.key_id, exc)
-
-        self.snipelist.save()
-
-    async def _send_snipe_dm(self, session, snipe, best, realm, plan):
-        try:
-            user = await self.fetch_user(plan.recipient_id)
-            if plan.is_banker:
-                wanters = [(f"<@{uid}>", s.target_copper) for uid, s in snipe.subscribers.items()]
-                await user.send(snipelist_mod.format_banker_alert(snipe, best, realm, wanters))
-            else:
-                await user.send(snipelist_mod.format_alert(snipe, best, realm, plan.target_copper))
-        except Exception as exc:  # noqa: BLE001 - one bad DM must not abort the fan-out
-            logger.warning("auction_snipe_check: could not DM %s: %s", plan.recipient_id, exc)
-
     @tasks.loop(hours=24)
     async def raiderio_harvest(self):
         """Daily Raider.io backfill/harvest: append new raiderio_run events (idempotent)."""
@@ -1145,14 +981,7 @@ class MyClient(commands.Bot):
         self.state = BotState.load()
         self.coordinator_id = COORDINATOR_ID
         self.elevated_ids = ELEVATED_IDS
-        self.watchlist = Watchlist.load()
         self.blizzard = blizzard.BlizzardClient()
-        self.snipelist = snipelist_mod.Snipelist.load()
-        self.token_watch = tokenwatch.TokenWatch.load()
-        self._snipe_realm_ids: list = []  # cached connected-realm ids
-        self._snipe_price_cache: dict = {}  # realm_id -> {(kind,key_id): (price, qty)}
-        self._snipe_realm_modified: dict = {}  # realm_id -> Last-Modified str
-        self._snipe_realm_ids_fetched = None
         self._char_mappings = raiderio.load_character_mappings()
         logger.info("Loaded state from file.")
 
@@ -1174,20 +1003,11 @@ class MyClient(commands.Bot):
         if not self.weekly_avail_reset.is_running():
             self.weekly_avail_reset.start()
 
-        if not self.price_watch_check.is_running():
-            self.price_watch_check.start()
-
         if not self.raiderio_harvest.is_running():
             self.raiderio_harvest.start()
 
         if not self.forecast_preview.is_running():
             self.forecast_preview.start()
-
-        if not self.auction_snipe_check.is_running():
-            self.auction_snipe_check.start()
-
-        if not self.token_watch_check.is_running():
-            self.token_watch_check.start()
 
     async def on_ready(self):
         """Called when the bot is ready."""
@@ -1229,58 +1049,6 @@ class MyClient(commands.Bot):
                 await button_msg.pin()
                 logger.info("on_ready: posted and pinned missing key request button in KEY_CHANNEL")
 
-    async def _run_gear_audit(
-        self, mappings: List[dict]
-    ) -> Tuple[List[gearaudit.CharacterFindings], List[Tuple[str, str, str]]]:
-        """Fetch and audit every mapped character. Returns (findings, failures).
-
-        One character's failure never ends the sweep — it is collected and reported, since a
-        404 usually means a rename or transfer the mapping file hasn't caught up with.
-        """
-        semaphore = asyncio.Semaphore(GEAR_AUDIT_CONCURRENCY)
-        findings: List[gearaudit.CharacterFindings] = []
-        failures: List[Tuple[str, str, str]] = []
-
-        async with aiohttp.ClientSession() as session:
-
-            async def audit_one(entry: dict) -> None:
-                character = entry.get("character") or ""
-                realm_slug = entry.get("realm_slug") or ""
-                realm_name = entry.get("realm_name") or realm_slug
-                if not character or not realm_slug:
-                    # Report it rather than dropping it silently — a half-filled mapping entry is
-                    # exactly the kind of drift this command is meant to surface.
-                    failures.append(
-                        (character or "(unnamed entry)", realm_name or "?", "incomplete mapping entry")
-                    )
-                    return
-                # The semaphore wraps the whole body, not just the equipment fetch: the per-gem
-                # item_info lookups are Blizzard calls too, and bounding only the first request
-                # would let ~30 characters' worth of gem lookups fan out at once.
-                async with semaphore:
-                    try:
-                        items = await self.blizzard.character_equipment(session, realm_slug, character)
-                    except Exception as exc:  # noqa: BLE001 - one bad character must not end the sweep
-                        logger.warning("gearaudit: %s/%s failed: %s", realm_slug, character, exc)
-                        failures.append((character, realm_name, "fetch failed"))
-                        return
-                    if items is None:
-                        failures.append(
-                            (character, realm_name, "not found — renamed, transferred, or a stale mapping")
-                        )
-                        return
-                    gem_quality: Dict[int, str] = {}
-                    for gem_id in gearaudit.gem_ids(items):
-                        try:
-                            gem_quality[gem_id] = (await self.blizzard.item_info(session, gem_id)).quality
-                        except Exception as exc:  # noqa: BLE001 - an unknown gem is simply not graded
-                            logger.warning("gearaudit: gem %s lookup failed: %s", gem_id, exc)
-                    findings.append(gearaudit.audit_character(character, realm_name, items, gem_quality))
-
-            await asyncio.gather(*(audit_one(entry) for entry in mappings), return_exceptions=True)
-
-        return findings, failures
-
     # ---------------------------
     # Message Listener
     # ---------------------------
@@ -1290,276 +1058,6 @@ class MyClient(commands.Bot):
             return
 
         await self.process_commands(message)
-
-        if message.content.startswith("!watch ") and message.author.id == BANKER_ID:
-            args = message.content.split()[1:]
-            if message.guild is not None:
-                try:
-                    await message.delete()
-                except (discord.Forbidden, discord.NotFound):
-                    pass
-            parsed = watchlist.parse_watch_command(args)
-            if parsed["kind"] == "error":
-                reason = parsed.get("reason")
-                if reason == "bad_flag":
-                    hint = (
-                        "❌ A `-x` quantity must be **attached with no space** (e.g. `-x100`, not `-x 100`). "
-                        "A spaced `-x` in a multi-item command swallows the next item id."
-                    )
-                elif reason == "multi_label":
-                    hint = (
-                        "❌ Labels aren't supported when watching several items at once — "
-                        "drop the text, or add that item on its own to give it a label."
-                    )
-                else:
-                    hint = "❌ Give at least one numeric item id."
-                await message.author.send(
-                    f"{hint}\n"
-                    "Usage: `!watch <itemId> [-x<qty>] [label]`  •  several at once: "
-                    "`!watch <id1> -x<qty> <id2> -x<qty> ...`\n"
-                    "Example: `!watch 241326 -x100 241322 -x100 241324 -x100`"
-                )
-                return
-            # Two or more ids -> watch several at once (auto-labelled), each with an optional -x target.
-            if parsed["kind"] == "multi":
-                added, already = [], []
-                for iid, iqty in parsed["items"]:
-                    target = iqty or BANKER_BULK_QTY
-                    if self.watchlist.get(iid) is None:
-                        self.watchlist.add(iid, f"Item {iid}", iqty)
-                        added.append(f"{iid} (bulk {target:,})")
-                    else:
-                        already.append(str(iid))
-                self.watchlist.save()
-                reply = []
-                if added:
-                    reply.append(f"👁️ Now watching {len(added)} item(s): {', '.join(added)}.")
-                if already:
-                    reply.append(f"Already watching: {', '.join(already)}.")
-                await message.author.send("\n".join(reply))
-                return
-            # Single item, with an optional multi-word label and optional -x bulk target.
-            item_id = parsed["item_id"]
-            label = parsed["label"] or f"Item {item_id}"
-            target_qty = parsed["target_qty"]
-            self.watchlist.add(item_id, label, target_qty)
-            self.watchlist.save()
-            qty_note = f" — bulk target **{target_qty:,}**" if target_qty else ""
-            await message.author.send(f"👁️ Now watching **{label}** (item {item_id}){qty_note}.")
-            return
-
-        if message.content.startswith("!unwatch ") and message.author.id == BANKER_ID:
-            args = message.content.split()[1:]
-            if message.guild is not None:
-                try:
-                    await message.delete()
-                except (discord.Forbidden, discord.NotFound):
-                    pass
-            if not args or not all(a.isdigit() for a in args):
-                await message.author.send("Usage: `!unwatch <itemId> [itemId ...]`")
-                return
-            removed, missing = [], []
-            for a in args:
-                iid = int(a)
-                (removed if self.watchlist.remove(iid) else missing).append(iid)
-            if removed:
-                self.watchlist.save()
-            reply = []
-            if removed:
-                reply.append(f"🚫 Stopped watching {len(removed)} item(s): {', '.join(str(i) for i in removed)}.")
-            if missing:
-                reply.append(f"Not being watched: {', '.join(str(i) for i in missing)}.")
-            await message.author.send("\n".join(reply))
-            return
-
-        if message.content == "!watches" and message.author.id == BANKER_ID:
-            if message.guild is not None:
-                try:
-                    await message.delete()
-                except (discord.Forbidden, discord.NotFound):
-                    pass
-            watches = self.watchlist.all()
-            if not watches:
-                await message.author.send("No items are being watched. Add one with `!watch <itemId> [label]`.")
-                return
-            lines = []
-            async with aiohttp.ClientSession() as session:
-                for watch in watches:
-                    try:
-                        now_result = await undermine.fetch_now(session, watch.item_id)
-                        daily = await undermine.fetch_daily(session, watch.item_id)
-                        target = watch.target_qty or BANKER_BULK_QTY
-                        sig = (
-                            watchlist.evaluate(
-                                now_result.price, now_result.quantity, daily, watch,
-                                now_result.auctions, target,
-                            )
-                            if now_result
-                            else None
-                        )
-                    except Exception:  # noqa: BLE001 - display best-effort
-                        sig = None
-                    lines.append(watchlist.format_watch_line(watch, sig))
-            await message.author.send("**Watched items:**\n" + "\n".join(lines))
-            return
-
-        if message.content.startswith("!gearaudit") and message.author.id in ELEVATED_IDS:
-            if message.guild is not None:
-                try:
-                    await message.delete()
-                except (discord.Forbidden, discord.NotFound):
-                    pass
-            wanted = message.content[len("!gearaudit"):].strip()
-            mappings = raiderio.load_character_mappings()
-            if wanted:
-                mappings = [m for m in mappings if (m.get("character") or "").lower() == wanted.lower()]
-                if not mappings:
-                    await message.author.send(f"No mapping for `{wanted}`.")
-                    return
-            if not mappings:
-                await message.author.send("No characters are mapped, so there is nothing to audit.")
-                return
-            try:
-                findings, failures = await self._run_gear_audit(mappings)
-            except Exception as exc:  # noqa: BLE001 - a failed audit must not kill on_message
-                logger.warning("gearaudit failed: %s", exc)
-                await message.author.send("The gear audit failed. Check the logs.")
-                return
-            for chunk in gearaudit.format_report(findings, failures):
-                await message.author.send(chunk)
-            return
-
-        if message.content.startswith("!tokenalert") and message.author.id == BANKER_ID:
-            if message.guild is not None:
-                try:
-                    await message.delete()
-                except (discord.Forbidden, discord.NotFound):
-                    pass
-            parts = message.content.split(maxsplit=1)
-            if len(parts) < 2:
-                await message.author.send(
-                    "Usage: `!tokenalert <gold>` (e.g. `!tokenalert 300000`) or `!tokenalert off`."
-                )
-                return
-            try:
-                threshold = tokenwatch.parse_threshold(parts[1])
-            except ValueError:
-                await message.author.send(
-                    f"`{parts[1].strip()}` isn't a valid gold amount. "
-                    "Use `!tokenalert 300000`, `!tokenalert 300,000`, or `!tokenalert off`."
-                )
-                return
-            # Setting or clearing a threshold always re-arms, so a new threshold never
-            # inherits a stale ratchet position from the previous one.
-            self.token_watch.threshold = threshold
-            self.token_watch.last_alert = None
-            self.token_watch.save()
-            if threshold is None:
-                await message.author.send("🔕 WoW Token alerts disabled.")
-            else:
-                await message.author.send(
-                    f"💰 WoW Token alert set: I'll DM you when the price rises above "
-                    f"**{watchlist.format_gold(threshold)}**."
-                )
-            return
-
-        if message.content == "!token" and message.author.id == BANKER_ID:
-            if message.guild is not None:
-                try:
-                    await message.delete()
-                except (discord.Forbidden, discord.NotFound):
-                    pass
-            price = None
-            try:
-                async with aiohttp.ClientSession() as session:
-                    result = await self.blizzard.token_price(session)
-                if result is not None:
-                    price = result[0]
-            except Exception as exc:  # noqa: BLE001 - report state even if the API is down
-                logger.warning("!token: could not fetch token price: %s", exc)
-            await message.author.send(tokenwatch.format_status(self.token_watch, price))
-            return
-
-        if message.content.startswith("!snipe ") and not message.content.startswith("!snipepet "):
-            args = message.content.split()[1:]
-            if len(args) < 2 or not args[0].isdigit():
-                await message.channel.send("Usage: `!snipe <itemId> <maxGold> [label]`")
-                return
-            item_id = int(args[0])
-            target = snipelist_mod.parse_gold(args[1])
-            if target is None:
-                await message.channel.send("Max price must be a positive number of gold, e.g. `!snipe 194123 5000`.")
-                return
-            async with aiohttp.ClientSession() as session:
-                try:
-                    info = await self.blizzard.item_info(session, item_id)
-                    label = " ".join(args[2:]) if len(args) > 2 else info.name or f"Item {item_id}"
-                    is_recipe = info.is_recipe
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("snipe item_info failed for %s: %s", item_id, exc)
-                    existing = self.snipelist.get("item", item_id)
-                    label = " ".join(args[2:]) if len(args) > 2 else (existing.label if existing else f"Item {item_id}")
-                    is_recipe = existing.is_recipe if existing else False
-            self.snipelist.subscribe(message.author.id, "item", item_id, target, label, is_recipe)
-            self.snipelist.save()
-            note = " (recipe — the banker is also alerted)" if is_recipe else ""
-            await message.channel.send(
-                f"🎯 Sniping **{label}** (item {item_id}) under {snipelist_mod.format_gold(target)}{note}."
-            )
-            return
-
-        if message.content.startswith("!snipepet "):
-            args = message.content.split()[1:]
-            if len(args) < 2 or not args[0].isdigit():
-                await message.channel.send("Usage: `!snipepet <speciesId> <maxGold> [label]`")
-                return
-            species_id = int(args[0])
-            target = snipelist_mod.parse_gold(args[1])
-            if target is None:
-                await message.channel.send("Max price must be a positive number of gold.")
-                return
-            async with aiohttp.ClientSession() as session:
-                try:
-                    name = await self.blizzard.pet_name(session, species_id)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("snipe pet_name failed for %s: %s", species_id, exc)
-                    name = f"Pet {species_id}"
-            label = " ".join(args[2:]) if len(args) > 2 else name
-            self.snipelist.subscribe(message.author.id, "pet", species_id, target, label, False)
-            self.snipelist.save()
-            await message.channel.send(
-                f"🎯 Sniping pet **{label}** (species {species_id}) under {snipelist_mod.format_gold(target)}."
-            )
-            return
-
-        if message.content.startswith("!unsnipe "):
-            args = message.content.split()[1:]
-            if not args or not all(a.isdigit() for a in args):
-                await message.channel.send("Usage: `!unsnipe <id ...>`")
-                return
-            removed = []
-            for a in args:
-                iid = int(a)
-                # a bare id may be an item or a pet the caller subscribes to; try both
-                if self.snipelist.unsubscribe(message.author.id, "item", iid):
-                    removed.append(iid)
-                elif self.snipelist.unsubscribe(message.author.id, "pet", iid):
-                    removed.append(iid)
-            if removed:
-                self.snipelist.save()
-                await message.channel.send(f"🚫 Stopped sniping: {', '.join(str(i) for i in removed)}.")
-            else:
-                await message.channel.send("You weren't sniping any of those.")
-            return
-
-        if message.content == "!snipes":
-            snipes = self.snipelist.for_owner(message.author.id)
-            if not snipes:
-                await message.channel.send("You aren't sniping anything. Add one with `!snipe <itemId> <maxGold>`.")
-                return
-            lines = [snipelist_mod.format_snipe_line(s, s.subscribers[message.author.id]) for s in snipes]
-            await message.author.send("**Your snipes:**\n" + "\n".join(lines))
-            return
 
         if message.content in ("!help", "!tools"):
             embed = discord.Embed(
