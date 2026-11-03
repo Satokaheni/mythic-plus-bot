@@ -134,7 +134,7 @@ Each schedule embed has three buttons:
 **Coordinator/Admin view** (also shown when the coordinator is the run organizer):
 - **Add Raider** — Search by display name (partial match) and assign a role
 - **Remove Raider** — Remove any signed-up raider from the run
-- **Change Role** — Move a raider to a different role slot
+- **Change Role** — Move a raider into a role slot that is currently open
 
 ### Price Watch
 

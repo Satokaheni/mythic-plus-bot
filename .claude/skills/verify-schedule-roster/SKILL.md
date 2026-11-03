@@ -32,6 +32,8 @@ Each property, then the harm when it breaks.
 
 P1-P5 are checked in every state, including the moment a handler is suspended at an await. P6 is checked after every step that calls `raider_remove`.
 
+P6 counts only the seats the step freed: tank or healer held before and open after, and a DPS seat whenever the DPS count dropped. It does not ask whether a queued raider fits some other seat that was already open. **Owner decision, 2026-11-03:** a removal promotes only into the seat it freed (`Schedule._check_fill(freed_role)`), so "any open seat" is not the intended behavior. The property text is unchanged. On 2026-11-03 the implementation (`check_promotion`) was widened to match it: it used to count a freed DPS seat only when DPS had been full (3/3), so a DPS leaving a 2/3 group was never checked.
+
 ## What is explored (bounds and assumptions)
 
 - **Raiders.** Default pool `T,H,D1,DT,HD` from `CATALOG` in the script: tank-only, healer-only, DPS-only, DPS-main with tank off-role, healer-main with DPS off-role. One run, level 10, one-key. Any pool member may post it, with each role they could pick.
@@ -48,32 +50,28 @@ P1-P5 are checked in every state, including the moment a handler is suspended at
 - `Schedule.to_dict` / `from_dict` and `utils.load_state` (restart round-trips), `send_message` / embed text, `format_dm_roster`, DM delivery, `notify_schedule`, `_notify_promoted`, `BotState.save`.
 - `hourly_check`, `Scheduling.fill_remaining_spots` selection, Modify Run, Delete Run, `!cleanup`.
 - Pools larger than five raiders. A bug that needs six distinct raiders at once is outside the bound.
-- A new bug that breaks a property already listed as a known finding in the same scope and interleave is masked by it. `player`/`seq` has P1-P5 clean, and P2, P3, P5 are clean everywhere, so those stay sensitive.
+- With `KNOWN` empty, no property is masked: every property is sensitive in every configuration. If a finding is ever added to `KNOWN` again, a new bug that breaks the same property in the same scope and interleave is hidden behind it.
 
 ## Findings at the sync commit
 
-These are real violations in the current code, recorded in `KNOWN` in the script so the check can detect new ones. Do not "fix" them by editing the check.
-
-- **F1 (P6, scope `player`). A queued raider who fits the freed seat is skipped.** `Schedule._check_fill` promotes the first queued raider who fits *any* open seat and stops. A multi-role raider who picked a taken role is queued even while their other role is open, so they are ahead in line. Shortest trace: T posts as tank; H signs up as healer; DT clicks Sign Up and picks tank, which is taken, so DT goes to the fill queue although three DPS seats are open; HD clicks Sign Up and picks healer, also queued; H clicks Remove. `_check_fill` puts DT into DPS and returns; HD, a healer, stays queued with the healer seat open.
-- **F2 (P1/P4, `race`). A raider can be seated twice by concurrent signups.** `ScheduleButtonView.signup_button` checks `check_availability` / `current_runs` and then awaits (`interaction.response.defer` or the role picker) before `raider_signup` and `add_run`. A second Sign Up click (a double-click), a DM-offer ✅, or a coordinator Add Raider for the same raider passes the same guard in that window. Shortest trace: T posts; H clicks Sign Up (guard passes, handler awaits); H accepts a DM offer, `raider_signup(H)` seats H as healer; H's Sign Up resumes and calls `raider_signup(H, None)`, which queues H as fill. H is now healer and fill, and in `members` twice. A double-click gives the same result one step later.
-- **F3 (P1/P4, scope `all`). A raider seated outside their registered roles can never leave the seat.** `raider_remove` looks for the raider only in the slots named by `raider.roles`, but `ManageRoleSelect`, `ManualAddRoleSelect`, and `ChangeRoleTargetSelect` offer all three roles for anyone. Shortest trace: T (tank-only) posts; the coordinator uses Change Role to move T to healer; T clicks Remove. T leaves `members` and `current_runs`, but the healer seat still holds T. Confirmed end to end through the offline harness (`verify-mythic-plus-bot`): coordinator Manage, Add Raider "Pew" (DPS-only) as Healer, Pew clicks Remove and is told `You've been removed from this run.`, yet the embed and `state.json` still show Pew as healer with `members` lacking Pew. Variant: Change Role T to healer, then Change Role T to tank, and T holds both seats.
-- **F4 (P6, scope `all`). Change Role into a taken role strands the raider in the queue with their old seat open.** `ChangeRoleTargetSelect.callback` calls `raider_remove` (which frees the seat and promotes nobody) and then `raider_signup(raider, role=new_role)`, which queues them when that role is taken. Shortest trace: T posts as tank; H signs up as healer; the coordinator moves T to healer. Tank is now open and T, a tank, waits in the fill queue.
+None. `KNOWN` in the script is empty, so any violation is new. F1-F4 (found at `0c75335`: promotion into the wrong seat, double seating from concurrent signups, a seat that could not be cleared when held outside the raider's registered roles, and Change Role into a taken role) were fixed on 2026-11-03 (CHANGELOG 1.10.1, `fix(roster)` commits).
 
 ## Coverage record
 
 Sync commit: `0c75335f41a1859f2db35e304c9fe4d86c6f1abc` (branch `refactor/modularize-bot`, bot split into cogs, v1.10.1). Previously synced at `3febdaca6f014b7464b47f2612fc3af83c36f3d1` (`feature/loot-council-helper`, pre-refactor `bot.py`). Confirmed at this commit, by reading each handler, that the steps below match the code. The refactor moved the `bot.py` handlers into cogs and renamed `bot.<x>` state to `bot.state.<x>`; the call order and await points of every mirrored step are unchanged. `schedule.py` and `raider.py` did not change between the two commits.
 
 Called for real (imported):
-- `schedule.py`: `Schedule.__init__`, `raider_signup`, `_check_fill`, `raider_remove`, `try_displace_off_roler`, `has_raider`, `is_filled`, `__eq__`/`__hash__` (through `current_runs` sets).
+- `schedule.py`: `Schedule.__init__`, `raider_signup` (and its `False` return for a raider already in the run), `_check_fill(freed_role)`, `raider_remove`, `seat_of`, `open_roles`, `try_displace_off_roler`, `has_raider`, `is_filled`, `__eq__`/`__hash__` (through `current_runs` sets).
 - `raider.py`: `Raider.__init__`, `add_run`, `remove_run`, `check_availability`, `__eq__`/`__hash__`.
 
 Mirrored (call order, guards, and await points copied into the step functions of `check_roster.py`; find handlers by name):
-- `views.py` `ScheduleButtonView.signup_button`: new-raider welcome branch and registered branch → `auto_guard`/`auto_finish`, `signup_guard`/`signup_apply`/`signup_finish`. The `await` points are `bot._notify_displaced`, the role picker (`RoleSelectView.wait`) or `defer`.
+- `views.py` `ScheduleButtonView.signup_button`: new-raider welcome branch and registered branch → `auto_guard`/`auto_finish`, `signup_guard`/`signup_apply`/`signup_finish`. The `await` points are `bot._notify_displaced`, the role picker (`RoleSelectView.wait`) or `defer`. After the picker/defer the registered branch re-checks `has_raider` (answers "already signed up" and stops) before displacement; both branches skip `add_run` and everything after it when `raider_signup` returns `False`.
 - `views.py` `ScheduleButtonView.remove_button` → `remove_click`. It now keeps the promoted raider from `raider_remove` and calls `bot._notify_promoted` after the embed edit; that does not change roster state.
-- `views.py` `_apply_manage_add` and `_apply_manual_add` → `staff_add`.
+- `views.py` `_apply_manage_add` and `_apply_manual_add` → `staff_add`. The `raider_signup` return value is the guard (`False` → "already signed up").
 - `views.py` `RemoveRaiderSelect.callback` → `staff_remove`.
-- `views.py` `ChangeRaiderRoleSelect.callback` and `ChangeRoleTargetSelect.callback` → `change_role_pick`/`change_role_apply`.
-- `cogs/scheduling.py` `Scheduling.on_spot_offer_reaction`, ✅ branch (DM offer; was `bot.py` `on_reaction_add`) → `auto_guard`/`auto_finish`. The fill-offer DM is the await; `raider_signup` runs in the ✅ reply or in the else branch.
+- `views.py` `ChangeRaiderRoleSelect.callback` and `ChangeRoleTargetSelect.callback` → `change_role_pick`/`change_role_apply`, with `_change_role_targets` → `change_targets` (open roles minus the raider's own seat). The pick refuses ("no open roles") when there is no target. At click time the callback re-checks that the raider is still in the run and that the role is still a target, and refuses without changing anything otherwise. `resumes` offers all three roles, a superset of the menu built at pick time, and the re-check turns the rest away.
+- `cogs/scheduling.py` `Scheduling.on_spot_offer_reaction`, ✅ branch (DM offer; was `bot.py` `on_reaction_add`) → `auto_guard`/`auto_finish`. The fill-offer DM is the await; `raider_signup` runs in the ✅ reply or in the else branch, and on `False` the raider is DMed "already signed up" and nothing else happens.
+- Not mirrored, as it is outside the one-run bound: the `_do_key_request_flow` join-existing branch. It checks `check_availability` after its await and treats a `False` from `raider_signup` the same way.
 - `cogs/scheduling.py` `Scheduling._do_key_request_flow`, new-run branch (`Schedule(...)`, then `add_run` after `PrePostAddRaiderView` returns a `message_id`) → `post_run`.
 
 ## Does my change touch this?
@@ -91,7 +89,11 @@ Run `git diff 0c75335f41a1859f2db35e304c9fe4d86c6f1abc -- schedule.py raider.py 
 - `search not exhausted` — raise `--depth`; the result is not complete.
 - A traceback on import means `schedule.py`/`raider.py` no longer import (check that first), or their constructors changed shape (`make_raider`, `post_run`).
 
-To show the check still has teeth after editing it, break the code on scratch and confirm the verdict fails, then restore: for example delete `self.team["fill"].remove(raider)` in `_check_fill` (expect `NEW violation: scope=player interleave=seq P1-one-place`) or `self.missing.remove("tank")` in `raider_signup` (expect `P2-missing-matches` in every configuration). Both were run at the sync commit and caught; `raider.remove_run(self)` removed from `raider_remove` trips P5, and `self.full = True` replaced by `pass` trips P3.
+To show the check still has teeth after editing it, break the code on scratch and confirm the verdict fails, then restore. Examples:
+- Delete the `has_raider` duplicate guard at the top of `raider_signup`: expect `NEW violation` for P1-one-place and P4-members-match in `player`/`race` and `all`/`race`. The shortest trace is a DM offer that bumps an off-roler and then seats the same raider twice. Run and caught at the sync commit (2026-11-03).
+- Delete `self.team["fill"].remove(raider)` in `_check_fill`: expect `NEW violation: scope=player interleave=seq P1-one-place`.
+- Delete `self.missing.remove("tank")` in `raider_signup`: expect `P2-missing-matches` in every configuration.
+- Remove `raider.remove_run(self)` from `raider_remove` (trips P5), or replace `self.full = True` with `pass` (trips P3).
 
 ## Updating
 

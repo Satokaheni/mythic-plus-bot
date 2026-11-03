@@ -69,8 +69,10 @@ A Discord bot (discord.py v2+, Python 3.9+) for scheduling World of Warcraft Myt
 - `organizer_id` — Discord user ID of whoever created the run
 - `note` — optional run note
 - `try_displace_off_roler(raider, role)` — bumps off-role fillers for main-role players (>8 hrs before run)
-- `_check_fill()` — promotes the first fill-queue raider who fits an open tank/healer/dps slot (one slot per raider), updating `missing`
-- `raider_remove(raider)` — frees the slot and returns the fill raider promoted into it (or `None`); callers DM them via the Scheduling cog's `_notify_promoted` (`MyClient._notify_promoted` delegates)
+- `raider_signup(raider, role=None)` — seats the raider in `role` (or their best open registered role), or queues them as fill when that seat is taken; returns `False` and changes nothing if the raider is already in `members`, `True` otherwise. Every caller checks the result and skips `add_run`, DMs, embed edits, and saves on `False` (answering "already signed up" where a reply is owed)
+- `_check_fill(freed_role)` — promotes the first fill-queue raider whose registered roles include `freed_role` into that seat (DPS only while fewer than 3), updating `missing`; never touches other open seats
+- `raider_remove(raider)` — frees the place the raider actually holds (tank, healer, a DPS seat, or fill — found with `seat_of`, regardless of registered roles), promotes into that freed seat only (removing a fill raider promotes no one), and returns the promoted raider (or `None`); callers DM them via the Scheduling cog's `_notify_promoted` (`MyClient._notify_promoted` delegates)
+- `seat_of(raider)` / `open_roles()` — the raider's place (`"tank"`/`"healer"`/`"dps"`/`"fill"`/`None`) and the roles with an open seat; Change Role (`ChangeRoleTargetSelect`) offers only `open_roles()` minus the raider's own seat, says "no open roles" when there are none, and re-checks at click time
 - `send_message(role_mentions, bot)` — returns `(embed, view, content)` for posting/editing
 
 ### `MyClient(commands.Bot)` + `BotState` + cogs
@@ -101,7 +103,7 @@ Each cog starts its loops in `cog_load` and cancels them in `cog_unload`. Cog-ow
 ### Signup Flow
 1. User clicks "Sign Up" on schedule embed → `ScheduleButtonView`
 2. Multi-role raiders get `RoleSelectView` to pick which role
-3. `schedule.raider_signup()` assigns slot, `raider.add_run()` tracks it
+3. `schedule.raider_signup()` assigns slot (refused if the raider is already in the run, e.g. a double-click), `raider.add_run()` tracks it
 4. If run fills → `notify_schedule()` DMs all members
 
 ### Key Request Flow

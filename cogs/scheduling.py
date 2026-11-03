@@ -610,7 +610,9 @@ class Scheduling(commands.Cog):
                                 await user.send(f"⚠️ **Cannot join this run**\n\n{conflict_reason}")
                                 return
 
-                            existing_schedule.raider_signup(self.bot.state.raiders[user.id])
+                            if not existing_schedule.raider_signup(self.bot.state.raiders[user.id]):
+                                await user.send("❌ You're already signed up for that run.")
+                                return
                             self.bot.state.raiders[user.id].add_run(existing_schedule)
                             await user.send(
                                 f"✅ You have been added to the existing run on {existing_schedule.date_scheduled} at {existing_schedule.start_time.strftime('%I:%M %p')}."
@@ -1000,22 +1002,30 @@ class Scheduling(commands.Cog):
                     try:
                         fill_reaction, _ = await self.bot.wait_for("reaction_add", timeout=120.0, check=fill_check)
                         if str(fill_reaction.emoji) == "✅":
-                            schedule.raider_signup(raider)
-                            raider.add_run(schedule)
-                            await dm_channel.send(
-                                f"✅ You've been added as a fill for the Level {schedule.level} run on "
-                                f"<t:{ts}:F>. You'll be notified if a spot opens up!"
-                            )
-                            key_msg = await self.bot.get_channel(config.KEY_CHANNEL_ID).fetch_message(schedule_id)
-                            embed, view, content = schedule.send_message(self.bot.state.role_mentions, self.bot)
-                            await key_msg.edit(content=content if content else None, embed=embed, view=view)
-                            logger.info("%s added as fill for schedule %s via DM", user, schedule)
+                            if not schedule.raider_signup(raider):
+                                await dm_channel.send(
+                                    f"❌ You're already signed up for the Level {schedule.level} run on <t:{ts}:F>."
+                                )
+                            else:
+                                raider.add_run(schedule)
+                                await dm_channel.send(
+                                    f"✅ You've been added as a fill for the Level {schedule.level} run on "
+                                    f"<t:{ts}:F>. You'll be notified if a spot opens up!"
+                                )
+                                key_msg = await self.bot.get_channel(config.KEY_CHANNEL_ID).fetch_message(schedule_id)
+                                embed, view, content = schedule.send_message(self.bot.state.role_mentions, self.bot)
+                                await key_msg.edit(content=content if content else None, embed=embed, view=view)
+                                logger.info("%s added as fill for schedule %s via DM", user, schedule)
                         else:
                             await dm_channel.send("❌ Understood, you won't be added to this run.")
                     except asyncio.TimeoutError:
                         pass
+                elif not schedule.raider_signup(raider):
+                    ts = int(schedule.start_time.astimezone(timezone.utc).timestamp())
+                    await reaction.message.channel.send(
+                        f"❌ You're already signed up for the Level {schedule.level} run on <t:{ts}:F>."
+                    )
                 else:
-                    schedule.raider_signup(raider)
                     raider.add_run(schedule)
                     if schedule.is_filled():
                         await self.notify_schedule(schedule)

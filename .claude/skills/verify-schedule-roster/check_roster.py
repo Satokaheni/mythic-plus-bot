@@ -71,18 +71,7 @@ PROPERTIES = {
 # Known findings at the sync commit: (scope, interleave, property) -> finding id (SKILL.md, Findings).
 # The check exits 0 only when the violated set equals this set exactly. Remove an entry only when the
 # finding is fixed in product code; never add one to silence a new violation without reporting it.
-KNOWN = {
-    ("player", "seq", "P6-promotion"): "F1",
-    ("player", "race", "P6-promotion"): "F1",
-    ("player", "race", "P1-one-place"): "F2",
-    ("player", "race", "P4-members-match"): "F2",
-    ("all", "race", "P1-one-place"): "F2",
-    ("all", "seq", "P1-one-place"): "F3",
-    ("all", "seq", "P4-members-match"): "F3",
-    ("all", "race", "P4-members-match"): "F3",
-    ("all", "seq", "P6-promotion"): "F4",
-    ("all", "race", "P6-promotion"): "F4",
-}
+KNOWN = {}
 
 
 # ---------------------------------------------------------------------------
@@ -188,22 +177,28 @@ def signup_guard(w, n, pick):
 
 
 def signup_apply(w, n, pick):
-    """views.py ScheduleButtonView.signup_button, after the role picker/defer: effective_role; try_displace_off_roler; if displaced, await the notice
-    (resumes in `signup_finish`); else raider_signup(raider, selected_role) + add_run."""
+    """views.py ScheduleButtonView.signup_button, after the role picker/defer: has_raider re-check (already
+    signed up -> answer and stop); effective_role; try_displace_off_roler; if displaced, await the notice
+    (resumes in `signup_finish`); else raider_signup(raider, selected_role), add_run only if it returned True."""
     r = w.r[n]
+    if w.s.has_raider(r):
+        return f"{n}'s Sign Up resumes: already in the run, handler answers 'already signed up'"
     effective = pick if pick is not None else r.roles[0]
     displaced = w.s.try_displace_off_roler(r, effective)
     if displaced is not None:
         w.pending = tuple(sorted(w.pending + (("signup2", n, pick),), key=str))
         return f"{n}'s Sign Up resumes: try_displace_off_roler bumps {displaced.name} (handler awaits the DM)"
-    w.s.raider_signup(r, pick)
+    if not w.s.raider_signup(r, pick):
+        return f"{n}'s Sign Up resumes: raider_signup({n}, {pick!r}) refuses (already in the run)"
     r.add_run(w.s)
     return f"{n}'s Sign Up resumes: raider_signup({n}, {pick!r})"
 
 
 def signup_finish(w, n, pick):
-    """views.py ScheduleButtonView.signup_button, after the `_notify_displaced` await: raider_signup + add_run."""
-    w.s.raider_signup(w.r[n], pick)
+    """views.py ScheduleButtonView.signup_button, after the `_notify_displaced` await: raider_signup, then
+    add_run only if it returned True."""
+    if not w.s.raider_signup(w.r[n], pick):
+        return f"{n}'s Sign Up finishes: raider_signup({n}, {pick!r}) refuses (already in the run)"
     w.r[n].add_run(w.s)
     return f"{n}'s Sign Up finishes: raider_signup({n}, {pick!r})"
 
@@ -212,7 +207,8 @@ def auto_guard(w, n):
     """views.py ScheduleButtonView.signup_button, new-raider welcome branch, and cogs/scheduling.py
     Scheduling.on_spot_offer_reaction, ✅ branch (DM offer): guard,
     try_displace_off_roler(raider, roles[0]); if displaced, or the run is full (DM offer asks about
-    the fill queue first), await (resumes in `auto_finish`); else raider_signup(raider) + add_run."""
+    the fill queue first), await (resumes in `auto_finish`); else raider_signup(raider), and add_run only
+    if it returned True."""
     r = w.r[n]
     if not r.check_availability(w.s) or w.s in r.current_runs:
         return None
@@ -221,13 +217,16 @@ def auto_guard(w, n):
         w.pending = tuple(sorted(w.pending + (("auto", n, None),), key=str))
         what = f"bumps {displaced.name}" if displaced is not None else "run is full, asks about the fill queue"
         return f"{n} accepts a DM run offer (or finishes welcome signup): {what} (handler awaits)"
-    w.s.raider_signup(r)
+    if not w.s.raider_signup(r):
+        return None  # refused, nothing changed (the guard above just passed, with no await between)
     r.add_run(w.s)
     return f"{n} accepts a DM run offer (or finishes welcome signup): raider_signup({n})"
 
 
 def auto_finish(w, n, _):
-    w.s.raider_signup(w.r[n])
+    """After the await: raider_signup(raider), then add_run only if it returned True."""
+    if not w.s.raider_signup(w.r[n]):
+        return f"{n}'s offer/welcome signup finishes: raider_signup({n}) refuses (already in the run)"
     w.r[n].add_run(w.s)
     return f"{n}'s offer/welcome signup finishes: raider_signup({n})"
 
@@ -249,11 +248,11 @@ def remove_click(w, n):
 def staff_add(w, n, role):
     """views.py _apply_manage_add (coordinator Add Raider; ManageRoleSelect offers all three
     roles) and _apply_manual_add (organizer Add Raider; ManualAddRoleSelect offers all
-    three to multi-role raiders): has_raider guard, raider_signup(raider, role), add_run."""
+    three to multi-role raiders): raider_signup(raider, role) is the guard (False -> 'already
+    signed up', nothing changed), then add_run."""
     r = w.r[n]
-    if w.s.has_raider(r):
+    if not w.s.raider_signup(r, role=role):
         return None
-    w.s.raider_signup(r, role=role)
     r.add_run(w.s)
     return f"coordinator/organizer adds {n} as {role} (raider_signup({n}, role={role!r}))"
 
@@ -268,18 +267,28 @@ def staff_remove(w, n):
     return f"coordinator removes {n} (raider_remove({n}))"
 
 
+def change_targets(s, r):
+    """views.py _change_role_targets: the open roles minus the seat the raider already holds."""
+    return [role for role in s.open_roles() if role != s.seat_of(r)]
+
+
 def change_role_pick(w, n):
-    """views.py ChangeRaiderRoleSelect.callback: has_raider guard, then the role picker
-    (await). Resumes in `change_role_apply`."""
-    if not w.s.has_raider(w.r[n]):
+    """views.py ChangeRaiderRoleSelect.callback: has_raider guard; no open target role -> 'no open
+    roles' and stop; else the role picker (await). Resumes in `change_role_apply`."""
+    if not w.s.has_raider(w.r[n]) or not change_targets(w.s, w.r[n]):
         return None
     w.pending = tuple(sorted(w.pending + (("chrole", n, None),), key=str))
     return f"coordinator opens Change Role for {n} (handler awaits the role pick)"
 
 
 def change_role_apply(w, n, role):
-    """views.py ChangeRoleTargetSelect.callback: raider_remove, raider_signup(role), add_run."""
+    """views.py ChangeRoleTargetSelect.callback: click-time re-check (raider still in the run and the role
+    still a target, else refuse and change nothing), then raider_remove, raider_signup(role), add_run.
+    `resumes` offers every role here, a superset of the menu built at pick time; the re-check is what
+    turns away a role that is not open at click time."""
     r = w.r[n]
+    if not w.s.has_raider(r) or role not in change_targets(w.s, r):
+        return f"coordinator picks {role} for {n}: refused (not open now), nothing changed"
     w.s.raider_remove(r)
     w.did_remove = True
     w.s.raider_signup(r, role=role)
@@ -294,7 +303,7 @@ GUARDS = {
     "remove_click": lambda w, n: w.s in w.r[n].current_runs,
     "staff_add": lambda w, n, _role: not w.s.has_raider(w.r[n]),
     "staff_remove": lambda w, n: w.s.has_raider(w.r[n]),
-    "change_role_pick": lambda w, n: w.s.has_raider(w.r[n]),
+    "change_role_pick": lambda w, n: w.s.has_raider(w.r[n]) and bool(change_targets(w.s, w.r[n])),
 }
 
 
@@ -404,14 +413,15 @@ def check_state(w):
 
 
 def check_promotion(before, after):
-    """P6 on a step that called raider_remove: seats held before, open after, that a raider still in
-    the fill queue lists among their roles."""
+    """P6 on a step that called raider_remove: the seats it freed (tank/healer held before and open
+    after; a DPS seat whenever the DPS count dropped) that a raider still in the fill queue lists among
+    their roles. Only freed seats count: the owner chose freed-seat-only promotion on 2026-11-03."""
     if after.deleted:
         return None
     b, a = before.s, after.s
-    held_before = {"tank": b.team["tank"] is not None, "healer": b.team["healer"] is not None,
-                   "dps": len(b.team["dps"]) == 3}
-    freed = {role for role in SLOT_ROLES if held_before[role] and role in open_slots(a)}
+    freed = {role for role in ("tank", "healer") if b.team[role] is not None and a.team[role] is None}
+    if len(a.team["dps"]) < len(b.team["dps"]):
+        freed.add("dps")
     waiting = [(f.name, role) for f in a.team["fill"] for role in f.roles if role in freed]
     if waiting:
         return f"freed {sorted(freed)} is open while {waiting} wait in the fill queue"

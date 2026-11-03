@@ -3,6 +3,10 @@
 ### Bug Fixes
 - Availability reactions no longer fail after a fresh install or a damaged state file — the 🟢/🟡/🔴 pools now exist from the start.
 - Changing your weekly availability reaction is now remembered after the bot restarts.
+- When someone leaves a run, the next queued player for that role now takes the open spot.
+- Double-clicking Sign Up (or accepting an offer at the same moment) can no longer put you in a run twice.
+- Coordinators can now remove a player they placed in a role outside that player's registered roles.
+- Change Role only offers roles that are open, so a player can no longer be stranded in the fill queue.
 
 ### Improvements
 - Internal restructure: each feature now lives in its own module. Commands that take arguments now reply with usage help when sent with none; everything else works as before.

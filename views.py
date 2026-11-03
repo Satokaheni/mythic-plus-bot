@@ -83,7 +83,9 @@ class ScheduleButtonView(discord.ui.View):
                     displaced = schedule.try_displace_off_roler(raider, raider.roles[0])
                     if displaced:
                         await bot._notify_displaced(displaced, schedule, raider.roles[0])
-                    schedule.raider_signup(raider)
+                    if not schedule.raider_signup(raider):
+                        await user.send("❌ Registration complete, but you're already signed up for this run.")
+                        return
                     raider.add_run(schedule)
 
                     embed, view, content = schedule.send_message(bot.state.role_mentions, bot)
@@ -148,12 +150,19 @@ class ScheduleButtonView(discord.ui.View):
         else:
             await interaction.response.defer(ephemeral=True)
 
+        # The role picker / defer above awaited, so another click or a DM offer may have seated them.
+        if schedule.has_raider(raider):
+            await self._already_signed_up(interaction, selected_role)
+            return
+
         effective_role = selected_role if selected_role is not None else raider.roles[0]
         displaced = schedule.try_displace_off_roler(raider, effective_role)
         if displaced:
             await bot._notify_displaced(displaced, schedule, effective_role)
 
-        schedule.raider_signup(raider, selected_role)
+        if not schedule.raider_signup(raider, selected_role):
+            await self._already_signed_up(interaction, selected_role)
+            return
         raider.add_run(schedule)
 
         embed, view, content = schedule.send_message(bot.state.role_mentions, bot)
@@ -173,6 +182,14 @@ class ScheduleButtonView(discord.ui.View):
             )
         else:
             await interaction.followup.send("✅ You've been signed up for this run!", ephemeral=True)
+
+    @staticmethod
+    async def _already_signed_up(interaction: discord.Interaction, selected_role: Optional[str]) -> None:
+        message = "❌ You're already signed up for this run."
+        if selected_role:
+            await interaction.edit_original_response(content=message, view=None)
+        else:
+            await interaction.followup.send(message, ephemeral=True)
 
     @discord.ui.button(label="Remove", style=discord.ButtonStyle.danger, emoji="❌", custom_id="remove")
     async def remove_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -464,13 +481,11 @@ async def _apply_manage_add(
     role: str = None,
 ) -> None:
     """Add a raider to a schedule from the coordinator manage menu."""
-    if schedule.has_raider(raider):
+    if not schedule.raider_signup(raider, role=role):
         await interaction.response.send_message(
             f"❌ **{raider.name}** is already signed up for this run.", ephemeral=True
         )
         return
-
-    schedule.raider_signup(raider, role=role)
     raider.add_run(schedule)
 
     if schedule.team["tank"] == raider:
@@ -739,6 +754,12 @@ class ChangeRaiderRoleSelect(discord.ui.Select):
         if not raider or not self.schedule.has_raider(raider):
             await interaction.response.send_message("❌ Raider not found in this run.", ephemeral=True)
             return
+        if not _change_role_targets(self.schedule, raider):
+            await interaction.response.send_message(
+                f"❌ No open roles to move **{raider.name}** into.", ephemeral=True
+            )
+            self.view.stop()
+            return
         await interaction.response.send_message(
             f"Change **{raider.name}** to which role?",
             view=ChangeRoleTargetView(raider, self.schedule, self.bot_client, self.key_msg),
@@ -755,8 +776,13 @@ class ChangeRaiderRoleView(discord.ui.View):
         self.add_item(ChangeRaiderRoleSelect(schedule, bot_client, key_msg))
 
 
+def _change_role_targets(schedule: "Schedule", raider: "Raider") -> list:
+    """Roles a coordinator may move the raider into: the open ones, minus the seat they already hold."""
+    return [role for role in schedule.open_roles() if role != schedule.seat_of(raider)]
+
+
 class ChangeRoleTargetSelect(discord.ui.Select):
-    """Dropdown for choosing the new role slot for a raider."""
+    """Dropdown for choosing the new role slot for a raider (only roles that are open)."""
 
     def __init__(self, raider: "Raider", schedule: "Schedule", bot_client: "MyClient", key_msg: discord.Message):
         self.raider = raider
@@ -767,7 +793,7 @@ class ChangeRoleTargetSelect(discord.ui.Select):
             discord.SelectOption(
                 label=role.title(), value=role, emoji={"tank": "🛡️", "healer": "💚", "dps": "⚔️"}.get(role)
             )
-            for role in ["tank", "healer", "dps"]
+            for role in _change_role_targets(schedule, raider)
         ]
         super().__init__(placeholder="Select new role…", min_values=1, max_values=1, options=options)
 
@@ -776,6 +802,17 @@ class ChangeRoleTargetSelect(discord.ui.Select):
         raider = self.raider
         schedule = self.schedule
         bot = self.bot_client
+
+        if not schedule.has_raider(raider):
+            await interaction.response.send_message(f"❌ **{raider.name}** is no longer in this run.", ephemeral=True)
+            self.view.stop()
+            return
+        if new_role not in _change_role_targets(schedule, raider):
+            await interaction.response.send_message(
+                f"❌ **{new_role.title()}** is no longer open. Nothing was changed.", ephemeral=True
+            )
+            self.view.stop()
+            return
 
         promoted = schedule.raider_remove(raider)
         schedule.raider_signup(raider, role=new_role)
@@ -1284,11 +1321,9 @@ async def _apply_manual_add(
     role: str = None,
 ) -> None:
     """Sign up a raider manually and refresh the schedule post."""
-    if schedule.has_raider(raider):
+    if not schedule.raider_signup(raider, role=role):
         await interaction.response.send_message(f"❌ **{raider.name}** is already signed up for this run.")
         return
-
-    schedule.raider_signup(raider, role=role)
     raider.add_run(schedule)
     add_view.added_count += 1
 

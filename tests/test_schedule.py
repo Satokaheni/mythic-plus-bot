@@ -405,7 +405,7 @@ def test_multi_role_fill_takes_only_one_slot(make_raider, make_schedule):
     flex = make_raider(user_id=6, roles=["tank", "dps"])
     sched.team["fill"].append(flex)
 
-    sched._check_fill()
+    sched._check_fill("tank")
 
     assert sched.team["tank"] is flex
     assert flex not in sched.team["dps"]
@@ -425,3 +425,126 @@ def test_raider_remove_returns_none_without_promotion(make_full_schedule):
     sched = make_full_schedule()
 
     assert sched.raider_remove(sched.team["healer"]) is None
+
+
+# ---------------------------------------------------------------------------
+# Roster fixes F1-F4 (counterexamples from .claude/skills/verify-schedule-roster)
+# ---------------------------------------------------------------------------
+
+
+def _seat_holders(sched):
+    seats = [sched.team["tank"], sched.team["healer"], *sched.team["dps"], *sched.team["fill"]]
+    return [r for r in seats if r is not None]
+
+
+def test_f1_removal_promotes_only_into_the_freed_seat(make_raider, make_schedule):
+    """T posts tank; H healer; DT picks Tank (queued); HD picks Healer (queued); H leaves."""
+    t = make_raider(user_id=1, roles=["tank"], name="T")
+    sched = make_schedule(raider=t)
+    h = make_raider(user_id=2, roles=["healer"], name="H")
+    dt = make_raider(user_id=3, roles=["dps", "tank"], name="DT")
+    hd = make_raider(user_id=4, roles=["healer", "dps"], name="HD")
+    sched.raider_signup(h)
+    sched.raider_signup(dt, "tank")
+    sched.raider_signup(hd, "healer")
+    assert sched.team["fill"] == [dt, hd]
+
+    promoted = sched.raider_remove(h)
+
+    assert promoted is hd
+    assert sched.team["healer"] is hd
+    assert sched.team["fill"] == [dt]
+    assert sched.team["dps"] == []
+    assert "healer" not in sched.missing
+    assert sched.signup == 2
+
+
+def test_f1_freed_dps_seat_skips_queued_raider_who_cannot_play_dps(make_raider, make_full_schedule):
+    sched = make_full_schedule()
+    tank_backup = make_raider(user_id=6, roles=["tank"])
+    dps_backup = make_raider(user_id=7, roles=["dps"])
+    sched.raider_signup(tank_backup)
+    sched.raider_signup(dps_backup)
+
+    promoted = sched.raider_remove(sched.team["dps"][0])
+
+    assert promoted is dps_backup
+    assert sched.team["fill"] == [tank_backup]
+    assert sched.is_filled()
+
+
+def test_f1_removing_a_fill_raider_promotes_no_one(make_raider, make_schedule):
+    sched = make_schedule(raider=make_raider(user_id=1, roles=["tank"]))
+    queued = make_raider(user_id=2, roles=["tank"])
+    waiting = make_raider(user_id=3, roles=["dps", "tank"])
+    sched.raider_signup(queued)
+    sched.raider_signup(waiting, "tank")
+
+    assert sched.raider_remove(queued) is None
+    assert sched.team["fill"] == [waiting]
+    assert sched.team["dps"] == []
+
+
+def test_f2_signup_returns_true_on_success(make_raider, make_schedule):
+    sched = make_schedule(raider=make_raider(user_id=1, roles=["tank"]))
+    assert sched.raider_signup(make_raider(user_id=2, roles=["healer"])) is True
+
+
+def test_f2_second_signup_of_same_raider_is_refused_and_mutates_nothing(make_raider, make_schedule):
+    sched = make_schedule(raider=make_raider(user_id=1, roles=["tank"]))
+    h = make_raider(user_id=2, roles=["healer"])
+    sched.raider_signup(h)
+    before = (dict(sched.team, dps=list(sched.team["dps"]), fill=list(sched.team["fill"])),
+              list(sched.members), list(sched.missing), sched.signup, sched.full)
+
+    assert sched.raider_signup(h) is False
+    assert sched.raider_signup(h, "dps") is False
+
+    after = (dict(sched.team, dps=list(sched.team["dps"]), fill=list(sched.team["fill"])),
+             list(sched.members), list(sched.missing), sched.signup, sched.full)
+    assert after == before
+    assert _seat_holders(sched).count(h) == 1
+
+
+def test_f2_try_signup_refuses_existing_member(make_raider, make_schedule):
+    tank = make_raider(user_id=1, roles=["tank"])
+    sched = make_schedule(raider=tank)
+    assert sched.try_signup(tank) is False
+    assert sched.try_signup(make_raider(user_id=2, roles=["healer"])) is True
+
+
+def test_f3_remove_frees_seat_outside_registered_roles(make_raider, make_schedule):
+    """Tank-only T is moved to healer by the staff path, then leaves."""
+    t = make_raider(user_id=1, roles=["tank"], name="T")
+    sched = make_schedule(raider=t)
+    t.add_run(sched)
+    d = make_raider(user_id=2, roles=["dps"], name="D")
+    sched.raider_signup(d)
+    d.add_run(sched)
+    sched.raider_remove(t)
+    sched.raider_signup(t, role="healer")
+    t.add_run(sched)
+    assert sched.team["healer"] is t
+
+    sched.raider_remove(t)
+
+    assert sched.team["healer"] is None
+    assert sched.team["tank"] is None
+    assert "healer" in sched.missing
+    assert t not in _seat_holders(sched)
+    assert sched.members == [d]
+    assert sched not in t.current_runs
+    assert sched.signup == 1
+
+
+def test_f3_remove_frees_dps_seat_for_raider_without_dps_role(make_raider, make_schedule):
+    sched = make_schedule(raider=make_raider(user_id=1, roles=["tank"]))
+    healer = make_raider(user_id=2, roles=["healer"])
+    sched.raider_signup(healer, role="dps")
+    backup = make_raider(user_id=3, roles=["dps"])
+    sched.team["fill"].append(backup)
+    sched.members.append(backup)
+
+    assert sched.raider_remove(healer) is backup
+    assert sched.team["dps"] == [backup]
+    assert healer not in sched.members
