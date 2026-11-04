@@ -433,6 +433,49 @@ async def assistant(h):
     h.check("no errors logged", not [e for e in h.world.events if e["kind"] == "log_error"])
 
 
+async def assistant_followup(h):
+    owner, other, bot = h.banker, h.coordinator, h.mention()
+
+    first = await h.say(owner, "snipe the vibrant shard", "dm")
+    ask = await h.wait_for(owner, "What max price, in gold?")
+    h.check("the first call has no history", json.loads(_claude_calls(h)[-1]["prompt"])["history"] == [])
+    h.check("the price question is a threaded reply to the request",
+            getattr(ask.reference, "message_id", None) == first.id, repr(ask.reference))
+
+    calls = len(_claude_calls(h))
+    await h.say(owner, "5000", "dm")
+    await h.wait_for(owner, "fake answer: 5000")
+    sent = json.loads(_claude_calls(h)[-1]["prompt"])
+    h.check("the follow-up call carries the earlier exchange",
+            sent == {"history": [{"role": "user", "text": "snipe the vibrant shard"},
+                                 {"role": "assistant", "text": "What max price, in gold?"}], "message": "5000"},
+            sent)
+    h.check("one claude call per message", len(_claude_calls(h)) == calls + 1)
+
+    used, calls = _usage_count(h), len(_claude_calls(h))
+    await h.say(owner, "reset", "dm")
+    h.check("reset answers without a claude call or usage",
+            bool(await h.wait_for(owner, "starting a new conversation"))
+            and _usage_count(h) == used and len(_claude_calls(h)) == calls)
+    await h.say(owner, "what's my next run?", "dm")
+    await h.wait_for(owner, "fake answer: what's my next run?")
+    h.check("after reset the next call has no history", json.loads(_claude_calls(h)[-1]["prompt"])["history"] == [])
+
+    await h.say(other, f"{bot} snipe the vibrant shard", "key")
+    await h.wait_for("key", "What max price, in gold?")
+    await h.say(owner, f"{bot} how do keys work?", "key")
+    await h.wait_for("key", "fake answer: how do keys work?")
+    h.check("another user's exchange in the same channel stays out of the history",
+            json.loads(_claude_calls(h)[-1]["prompt"])["history"] == [])
+    await h.say(other, f"{bot} 5000", "key")
+    await h.wait_for("key", "fake answer: 5000")
+    mentioned = json.loads(_claude_calls(h)[-1]["prompt"])
+    h.check("a guild @mention follow-up carries that user's exchange, mention stripped",
+            mentioned["history"] == [{"role": "user", "text": "snipe the vibrant shard"},
+                                     {"role": "assistant", "text": "What max price, in gold?"}], mentioned)
+    h.check("no errors logged", not [e for e in h.world.events if e["kind"] == "log_error"])
+
+
 def json_dump(obj) -> str:
     import json
 
@@ -449,4 +492,5 @@ JOURNEYS = {
     "banker-token": (banker_token, "!tokenalert / !token, banker gate, off"),
     "command-gates": (command_gates, "permission/channel gates stay silent; unknown commands and chat are ignored"),
     "assistant": (assistant, "plain-language DM/mention → answer or confirmed command via fake claude"),
+    "assistant-followup": (assistant_followup, "follow-up carries the earlier exchange; reset and other users stay out"),
 }
