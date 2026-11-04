@@ -10,8 +10,6 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Callable, List, Optional
 
-import discord
-
 logger = logging.getLogger("discord")
 
 RESET_WORDS = frozenset({"reset", "new topic"})
@@ -80,8 +78,9 @@ async def collect_history(message, *, bot_user_id: int, clean: Callable[[object]
         return []
     try:
         earlier = [m async for m in message.channel.history(limit=FETCH_LIMIT, before=message)]
-    except discord.HTTPException as exc:
-        logger.warning("assistant: could not read history, answering without context: %s", exc)
+    except Exception as exc:  # Forbidden, or a network error from aiohttp: answer without context either way
+        logger.warning("assistant: could not read history, answering without context: %s: %s",
+                       type(exc).__name__, exc)
         return []
     return select_turns(message, earlier, bot_user_id=bot_user_id, clean=clean, idle_minutes=idle_minutes,
                         max_messages=max_messages)

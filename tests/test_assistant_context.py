@@ -156,6 +156,11 @@ def test_forbidden_history_returns_empty(caplog):
     assert any("history" in r.getMessage() for r in caplog.records)
 
 
+@pytest.mark.parametrize("error", [OSError("connection reset"), asyncio.TimeoutError()])
+def test_network_error_reading_history_returns_empty(error):
+    assert _collect(_msg(OWNER, "hi", 0), _Channel(error=error)) == []
+
+
 @pytest.mark.parametrize("idle,max_messages", [(0, 10), (30, 0)])
 def test_context_off_never_reads_discord(idle, max_messages):
     channel = _Channel([_msg(OWNER, "hi", 0)])

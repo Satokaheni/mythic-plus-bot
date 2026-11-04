@@ -107,12 +107,17 @@ def test_smoke_context_call_is_locked_down_too(tmp_path, capsys):
     assert "SMOKE FAIL" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("args", [["215147", "5000"], ["215147", "5,000"], ["215147", "5000g", "Vibrant Shard"]])
-def test_followup_snipe_accepts_price_spellings(args):
+@pytest.mark.parametrize("args", [["215147", "5000"], ["215147", "5000.0"], ["215147", "5000", "Vibrant Shard"]])
+def test_followup_snipe_accepts_what_snipe_would_run(args):
     assert smoke._is_followup_snipe({"kind": "command", "command": "snipe", "args": args})
+
+
+@pytest.mark.parametrize("args", [["5000", "215147"], ["215147", "5,000"], ["215147", "5000g"], ["215147"]])
+def test_followup_snipe_rejects_args_snipe_would_misread(args):
+    # !snipe reads args[0] as the item and parses args[1] with parse_gold; anything else fails or mis-targets
+    assert not smoke._is_followup_snipe({"kind": "command", "command": "snipe", "args": args})
 
 
 def test_followup_snipe_rejects_other_results():
     assert not smoke._is_followup_snipe({"kind": "answer", "text": "5000"})
-    assert not smoke._is_followup_snipe({"kind": "command", "command": "snipe", "args": ["215147"]})
     assert not smoke._is_followup_snipe(None)

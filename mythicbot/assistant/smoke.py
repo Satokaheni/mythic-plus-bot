@@ -22,6 +22,7 @@ from dotenv import dotenv_values
 
 from mythicbot.assistant import claude_runner as cr
 from mythicbot.assistant import intent
+from mythicbot.market.snipelist import parse_gold
 
 SCHEMA = {"type": "object", "properties": {"kind": {"type": "string", "enum": ["answer"]}, "text": {"type": "string"}},
           "required": ["kind", "text"], "additionalProperties": False}
@@ -90,10 +91,11 @@ def _call(a, token: str, root: Path, *, schema, prompt_file: Path, stdin: str, l
 
 
 def _is_followup_snipe(out) -> bool:
+    """True only for args `!snipe` itself would run as item 215147 at 5000g (it reads args[0], then parse_gold(args[1]))."""
     if not isinstance(out, dict) or out.get("kind") != "command" or out.get("command") != "snipe":
         return False
-    args = {str(x).replace(",", "").strip().lower().removesuffix("g") for x in out.get("args") or []}
-    return {"215147", "5000"} <= args
+    args = [str(x) for x in out.get("args") or []]
+    return len(args) >= 2 and args[0] == "215147" and parse_gold(args[1]) == 5000 * 10000
 
 
 def _run(a, token: str, root: Path) -> int:

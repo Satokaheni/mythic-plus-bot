@@ -175,6 +175,25 @@ def test_every_reply_threads_to_the_message_without_pinging(cog_and_calls, text,
     assert kwargs["allowed_mentions"] is mod.NO_MENTIONS
 
 
+def test_reply_without_read_message_history_falls_back_to_a_plain_send(cog_and_calls):
+    mod, cog, _calls, results = cog_and_calls
+
+    class _NoHistoryChannel(_Channel):
+        async def send(self, content=None, **kwargs):
+            if "reference" in kwargs:  # Discord refuses a reply without Read Message History (code 160002)
+                raise discord.Forbidden(SimpleNamespace(status=403, reason="Forbidden"),
+                                        {"code": 160002, "message": "Cannot reply without permission to read message history"})
+            await super().send(content, **kwargs)
+
+    channel = _NoHistoryChannel()
+    results.append(RunResult(ok=True, output=ANSWER))
+
+    asyncio.run(cog.on_assistant_message(_dm("ping", channel)))
+
+    assert channel.sent == ["pong"] and "reference" not in channel.kwargs[0]
+    assert channel.kwargs[0]["allowed_mentions"] is mod.NO_MENTIONS
+
+
 def test_context_off_never_reads_history(cog_and_calls, monkeypatch):
     mod, cog, calls, results = cog_and_calls
     monkeypatch.setattr(mod.config, "ASSISTANT_CONTEXT_MINUTES", 0)

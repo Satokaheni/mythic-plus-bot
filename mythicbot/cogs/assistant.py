@@ -19,6 +19,7 @@ logger = logging.getLogger("discord")
 FAILURE = "I couldn't work that out — try `!help`."
 RESET_REPLY = "OK — starting a new conversation."
 NO_MENTIONS = discord.AllowedMentions.none()
+_REPLY_NEEDS_HISTORY = 160002  # Discord error: "Cannot reply without permission to read message history"
 MAX_ANSWER_CHUNKS = 3
 _REPO_DIR = Path(__file__).resolve().parents[2]
 
@@ -121,8 +122,14 @@ class Assistant(commands.Cog):
 
     async def _reply(self, message: discord.Message, content: str, **kwargs):
         """Every assistant reply is a Discord reply to the triggering message (so history can pair them), no ping."""
-        return await message.channel.send(content, reference=message.to_reference(fail_if_not_exists=False),
-                                          allowed_mentions=NO_MENTIONS, **kwargs)
+        try:
+            return await message.channel.send(content, reference=message.to_reference(fail_if_not_exists=False),
+                                              allowed_mentions=NO_MENTIONS, **kwargs)
+        except discord.HTTPException as exc:
+            if exc.code != _REPLY_NEEDS_HISTORY:
+                raise
+        # No Read Message History here: reply unthreaded (this channel has no readable context to pair anyway).
+        return await message.channel.send(content, allowed_mentions=NO_MENTIONS, **kwargs)
 
     @commands.Cog.listener("on_message")
     async def on_assistant_message(self, message: discord.Message) -> None:
