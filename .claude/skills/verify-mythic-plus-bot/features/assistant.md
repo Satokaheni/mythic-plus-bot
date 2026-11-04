@@ -13,6 +13,7 @@ An allowlisted user (the harness allowlists `h.banker` and `h.coordinator`) can 
 - `assistant-flow` `make a run ...` opens the key-request DM flow.
 - `assistant-failure` a forbidden command (`evil`), unsafe arg (`inject`), bad JSON, error result, crash, or timeout each get `I couldn't work that out`.
 - `assistant-busy` a message during an in-flight call gets `One moment — still working on the last one.`; every call is counted in `assistant.json`.
+- `assistant-context` a follow-up DM or @mention carries that user's earlier exchange (user turn + the bot's threaded reply) as JSON `history`; `reset` answers `OK — starting a new conversation.` with no Claude call; another user's exchange in the same channel never appears. Every assistant reply is a Discord reply to the triggering message.
 
 ## How to get to it (user POV)
 
@@ -25,7 +26,7 @@ An allowlisted user (the harness allowlists `h.banker` and `h.coordinator`) can 
 Preconditions:
 
 - Baseline boot. The harness sets `ASSISTANT_ENABLED=1`, allowlists `h.banker` and `h.coordinator`, points `CLAUDE_BIN` at `fake_claude.py`, and sets a 3 s timeout. Each fake call is logged to `h.assistant_dir / "work" / "fake_claude_calls.jsonl"` (argv, env keys, prompt). The work and config dirs are under `<system temp>/mpb-verify/<run-id>/`, outside the repo, because the assistant disables itself when either is inside a git work tree.
-- Fake routes are keyed on prompt text: `unsnipe`, `my snipes`, `snipe`, `watch`, `make a run`, `evil` (forbidden `cleanup`), `inject` (`@everyone` arg); anything else answers. Modes: `fake:long`, `fake:badjson`, `fake:error`, `fake:crash`, `fake:timeout` (sleeps; the bot kills it at the timeout).
+- The fake parses stdin as JSON and routes on `message` (raw text if not JSON); each call's raw stdin is logged as `prompt`. Routes: `unsnipe`, `my snipes`, `snipe` with no digits (answers `What max price, in gold?`), `snipe`, `watch`, `make a run`, `evil` (forbidden `cleanup`), `inject` (`@everyone` arg); anything else answers `fake answer: <message>`. Modes: `fake:long`, `fake:badjson`, `fake:error`, `fake:crash`, `fake:timeout` (sleeps; the bot kills it at the timeout).
 
 - **Answer in DM.** Run `await h.say(h.banker, "what is the best mage spec?", "dm")` then `await h.wait_for(h.banker, "fake answer: what is the best mage spec?")`.
 - **Mention in #keys.** Run `await h.say(h.banker, f"{h.mention()} how do keys work?", "key")` then `await h.wait_for("key", "fake answer: how do keys work?")`.
@@ -33,6 +34,7 @@ Preconditions:
 - **Cancelled write.** Same with `unsnipe 215147` and `"Cancel"`; wait for `Cancelled`; `snipes.json` is unchanged.
 - **Access refused.** Run `await h.say(h.coordinator, "watch item 241326", "dm")`, then wait for `don't have access to`. No `I'll run` prompt is posted (the access reply is the only bot act besides typing) and `watches.json` is unchanged.
 - **Failures.** Run `await h.say(h.coordinator, "evil", "dm")` (also `inject`, `fake:badjson`, `fake:error`, `fake:crash`, `fake:timeout`) then `await h.wait_for(h.coordinator, "couldn't work that out", timeout=15)`.
+- **Follow-up.** `first = await h.say(h.banker, "snipe the vibrant shard", "dm")`, wait for `What max price, in gold?`, then `await h.say(h.banker, "5000", "dm")`; `json.loads(_claude_calls(h)[-1]["prompt"])` has both earlier turns in `history`. Proof: `python $H run assistant-followup`.
 - **Proof.** Run `python $H run assistant`. `summary.json` shows every check passing. The journey also asserts that no recorded fake-claude env held a bot secret, that every call used `--strict-mcp-config` and `--tools ""`, and that the call count in `assistant.json` matches.
 
 ## Gotchas

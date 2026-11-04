@@ -100,10 +100,12 @@ Off unless enabled. It shells out to the Claude Code CLI, so the host needs it i
    ASSISTANT_ENABLED=1
    ASSISTANT_USER_IDS=<your Discord user ID>[,<more IDs>]
    ```
-   Optional: `CLAUDE_BIN` (CLI path, default `claude`), `ASSISTANT_MODEL` (default `haiku`), `ASSISTANT_TIMEOUT` (seconds, default `60`), `ASSISTANT_DAILY_CAP` (calls per day, default `100`), `ASSISTANT_WORK_DIR`, `ASSISTANT_CONFIG_DIR`.
-4. Check it works: `python -m mythicbot.assistant.smoke --env-file .env` (reads only the token; exits 0 when the CLI answers with no tools beyond StructuredOutput and no MCP servers loaded).
+   Optional: `CLAUDE_BIN` (CLI path, default `claude`), `ASSISTANT_MODEL` (default `haiku`), `ASSISTANT_TIMEOUT` (seconds, default `60`), `ASSISTANT_DAILY_CAP` (calls per day, default `100`), `ASSISTANT_CONTEXT_MINUTES` (default `30`), `ASSISTANT_CONTEXT_MESSAGES` (default `10`; `0` turns memory off), `ASSISTANT_WORK_DIR`, `ASSISTANT_CONFIG_DIR`.
+4. Check it works: `python -m mythicbot.assistant.smoke --env-file .env` (reads only the token; exits 0 when the CLI answers with no tools beyond StructuredOutput and no MCP servers loaded, and a two-turn follow-up resolves to the right command).
 
 Usage counts against your Claude plan's allowance; the daily cap guards against runaway use. The counter lives in `assistant.json`.
+
+It remembers the conversation: a follow-up within 30 minutes in the same DM or channel sees your last few exchanges with it, so you can answer its questions ("What max price?" → "5000") or say "make it 6000". Its replies are threaded under your message. Say `reset` (or `new topic`) to start over. Each person's conversation is their own. Nothing is stored by the bot — it re-reads the recent Discord messages each time.
 
 ### Docker
 
@@ -301,6 +303,8 @@ mythic-plus-bot/
 | `ASSISTANT_MODEL` | Model alias (optional, default `haiku`) |
 | `ASSISTANT_TIMEOUT` | Seconds before a call is killed (optional, default `60`) |
 | `ASSISTANT_DAILY_CAP` | Max assistant calls per day (optional, default `100`) |
+| `ASSISTANT_CONTEXT_MINUTES` | Idle minutes before the assistant forgets the conversation (optional, default `30`; `0` = off) |
+| `ASSISTANT_CONTEXT_MESSAGES` | Max earlier messages the assistant sees (optional, default `10`; `0` = off) |
 | `ASSISTANT_WORK_DIR` / `ASSISTANT_CONFIG_DIR` | Isolated work/config dirs for the CLI (optional, under `~/.mpb-assistant/`) |
 | `LOG_FILE` | Path to the rotating log file (optional, default `bot.log`) |
 | `LOG_LEVEL` | Log verbosity: `DEBUG`/`INFO`/`WARNING`/… (optional, default `INFO`) |

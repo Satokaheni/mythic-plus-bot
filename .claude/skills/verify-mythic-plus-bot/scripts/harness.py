@@ -403,8 +403,13 @@ class FakeMessage:
         self.pinned = False
         self._world.record("unpin", channel=self.channel, message=self)
 
+    def to_reference(self, *, fail_if_not_exists: bool = True) -> discord.MessageReference:
+        return discord.MessageReference(message_id=self.id, channel_id=self.channel.id,
+                                        guild_id=getattr(self.guild, "id", None),
+                                        fail_if_not_exists=fail_if_not_exists)
+
     async def reply(self, content=None, **kwargs):
-        return await self.channel.send(content, reference=self, **kwargs)
+        return await self.channel.send(content, reference=self.to_reference(), **kwargs)
 
 
 class _Messageable:
@@ -434,6 +439,8 @@ class _Messageable:
         except discord.HTTPException as exc:
             self._world.record("rejected", channel=self, detail=str(exc), op=kind, content=content)
             raise
+        if reference is not None and not isinstance(reference, discord.MessageReference):
+            reference = reference.to_reference()
         msg = FakeMessage(self._world, self, author, content, embeds, view, ephemeral_to=ephemeral_to,
                           reference=reference)
         self._messages[msg.id] = msg
@@ -465,8 +472,10 @@ class _Messageable:
             await m.delete()
         return victims
 
-    async def history(self, *, limit: Optional[int] = 100, **_ignored):
-        for m in list(reversed(list(self._messages.values())))[:limit]:
+    async def history(self, *, limit: Optional[int] = 100, before=None, **_ignored):
+        cutoff = getattr(before, "id", before)
+        newest_first = [m for m in reversed(list(self._messages.values())) if cutoff is None or m.id < cutoff]
+        for m in newest_first[:limit] if limit else newest_first:
             yield m
 
     def messages(self) -> List[FakeMessage]:

@@ -7,6 +7,17 @@ import sys
 import time
 
 
+def _message(prompt: str) -> str:
+    """The assistant sends {"history": [...], "message": "..."}; route on the message only."""
+    try:
+        data = json.loads(prompt)
+    except ValueError:
+        return prompt
+    if isinstance(data, dict) and isinstance(data.get("message"), str):
+        return data["message"]
+    return prompt
+
+
 def _route(low: str, prompt: str) -> dict:
     if "fake:long" in low:
         return {"kind": "answer", "text": ("long answer " * 700)[:7000]}
@@ -14,6 +25,8 @@ def _route(low: str, prompt: str) -> dict:
         return {"kind": "command", "command": "unsnipe", "args": ["215147"], "summary": "stop sniping 215147"}
     if "my snipes" in low:
         return {"kind": "command", "command": "snipes", "args": [], "summary": "list snipes"}
+    if "snipe" in low and not any(ch.isdigit() for ch in low):
+        return {"kind": "answer", "text": "What max price, in gold?"}
     if "snipe" in low:
         return {"kind": "command", "command": "snipe", "args": ["215147", "5000", "Vibrant Shard"],
                 "summary": "snipe 215147 under 5000g"}
@@ -32,7 +45,8 @@ def main() -> int:
     prompt = sys.stdin.read()
     with open("fake_claude_calls.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps({"argv": sys.argv[1:], "env_keys": sorted(os.environ), "prompt": prompt}) + "\n")
-    low = prompt.lower()
+    text = _message(prompt)
+    low = text.lower()
     if "fake:timeout" in low:
         time.sleep(600)
         return 0
@@ -47,7 +61,7 @@ def main() -> int:
                           "total_cost_usd": 0.001}))
         return 0
     print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": 0.0012,
-                      "duration_ms": 5, "session_id": "fake", "structured_output": _route(low, prompt)}))
+                      "duration_ms": 5, "session_id": "fake", "structured_output": _route(low, text)}))
     return 0
 
 

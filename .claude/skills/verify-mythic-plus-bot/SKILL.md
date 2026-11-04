@@ -45,11 +45,12 @@ bot's mention string (`<@bot-id>`) for @mention messages, e.g. `await h.say(u, f
 
 The assistant runs against a fake claude: `FAKE_ENV` sets `ASSISTANT_ENABLED=1`, allowlists `h.banker` and
 `h.coordinator`, and points `CLAUDE_BIN` at `scripts/fake_claude.py` (nothing calls Anthropic). It reads the
-prompt on stdin, appends `{argv, env_keys, prompt}` to `fake_claude_calls.jsonl` in its work dir, and answers
-by prompt text: `fake:long` (7000-char answer), `fake:timeout` (sleeps past `ASSISTANT_TIMEOUT=3`),
-`fake:badjson`, `fake:crash` (exit 2), `fake:error` (`error_during_execution`); `snipe`/`unsnipe`/`my snipes`/
+prompt on stdin, appends `{argv, env_keys, prompt}` (raw stdin) to `fake_claude_calls.jsonl` in its work dir, parses
+the assistant's JSON stdin, and answers by its `message` field: `fake:long` (7000-char answer), `fake:timeout` (sleeps past `ASSISTANT_TIMEOUT=3`),
+`fake:badjson`, `fake:crash` (exit 2), `fake:error` (`error_during_execution`); `snipe` with no digits answers
+`What max price, in gold?` (the `assistant-followup` journey answers it with `5000`); `snipe`/`unsnipe`/`my snipes`/
 `watch`/`make a run` route to those commands, `evil` names a disallowed command, `inject` an unsafe arg, and
-anything else gets `fake answer: <prompt>`. The assistant refuses a work/config dir inside a git work tree,
+anything else gets `fake answer: <message>`. The assistant refuses a work/config dir inside a git work tree,
 so they live outside the repo at `h.assistant_dir` = `<system temp>/mpb-verify/<run-id>/{work,config}`.
 
 ## Doctor

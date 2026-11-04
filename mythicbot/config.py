@@ -76,4 +76,21 @@ ASSISTANT_TIMEOUT = float(os.getenv("ASSISTANT_TIMEOUT", "60"))
 ASSISTANT_DAILY_CAP = int(os.getenv("ASSISTANT_DAILY_CAP", "100"))
 ASSISTANT_WORK_DIR = os.getenv("ASSISTANT_WORK_DIR", os.path.expanduser("~/.mpb-assistant/work"))
 ASSISTANT_CONFIG_DIR = os.getenv("ASSISTANT_CONFIG_DIR", os.path.expanduser("~/.mpb-assistant/config"))
+
+
+def _int_env(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logging.getLogger(__name__).warning("%s=%r is not a whole number; using %d", name, raw, default)
+        return default
+
+
+# Assistant conversation context: idle gap that ends a conversation, and max earlier turns sent. 0 = off.
+ASSISTANT_CONTEXT_MINUTES = _int_env("ASSISTANT_CONTEXT_MINUTES", 30)
+ASSISTANT_CONTEXT_MESSAGES = _int_env("ASSISTANT_CONTEXT_MESSAGES", 10)
+
 CLAUDE_CODE_OAUTH_TOKEN = os.getenv("CLAUDE_CODE_OAUTH_TOKEN", "")

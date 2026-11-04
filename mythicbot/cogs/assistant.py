@@ -12,12 +12,14 @@ import discord
 from discord.ext import commands
 
 from mythicbot import config
-from mythicbot.assistant import claude_runner, intent
+from mythicbot.assistant import claude_runner, context, intent
 from mythicbot.assistant.usage import DailyUsage
 
 logger = logging.getLogger("discord")
 FAILURE = "I couldn't work that out — try `!help`."
+RESET_REPLY = "OK — starting a new conversation."
 NO_MENTIONS = discord.AllowedMentions.none()
+_REPLY_NEEDS_HISTORY = 160002  # Discord error: "Cannot reply without permission to read message history"
 MAX_ANSWER_CHUNKS = 3
 _REPO_DIR = Path(__file__).resolve().parents[2]
 
@@ -114,46 +116,72 @@ class Assistant(commands.Cog):
             self.system_prompt_file.parent.mkdir(parents=True, exist_ok=True)
             self.system_prompt_file.write_text(intent.render_system_prompt(intent.TEMPLATE_PATH), encoding="utf-8")
 
+    @staticmethod
+    def _context_on() -> bool:
+        return config.ASSISTANT_CONTEXT_MINUTES > 0 and config.ASSISTANT_CONTEXT_MESSAGES > 0
+
+    async def _reply(self, message: discord.Message, content: str, **kwargs):
+        """Every assistant reply is a Discord reply to the triggering message (so history can pair them), no ping."""
+        try:
+            return await message.channel.send(content, reference=message.to_reference(fail_if_not_exists=False),
+                                              allowed_mentions=NO_MENTIONS, **kwargs)
+        except discord.HTTPException as exc:
+            if exc.code != _REPLY_NEEDS_HISTORY:
+                raise
+        # No Read Message History here: reply unthreaded (this channel has no readable context to pair anyway).
+        return await message.channel.send(content, allowed_mentions=NO_MENTIONS, **kwargs)
+
     @commands.Cog.listener("on_message")
     async def on_assistant_message(self, message: discord.Message) -> None:
         if self.disabled:
             return
-        prompt = should_handle(message, bot_user_id=self.bot.user.id, allowed_ids=config.ASSISTANT_USER_IDS,
+        bot_user_id = self.bot.user.id
+        prompt = should_handle(message, bot_user_id=bot_user_id, allowed_ids=config.ASSISTANT_USER_IDS,
                                enabled=config.ASSISTANT_ENABLED)
         if prompt is None:
             return
         if not prompt:
-            await message.channel.send("What can I help with?")
+            await self._reply(message, "What can I help with?")
+            return
+        if self._context_on() and context.is_reset(prompt):
+            await self._reply(message, RESET_REPLY)
             return
         today = datetime.now(config._CST).date().isoformat()
         if not self.usage.allow(today, config.ASSISTANT_DAILY_CAP):
-            await message.channel.send("Daily assistant limit reached.")
+            await self._reply(message, "Daily assistant limit reached.")
             return
         if self._busy.locked():
-            await message.channel.send("One moment — still working on the last one.")
+            await self._reply(message, "One moment — still working on the last one.")
             return
         async with self._busy:
             async with message.channel.typing():
+                history = await context.collect_history(
+                    message, bot_user_id=bot_user_id,
+                    clean=lambda m: should_handle(m, bot_user_id=bot_user_id, allowed_ids=config.ASSISTANT_USER_IDS,
+                                                  enabled=True),
+                    idle_minutes=config.ASSISTANT_CONTEXT_MINUTES, max_messages=config.ASSISTANT_CONTEXT_MESSAGES,
+                )
                 result = await claude_runner.run_claude(
-                    prompt, cmd=config.CLAUDE_CMD, schema=intent.SCHEMA, model=config.ASSISTANT_MODEL,
-                    system_prompt_file=self.system_prompt_file, work_dir=self.work_dir,
+                    context.build_prompt(history, prompt), cmd=config.CLAUDE_CMD, schema=intent.SCHEMA,
+                    model=config.ASSISTANT_MODEL, system_prompt_file=self.system_prompt_file, work_dir=self.work_dir,
                     config_dir=self.config_dir, token=config.CLAUDE_CODE_OAUTH_TOKEN,
                     timeout=config.ASSISTANT_TIMEOUT,
                 )
             self.usage.record(today, result.cost_usd)
             self.usage.save()
-        logger.info("assistant: user=%s dm=%s ok=%s subtype=%s cost=%.4f seconds=%.1f", message.author.id,
-                    message.guild is None, result.ok, result.subtype, result.cost_usd, result.duration_s)
+        logger.info("assistant: user=%s dm=%s ok=%s subtype=%s cost=%.4f seconds=%.1f history=%d chars=%d",
+                    message.author.id, message.guild is None, result.ok, result.subtype, result.cost_usd,
+                    result.duration_s, len(history), sum(len(t.text) for t in history))
         logger.debug("assistant: prompt=%r", prompt[:200])
         if not result.ok:
             logger.warning("assistant: claude call failed: %s detail=%r", result.error, result.detail)
-            await message.channel.send(FAILURE)
+            await self._reply(message, FAILURE)
             return
         try:
             parsed = intent.validate(result.output)
         except intent.IntentError as exc:
             logger.warning("assistant: rejected intent: %s", exc)
-            await message.channel.send(FAILURE)
+            await self._reply(message, FAILURE)
             return
         logger.info("assistant: intent=%s", f"command:{parsed.command}" if parsed.kind == "command" else "answer")
         await self._act(message, parsed)
@@ -161,7 +189,7 @@ class Assistant(commands.Cog):
     async def _act(self, message: discord.Message, parsed: "intent.Intent") -> None:
         if parsed.kind == "answer":
             for chunk in _chunks(parsed.text):
-                await message.channel.send(chunk, allowed_mentions=NO_MENTIONS)
+                await self._reply(message, chunk)
             return
         if parsed.command in intent.FLOW_COMMANDS:
             await self.bot._do_key_request_flow(message.author)
@@ -172,7 +200,7 @@ class Assistant(commands.Cog):
             return
         if parsed.needs_confirm:
             view = ConfirmView(message.author.id)
-            ask = await message.channel.send(f"I'll run `{command}` — confirm?", view=view, allowed_mentions=NO_MENTIONS)
+            ask = await self._reply(message, f"I'll run `{command}` — confirm?", view=view)
             await view.wait()
             if not view.confirmed:
                 await ask.edit(content=f"Cancelled `{command}`.", view=None)
@@ -186,17 +214,16 @@ class Assistant(commands.Cog):
         proxy.content = command
         ctx = await self.bot.get_context(proxy)
         if ctx.command is None:
-            await message.channel.send(FAILURE)
+            await self._reply(message, FAILURE)
             return None
         try:
             allowed = await ctx.command.can_run(ctx)
         except commands.CheckFailure:
             allowed = False
         if not allowed:
-            await message.channel.send(f"You don't have access to `!{ctx.command.name}` here.")
+            await self._reply(message, f"You don't have access to `!{ctx.command.name}` here.")
             return None
         return ctx
-
 
 async def setup(bot) -> None:
     await bot.add_cog(Assistant(bot))

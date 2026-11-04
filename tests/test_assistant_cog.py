@@ -1,10 +1,12 @@
-"""Assistant cog: daily cap, usage counting, and answer chunking (claude_runner stubbed)."""
+"""Assistant cog: daily cap, usage counting, answer chunking, conversation context (claude_runner stubbed)."""
 
 import asyncio
 import importlib
 import json
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from itertools import count
 from types import SimpleNamespace
 
 import discord
@@ -15,25 +17,44 @@ from mythicbot.assistant.claude_runner import RunResult
 
 OWNER, BOT = 5, 99
 ANSWER = {"kind": "answer", "text": "pong"}
+_ids = count(1)
 
 
 class _Channel:
     type = discord.ChannelType.private
 
-    def __init__(self):
-        self.sent = []
+    def __init__(self, earlier=()):
+        self.sent, self.kwargs = [], []
+        self.earlier = list(earlier)  # newest first, as discord.py's history() yields
+        self.history_calls = 0
 
     async def send(self, content=None, **kwargs):
         self.sent.append(content)
+        self.kwargs.append(kwargs)
+
+    async def history(self, *, limit, before):
+        self.history_calls += 1
+        for m in self.earlier:
+            yield m
 
     @asynccontextmanager
     async def typing(self):
         yield
 
 
-def _dm(content, channel):
-    return SimpleNamespace(content=content, author=SimpleNamespace(id=OWNER, bot=False), webhook_id=None,
-                           type=discord.MessageType.default, channel=channel, guild=None, raw_mentions=[], mentions=[])
+def _dm(content, channel, *, author=OWNER, reply_to=None):
+    msg_id = next(_ids)
+    return SimpleNamespace(
+        id=msg_id, content=content, author=SimpleNamespace(id=author, bot=author == BOT), webhook_id=None,
+        type=discord.MessageType.default, channel=channel, guild=None, raw_mentions=[], mentions=[],
+        created_at=datetime.now(timezone.utc),
+        reference=SimpleNamespace(message_id=reply_to.id) if reply_to else None,
+        to_reference=lambda fail_if_not_exists=True: SimpleNamespace(message_id=msg_id,
+                                                                      fail_if_not_exists=fail_if_not_exists))
+
+
+def _messages(calls):
+    return [json.loads(c)["message"] for c in calls]
 
 
 @pytest.fixture
@@ -74,7 +95,7 @@ def test_failed_and_successful_calls_are_counted_then_capped(cog_and_calls, tmp_
 
     asyncio.run(cog.on_assistant_message(_dm("one more", channel)))
     assert channel.sent[-1] == "Daily assistant limit reached."
-    assert calls == ["fake:error", "ping"], "the capped message must not reach claude"
+    assert _messages(calls) == ["fake:error", "ping"], "the capped message must not reach claude"
     assert _count(tmp_path) == 2
 
 
@@ -86,7 +107,7 @@ def test_cap_survives_a_restart(cog_and_calls, tmp_path):
     restarted = mod.Assistant(SimpleNamespace(user=SimpleNamespace(id=BOT)))  # reloads assistant.json
     channel = _Channel()
     asyncio.run(restarted.on_assistant_message(_dm("c", channel)))
-    assert channel.sent == ["Daily assistant limit reached."] and calls == ["a", "b"]
+    assert channel.sent == ["Daily assistant limit reached."] and _messages(calls) == ["a", "b"]
 
 
 def test_chunks_cap_at_three_messages(cog_and_calls):
@@ -122,6 +143,86 @@ def test_refused_write_gets_the_access_reply_before_any_confirm_prompt(cog_and_c
 
     assert channel.sent == ["You don't have access to `!watch` here."]
     assert invoked == []
+
+
+def test_prompt_carries_the_collected_history(cog_and_calls):
+    _mod, cog, calls, results = cog_and_calls
+    channel = _Channel()
+    asked = _dm("snipe the vibrant shard", channel)
+    question = _dm("What max price, in gold?", channel, author=BOT, reply_to=asked)
+    channel.earlier = [question, asked]
+    results.append(RunResult(ok=True, output=ANSWER))
+
+    asyncio.run(cog.on_assistant_message(_dm("5000", channel)))
+
+    assert json.loads(calls[0]) == {"history": [{"role": "user", "text": "snipe the vibrant shard"},
+                                                {"role": "assistant", "text": "What max price, in gold?"}],
+                                    "message": "5000"}
+
+
+@pytest.mark.parametrize("text,expected", [("ping", "pong"), ("", "What can I help with?")])
+def test_every_reply_threads_to_the_message_without_pinging(cog_and_calls, text, expected):
+    mod, cog, _calls, results = cog_and_calls
+    channel = _Channel()
+    results.append(RunResult(ok=True, output=ANSWER))
+    message = _dm(text, channel)
+
+    asyncio.run(cog.on_assistant_message(message))
+
+    assert channel.sent == [expected]
+    kwargs = channel.kwargs[0]
+    assert kwargs["reference"].message_id == message.id and kwargs["reference"].fail_if_not_exists is False
+    assert kwargs["allowed_mentions"] is mod.NO_MENTIONS
+
+
+def test_reply_without_read_message_history_falls_back_to_a_plain_send(cog_and_calls):
+    mod, cog, _calls, results = cog_and_calls
+
+    class _NoHistoryChannel(_Channel):
+        async def send(self, content=None, **kwargs):
+            if "reference" in kwargs:  # Discord refuses a reply without Read Message History (code 160002)
+                raise discord.Forbidden(SimpleNamespace(status=403, reason="Forbidden"),
+                                        {"code": 160002, "message": "Cannot reply without permission to read message history"})
+            await super().send(content, **kwargs)
+
+    channel = _NoHistoryChannel()
+    results.append(RunResult(ok=True, output=ANSWER))
+
+    asyncio.run(cog.on_assistant_message(_dm("ping", channel)))
+
+    assert channel.sent == ["pong"] and "reference" not in channel.kwargs[0]
+    assert channel.kwargs[0]["allowed_mentions"] is mod.NO_MENTIONS
+
+
+def test_context_off_never_reads_history(cog_and_calls, monkeypatch):
+    mod, cog, calls, results = cog_and_calls
+    monkeypatch.setattr(mod.config, "ASSISTANT_CONTEXT_MINUTES", 0)
+    channel = _Channel()
+    results.append(RunResult(ok=True, output=ANSWER))
+
+    asyncio.run(cog.on_assistant_message(_dm("ping", channel)))
+
+    assert channel.history_calls == 0 and json.loads(calls[0]) == {"history": [], "message": "ping"}
+
+
+def test_reset_starts_fresh_without_calling_claude(cog_and_calls, tmp_path):
+    mod, cog, calls, _results = cog_and_calls
+    channel = _Channel()
+
+    asyncio.run(cog.on_assistant_message(_dm("Reset.", channel)))
+
+    assert channel.sent == [mod.RESET_REPLY] and calls == []
+    assert not (tmp_path / "assistant.json").exists(), "a reset is not a claude call and is not counted"
+
+
+def test_reset_with_context_off_goes_to_claude(cog_and_calls, monkeypatch):
+    mod, cog, calls, results = cog_and_calls
+    monkeypatch.setattr(mod.config, "ASSISTANT_CONTEXT_MESSAGES", 0)
+    results.append(RunResult(ok=True, output=ANSWER))
+
+    asyncio.run(cog.on_assistant_message(_dm("Reset!", _Channel())))
+
+    assert _messages(calls) == ["Reset!"]
 
 
 # ---------------------------------------------------------------------------
